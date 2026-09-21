@@ -19,7 +19,10 @@ import type * as t from '@/types';
 import { isInterfacePermissionPath } from '@/utils/interfacePermissions';
 import { stripSecretPreviewValues } from '@/utils';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
-import { requireAnyCapability } from './capabilities';
+import {
+  requireAllSectionCapabilities,
+  requireAnyCapability,
+} from './capabilities';
 import { safeFieldPath } from './utils/validation';
 import { apiFetch } from './utils/api';
 import {
@@ -284,11 +287,10 @@ export const saveFieldProfileValueFn = createServerFn({ method: 'POST' })
     }),
   )
   .handler(async ({ data }) => {
-    await requireAnyCapability([
-      SystemCapabilities.ASSIGN_CONFIGS,
-      SystemCapabilities.MANAGE_CONFIGS,
-    ]);
     if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
+    // Mirrors the backend field-PATCH check: broad manage:configs or the
+    // section-scoped manage:configs:<section> (assign caps do not gate fields).
+    await requireAllSectionCapabilities([data.fieldPath.split('.')[0]]);
     const apiType = data.principalType;
     const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, [
       { fieldPath: data.fieldPath, value: data.value },
@@ -338,12 +340,11 @@ export const bulkSaveProfileValuesFn = createServerFn({ method: 'POST' })
         entries: Array<{ fieldPath: string; value: unknown }>;
       };
     }) => {
-      await requireAnyCapability([
-        SystemCapabilities.ASSIGN_CONFIGS,
-        SystemCapabilities.MANAGE_CONFIGS,
-      ]);
       const filtered = data.entries.filter((e) => !isInterfacePermissionPath(e.fieldPath));
       if (filtered.length === 0) return { success: true, count: 0 };
+      await requireAllSectionCapabilities([
+        ...new Set(filtered.map((e) => e.fieldPath.split('.')[0])),
+      ]);
       const apiType = data.principalType;
       const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, filtered);
       const response = await apiFetch(
@@ -396,9 +397,12 @@ export const createScopeFn = createServerFn({ method: 'POST' })
         principalId?: string;
       };
     }) => {
+      // Mirrors the backend upsert check: broad manage, broad assign, or
+      // target-scoped assign:configs:<principalType>.
       await requireAnyCapability([
-        SystemCapabilities.ASSIGN_CONFIGS,
         SystemCapabilities.MANAGE_CONFIGS,
+        SystemCapabilities.ASSIGN_CONFIGS,
+        `assign:configs:${data.principalType}`,
       ]);
       const principalId =
         data.principalId ??
@@ -464,10 +468,7 @@ export const removeFieldProfileValueFn = createServerFn({ method: 'POST' })
       };
     }) => {
       if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
-      await requireAnyCapability([
-        SystemCapabilities.ASSIGN_CONFIGS,
-        SystemCapabilities.MANAGE_CONFIGS,
-      ]);
+      await requireAllSectionCapabilities([data.fieldPath.split('.')[0]]);
       const apiType = data.principalType;
       const response = await apiFetch(
         `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields?fieldPath=${encodeURIComponent(data.fieldPath)}`,
@@ -506,10 +507,7 @@ export const tombstoneFieldProfileValueFn = createServerFn({ method: 'POST' })
       };
     }) => {
       if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
-      await requireAnyCapability([
-        SystemCapabilities.ASSIGN_CONFIGS,
-        SystemCapabilities.MANAGE_CONFIGS,
-      ]);
+      await requireAllSectionCapabilities([data.fieldPath.split('.')[0]]);
       const apiType = data.principalType;
       const response = await apiFetch(
         `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields/tombstone`,
@@ -551,8 +549,9 @@ export const toggleScopeActiveFn = createServerFn({ method: 'POST' })
       };
     }) => {
       await requireAnyCapability([
-        SystemCapabilities.ASSIGN_CONFIGS,
         SystemCapabilities.MANAGE_CONFIGS,
+        SystemCapabilities.ASSIGN_CONFIGS,
+        `assign:configs:${data.principalType}`,
       ]);
       const apiType = data.principalType;
       const response = await apiFetch(
@@ -593,8 +592,9 @@ export const deleteScopeFn = createServerFn({ method: 'POST' })
       };
     }) => {
       await requireAnyCapability([
-        SystemCapabilities.ASSIGN_CONFIGS,
         SystemCapabilities.MANAGE_CONFIGS,
+        SystemCapabilities.ASSIGN_CONFIGS,
+        `assign:configs:${data.principalType}`,
       ]);
       const apiType = data.principalType;
       const response = await apiFetch(
