@@ -97,8 +97,8 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
           onChange={(e) => setRole(e.target.value as SystemRoles)}
           className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default)"
         >
-          <option value={SystemRoles.USER}>{SystemRoles.USER}</option>
-          <option value={SystemRoles.ADMIN}>{SystemRoles.ADMIN}</option>
+          <option value={SystemRoles.USER}>{localize('com_users_role_user')}</option>
+          <option value={SystemRoles.ADMIN}>{localize('com_users_role_admin')}</option>
         </select>
       </div>
     </FormDialog>

@@ -1237,5 +1237,10 @@
   "com_a11y_logo_alt": "LibreChat 徽标",
   "com_ui_language": "语言",
   "com_ui_language_english": "English",
-  "com_ui_language_zh_hans": "中文（简体）"
+  "com_ui_language_zh_hans": "中文（简体）",
+  "com_audit_target_user": "用户",
+  "com_audit_target_group": "群组",
+  "com_audit_target_role": "角色",
+  "com_users_role_admin": "管理员",
+  "com_users_role_user": "用户"
 }

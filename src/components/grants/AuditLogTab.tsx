@@ -41,6 +41,11 @@ const TARGET_TYPE_OPTIONS: readonly PrincipalType[] = [
   PrincipalType.GROUP,
   PrincipalType.ROLE,
 ] as const;
+const TARGET_TYPE_LABEL_KEYS: Record<(typeof TARGET_TYPE_OPTIONS)[number], string> = {
+  [PrincipalType.USER]: 'com_audit_target_user',
+  [PrincipalType.GROUP]: 'com_audit_target_group',
+  [PrincipalType.ROLE]: 'com_audit_target_role',
+};
 /** Radix `Select.Item` cannot use `value=""` (Radix reserves empty string for
  * "no selection"). Use a non-empty sentinel and translate to `''` in state. */
 const TARGET_TYPE_ALL = '__all__';
@@ -510,7 +515,7 @@ export function AuditLogTab() {
             <Select.Item value={TARGET_TYPE_ALL}>{localize('com_ui_all')}</Select.Item>
             {TARGET_TYPE_OPTIONS.map((pt) => (
               <Select.Item key={pt} value={pt}>
-                {pt}
+                {localize(TARGET_TYPE_LABEL_KEYS[pt])}
               </Select.Item>
             ))}
           </Select>
