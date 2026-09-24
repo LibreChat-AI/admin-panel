@@ -1234,5 +1234,8 @@
   "com_kv_type_number": "123",
   "com_kv_type_boolean": "T/F",
   "com_kv_type_json": "{ }",
-  "com_a11y_logo_alt": "LibreChat 徽标"
+  "com_a11y_logo_alt": "LibreChat 徽标",
+  "com_ui_language": "语言",
+  "com_ui_language_english": "English",
+  "com_ui_language_zh_hans": "中文（简体）"
 }
