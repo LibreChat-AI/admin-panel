@@ -80,7 +80,9 @@ function RootPending() {
   const localize = useLocalize();
   return (
     <div className="flex min-h-screen items-center justify-center bg-(--cui-color-background-default)">
-      <div className="animate-pulse text-lg text-(--cui-color-text-muted)">
+      {/* SSR renders the default locale; the browser may resolve another one on
+          hydration, so suppress the expected text mismatch (same as <html lang>). */}
+      <div className="animate-pulse text-lg text-(--cui-color-text-muted)" suppressHydrationWarning>
         {localize('com_ui_loading')}
       </div>
     </div>
