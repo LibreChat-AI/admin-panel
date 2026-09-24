@@ -5,4 +5,5 @@ export * from './groups';
 export * from './langfuse';
 export * from './roles';
 export * from './scopes';
+export * from './terravox';
 export * from './users';
