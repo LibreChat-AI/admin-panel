@@ -22,7 +22,12 @@ interface Draft {
   formJson: string;
   execKind: 'server' | 'desktop';
   handler: string;
-  catalogToolId: string;
+  distOwner: string;
+  distRepo: string;
+  distVersion: string;
+  distSha256: string;
+  distLauncher: string;
+  distRuntime: string;
   timeout: string;
   renderer: string;
   resultConfigJson: string;
@@ -46,6 +51,7 @@ const parseJsonBlock = (text: string): { value?: unknown; error?: string } => {
 export function ToolEditDialog({
   open,
   tool,
+  prefill,
   groups,
   handlers,
   saving,
@@ -57,17 +63,17 @@ export function ToolEditDialog({
   const isEdit = tool !== null;
   const existingNames = useMemo(() => groups.map((g) => g.name), [groups]);
 
-  const [draft, setDraft] = useState<Draft>(() => initDraft(tool, existingNames));
+  const [draft, setDraft] = useState<Draft>(() => initDraft(tool ?? prefill ?? null, existingNames));
   const [clientError, setClientError] = useState<string | null>(null);
   const [tab, setTab] = useState('basic');
 
   useEffect(() => {
     if (open) {
-      setDraft(initDraft(tool, existingNames));
+      setDraft(initDraft(tool ?? prefill ?? null, existingNames));
       setClientError(null);
       setTab('basic');
     }
-  }, [open, tool, existingNames]);
+  }, [open, tool, prefill, existingNames]);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -120,8 +126,17 @@ export function ToolEditDialog({
       setTab('exec');
       return;
     }
-    if (draft.execKind === 'desktop' && !draft.catalogToolId.trim()) {
-      setClientError(localize('com_tools_err_catalog_tool_id'));
+    if (draft.execKind === 'desktop' && (!draft.distOwner.trim() || !draft.distRepo.trim())) {
+      setClientError(localize('com_tools_err_owner_repo'));
+      setTab('exec');
+      return;
+    }
+    if (
+      draft.execKind === 'desktop' &&
+      draft.distSha256.trim() &&
+      !/^[a-f0-9]{64}$/.test(draft.distSha256.trim())
+    ) {
+      setClientError(localize('com_tools_err_sha256'));
       setTab('exec');
       return;
     }
@@ -137,6 +152,27 @@ export function ToolEditDialog({
       .map((s) => s.trim())
       .filter(Boolean);
 
+    /** desktop：登记 用户/仓库；补充字段仅在 tool.json 缺失时兜底（可全空） */
+    const distribution: Record<string, unknown> = {
+      source: {
+        type: 'gitea_release',
+        owner: draft.distOwner.trim(),
+        repo: draft.distRepo.trim(),
+      },
+    };
+    if (draft.distVersion.trim()) {
+      distribution.version = draft.distVersion.trim();
+    }
+    if (draft.distSha256.trim()) {
+      distribution.package_sha256 = draft.distSha256.trim();
+    }
+    if (draft.distLauncher.trim()) {
+      distribution.launcher = draft.distLauncher.trim();
+    }
+    if (draft.distRuntime.trim()) {
+      distribution.runtime = draft.distRuntime.trim();
+    }
+
     const manifest: Record<string, unknown> = {
       schema_version: 1,
       tool_id: toolId,
@@ -151,7 +187,7 @@ export function ToolEditDialog({
       execution:
         draft.execKind === 'server'
           ? { kind: 'server', handler: draft.handler }
-          : { kind: 'desktop', catalog_tool_id: draft.catalogToolId.trim() },
+          : { kind: 'desktop', distribution },
       result: {
         renderer: draft.renderer.trim(),
         ...(resultConfig.value !== undefined ? { config: resultConfig.value } : {}),
@@ -533,14 +569,15 @@ function ExecTab({
           </div>
         ) : (
           <div>
-            <label className={labelClass} htmlFor="exec-catalog">
-              {localize('com_tools_field_catalog_tool_id')}
+            <label className={labelClass} htmlFor="exec-dist-owner">
+              {localize('com_tools_field_dist_owner')}
             </label>
             <input
-              id="exec-catalog"
+              id="exec-dist-owner"
               className="config-input w-full"
-              value={draft.catalogToolId}
-              onChange={(e) => onSet('catalogToolId', e.target.value)}
+              value={draft.distOwner}
+              onChange={(e) => onSet('distOwner', e.target.value)}
+              placeholder="terravox"
             />
           </div>
         )}
@@ -558,6 +595,86 @@ function ExecTab({
           />
         </div>
       </div>
+
+      {draft.execKind === 'desktop' && (
+        <>
+          <div>
+            <label className={labelClass} htmlFor="exec-dist-repo">
+              {localize('com_tools_field_dist_repo')}
+            </label>
+            <input
+              id="exec-dist-repo"
+              className="config-input w-full"
+              value={draft.distRepo}
+              onChange={(e) => onSet('distRepo', e.target.value)}
+              placeholder="batch-export"
+            />
+            <p className="mt-1 text-xs text-(--cui-color-text-muted)">
+              {localize('com_tools_dist_hint')}
+            </p>
+          </div>
+          <div className="flex flex-col gap-3 rounded-lg border border-(--cui-color-stroke-default) p-3">
+            <span className="text-xs font-medium text-(--cui-color-text-muted)">
+              {localize('com_tools_field_dist_extra')}
+            </span>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelClass} htmlFor="exec-dist-version">
+                  {localize('com_tools_field_dist_version')}
+                </label>
+                <input
+                  id="exec-dist-version"
+                  className="config-input w-full"
+                  value={draft.distVersion}
+                  onChange={(e) => onSet('distVersion', e.target.value)}
+                  placeholder="1.0.0"
+                />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="exec-dist-runtime">
+                  {localize('com_tools_field_dist_runtime')}
+                </label>
+                <select
+                  id="exec-dist-runtime"
+                  className="config-input w-full"
+                  value={draft.distRuntime}
+                  onChange={(e) => onSet('distRuntime', e.target.value)}
+                >
+                  <option value="">—</option>
+                  <option value="self-contained">self-contained</option>
+                  <option value="standard-python">standard-python</option>
+                  <option value="arcpy3">arcpy3</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="exec-dist-launcher">
+                  {localize('com_tools_field_dist_launcher')}
+                </label>
+                <input
+                  id="exec-dist-launcher"
+                  className="config-input w-full"
+                  value={draft.distLauncher}
+                  onChange={(e) => onSet('distLauncher', e.target.value)}
+                  placeholder="main.py"
+                />
+              </div>
+              <div>
+                <label className={labelClass} htmlFor="exec-dist-sha256">
+                  {localize('com_tools_field_dist_sha256')}
+                </label>
+                <input
+                  id="exec-dist-sha256"
+                  className="config-input-mono config-input w-full font-mono text-xs"
+                  spellCheck={false}
+                  value={draft.distSha256}
+                  onChange={(e) => onSet('distSha256', e.target.value)}
+                  placeholder="<64 hex>"
+                />
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div>
@@ -638,7 +755,12 @@ function initDraft(tool: TerraVoxTool | null, existingNames: string[]): Draft {
       formJson: '',
       execKind: 'server',
       handler: '',
-      catalogToolId: '',
+      distOwner: '',
+      distRepo: '',
+      distVersion: '',
+      distSha256: '',
+      distLauncher: '',
+      distRuntime: '',
       timeout: '60',
       renderer: 'json',
       resultConfigJson: '',
@@ -647,6 +769,8 @@ function initDraft(tool: TerraVoxTool | null, existingNames: string[]): Draft {
   }
   const execution = (tool.execution ?? {}) as Record<string, unknown>;
   const kind = execution.kind === 'desktop' ? 'desktop' : 'server';
+  const distribution = (execution.distribution ?? {}) as Record<string, unknown>;
+  const source = (distribution.source ?? {}) as Record<string, unknown>;
   const [prefix, ...rest] = tool.tool_id.split('.');
   return {
     prefix: existingNames.includes(prefix) ? prefix : '__custom__',
@@ -664,7 +788,13 @@ function initDraft(tool: TerraVoxTool | null, existingNames: string[]): Draft {
     formJson: toEditableJson(tool.form),
     execKind: kind,
     handler: typeof execution.handler === 'string' ? execution.handler : '',
-    catalogToolId: typeof execution.catalog_tool_id === 'string' ? execution.catalog_tool_id : '',
+    distOwner: typeof source.owner === 'string' ? source.owner : '',
+    distRepo: typeof source.repo === 'string' ? source.repo : '',
+    distVersion: typeof distribution.version === 'string' ? distribution.version : '',
+    distSha256:
+      typeof distribution.package_sha256 === 'string' ? distribution.package_sha256 : '',
+    distLauncher: typeof distribution.launcher === 'string' ? distribution.launcher : '',
+    distRuntime: typeof distribution.runtime === 'string' ? distribution.runtime : '',
     timeout: String(tool.timeout_seconds ?? 60),
     renderer: (tool.result?.renderer as string | undefined) ?? 'json',
     resultConfigJson: toEditableJson((tool.result as Record<string, unknown>)?.config),

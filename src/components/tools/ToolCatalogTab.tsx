@@ -20,7 +20,9 @@ import {
 } from '@/components/shared';
 import { ConfirmDialog } from '@/components/access';
 import { useLocalize } from '@/hooks';
+import { notifySuccess } from '@/utils';
 import { ToolEditDialog } from './ToolEditDialog';
+import { GiteaImportDialog } from './GiteaImportDialog';
 import { ImportToolsDialog } from './ImportToolsDialog';
 
 const TAG_STYLE =
@@ -34,6 +36,9 @@ export function ToolCatalogTab() {
   const [search, setSearch] = useState('');
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<TerraVoxTool | null>(null);
+  /** Gitea 导入解析出的预填数据（创建模式打开编辑对话框）。 */
+  const [prefill, setPrefill] = useState<TerraVoxTool | null>(null);
+  const [giteaOpen, setGiteaOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<TerraVoxTool | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [mutError, setMutError] = useState<string | null>(null);
@@ -57,6 +62,7 @@ export function ToolCatalogTab() {
     onSuccess: () => {
       setEditOpen(false);
       setEditing(null);
+      setPrefill(null);
       setMutError(null);
       invalidate();
     },
@@ -100,8 +106,10 @@ export function ToolCatalogTab() {
     );
   }, [tools, search]);
 
+  /** 「手动创建」/ 清空预填：以空白创建模式打开编辑对话框 */
   const openCreate = () => {
     setEditing(null);
+    setPrefill(null);
     setEditOpen(true);
   };
 
@@ -208,7 +216,7 @@ export function ToolCatalogTab() {
           </button>
           <button
             type="button"
-            onClick={openCreate}
+            onClick={() => setGiteaOpen(true)}
             className="flex items-center gap-1.5 rounded-lg bg-(--cui-color-accent-primary) px-3 py-1.5 text-sm font-medium text-white transition-colors hover:opacity-90"
           >
             <Icon name="plus" size="sm" />
@@ -228,6 +236,7 @@ export function ToolCatalogTab() {
       <ToolEditDialog
         open={editOpen}
         tool={editing}
+        prefill={prefill}
         groups={groups}
         handlers={handlersQuery.data ?? []}
         saving={saveMutation.isPending}
@@ -241,10 +250,34 @@ export function ToolCatalogTab() {
               }
             : undefined
         }
-        onSubmit={(manifest) => saveMutation.mutate(manifest)}
+        onSubmit={(manifest) => {
+          const wasEdit = editing !== null;
+          saveMutation.mutate(manifest, {
+            onSuccess: () =>
+              notifySuccess(
+                localize(wasEdit ? 'com_toast_tool_updated' : 'com_toast_tool_created'),
+              ),
+          });
+        }}
         onClose={() => {
           setEditOpen(false);
           setEditing(null);
+          setPrefill(null);
+        }}
+      />
+
+      <GiteaImportDialog
+        open={giteaOpen}
+        onClose={() => setGiteaOpen(false)}
+        onManualCreate={() => {
+          setGiteaOpen(false);
+          openCreate();
+        }}
+        onContinue={(data) => {
+          setGiteaOpen(false);
+          setEditing(null);
+          setPrefill(data);
+          setEditOpen(true);
         }}
       />
 

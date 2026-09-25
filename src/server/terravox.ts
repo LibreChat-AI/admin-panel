@@ -69,6 +69,49 @@ export interface ImportResult {
   error?: string;
 }
 
+// ── Gitea 分发（「从 Gitea 导入」）───────────────────────────────────
+
+export interface GiteaRepoSummary {
+  name: string;
+  description?: string;
+  updated_at?: string;
+}
+
+export interface GiteaOwner {
+  login: string;
+  type?: 'user' | 'org';
+  repos: GiteaRepoSummary[];
+}
+
+export interface GiteaReposResult {
+  base_url: string;
+  owners: GiteaOwner[];
+}
+
+export interface GiteaReleaseInfo {
+  tag: string;
+  published_at?: string;
+  zip_asset?: string;
+  zip_size?: number;
+}
+
+export interface GiteaCheckItem {
+  key: string;
+  level: 'ok' | 'warn' | 'error';
+  message: string;
+}
+
+export interface GiteaCheckResult {
+  owner: string;
+  repo: string;
+  repo_description?: string;
+  release?: GiteaReleaseInfo;
+  /** repo 根 tool.json 解析结果（缺失时 undefined） */
+  tool_json?: { [key: string]: JsonValue };
+  checks: GiteaCheckItem[];
+  installable: boolean;
+}
+
 // ── Runtime guards (shape only — the gateway validates semantics) ────
 
 const toolManifestSchema = z
@@ -93,6 +136,12 @@ const toolGroupMetaSchema = z.object({
   name: z.string(),
   display_name: z.string().optional().default(''),
   sort_order: z.number().optional().default(0),
+});
+
+const giteaCheckItemSchema = z.object({
+  key: z.string(),
+  level: z.enum(['ok', 'warn', 'error']),
+  message: z.string(),
 });
 
 // ── Error plumbing ───────────────────────────────────────────────────
@@ -378,4 +427,89 @@ export const importToolsFn = createServerFn({ method: 'POST' })
       throw new Error('Failed to parse import results');
     }
     return parsed.data;
+  });
+
+// ── Gitea 分发（「从 Gitea 导入」）───────────────────────────────────
+
+export const giteaReposFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ baseUrl: z.string().optional() }))
+  .handler(async ({ data }): Promise<GiteaReposResult> => {
+    const qs = data.baseUrl ? `?base_url=${encodeURIComponent(data.baseUrl)}` : '';
+    const response = await apiFetch(`/api/terravox/admin/gitea/repos${qs}`);
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    const parsed = z
+      .object({
+        base_url: z.string(),
+        owners: z.array(
+          z.object({
+            login: z.string(),
+            repos: z.array(
+              z.object({
+                name: z.string(),
+                description: z.string().optional(),
+                updated_at: z.string().optional(),
+              }),
+            ),
+          }),
+        ),
+      })
+      .safeParse(await response.json());
+    if (!parsed.success) {
+      throw new Error('Failed to parse Gitea repository listing');
+    }
+    return parsed.data as GiteaReposResult;
+  });
+
+/** Gitea 地址 → owner 分组仓库列表（随地址变化重新拉取）。空串 = 网关默认地址。 */
+export const giteaReposQueryOptions = (baseUrl: string) =>
+  queryOptions({
+    queryKey: ['terravox', 'gitea', 'repos', baseUrl],
+    queryFn: () => giteaReposFn({ data: { baseUrl: baseUrl || undefined } }),
+    staleTime: 60_000,
+  });
+
+export const giteaCheckRepoFn = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      owner: z.string().min(1),
+      repo: z.string().min(1),
+      baseUrl: z.string().optional(),
+    }),
+  )
+  .handler(async ({ data }): Promise<GiteaCheckResult> => {
+    const response = await apiFetch('/api/terravox/admin/gitea/repos/check', {
+      method: 'POST',
+      body: JSON.stringify({
+        owner: data.owner,
+        repo: data.repo,
+        ...(data.baseUrl ? { base_url: data.baseUrl } : {}),
+      }),
+    });
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    const parsed = z
+      .object({
+        owner: z.string(),
+        repo: z.string(),
+        repo_description: z.string().optional(),
+        release: z
+          .object({
+            tag: z.string(),
+            published_at: z.string().optional(),
+            zip_asset: z.string().optional(),
+            zip_size: z.number().optional(),
+          })
+          .optional(),
+        tool_json: z.record(z.string(), z.any()).optional(),
+        checks: z.array(giteaCheckItemSchema),
+        installable: z.boolean(),
+      })
+      .safeParse(await response.json());
+    if (!parsed.success) {
+      throw new Error('Failed to parse Gitea repo check result');
+    }
+    return parsed.data as GiteaCheckResult;
   });

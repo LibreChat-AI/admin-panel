@@ -10,6 +10,8 @@ export interface ToolsPageProps {
 export interface ToolEditDialogProps {
   open: boolean;
   tool: TerraVoxTool | null;
+  /** Gitea 导入预填：以创建模式打开但预填仓库解析出的字段（tool 仍为 null）。 */
+  prefill?: TerraVoxTool | null;
   groups: TerraVoxGroup[];
   handlers: string[];
   saving: boolean;
@@ -21,6 +23,15 @@ export interface ToolEditDialogProps {
 export interface ToolEditError {
   message?: string;
   errors?: { path?: string; message: string }[];
+}
+
+export interface GiteaImportDialogProps {
+  open: boolean;
+  onClose: () => void;
+  /** 面板内「手动创建」：跳过 Gitea，直接打开空白编辑对话框。 */
+  onManualCreate: () => void;
+  /** 检查通过（无 error 级问题）后携带仓库解析出的预填数据继续编辑。 */
+  onContinue: (prefill: TerraVoxTool) => void;
 }
 
 export interface ToolGroupEditDialogProps {
