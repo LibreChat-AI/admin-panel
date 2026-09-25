@@ -16,9 +16,9 @@ const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/users': 'com_users_title',
   '/access': 'com_access_title',
   '/grants': 'com_grants_title',
+  '/tools': 'com_tools_title',
   '/help': 'com_help_title',
 };
-
 
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ location }) => {
