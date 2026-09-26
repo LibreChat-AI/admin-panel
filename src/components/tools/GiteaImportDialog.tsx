@@ -130,6 +130,7 @@ export function GiteaImportDialog({ open, onClose, onManualCreate, onContinue }:
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_tools_gitea_import_title')}
         showClose
         onClose={onClose}

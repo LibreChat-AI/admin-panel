@@ -177,6 +177,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_access_edit_role')}
         showClose
         onClose={onClose}

@@ -218,6 +218,7 @@ export function ToolEditDialog({
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={isEdit ? localize('com_tools_edit_title') : localize('com_tools_add_title')}
         showClose
         onClose={onClose}

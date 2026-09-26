@@ -204,6 +204,7 @@ export function ImportToolsDialog({
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_tools_import_title')}
         showClose
         onClose={close}

@@ -223,6 +223,7 @@ export function AuditLogDetailDrawer({
             )}
           />
           <Dialog.Content
+            onInteractOutside={(event) => event.preventDefault()}
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
             className={cn(
@@ -270,6 +271,7 @@ export function AuditLogDetailDrawer({
             )}
           />
           <Dialog.Content
+            onInteractOutside={(event) => event.preventDefault()}
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
             className={cn(
@@ -322,6 +324,7 @@ export function AuditLogDetailDrawer({
             )}
           />
           <Dialog.Content
+            onInteractOutside={(event) => event.preventDefault()}
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
             className={cn(
@@ -387,6 +390,7 @@ export function AuditLogDetailDrawer({
           )}
         />
         <Dialog.Content
+          onInteractOutside={(event) => event.preventDefault()}
           aria-label={localize('com_audit_detail_title')}
           onEscapeKeyDown={() => onClose()}
           className={cn(

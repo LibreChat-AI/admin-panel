@@ -35,6 +35,7 @@ export function FormDialog({
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={title}
         showClose
         onClose={onClose}

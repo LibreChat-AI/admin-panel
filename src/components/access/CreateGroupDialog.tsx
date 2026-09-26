@@ -81,6 +81,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_access_create_group')}
         showClose
         onClose={resetAndClose}

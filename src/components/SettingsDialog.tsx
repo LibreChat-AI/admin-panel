@@ -41,6 +41,7 @@ export function SettingsDialog({ open, onClose }: t.SettingsDialogProps) {
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_ui_settings')}
         showClose
         onClose={onClose}

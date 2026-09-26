@@ -37,7 +37,8 @@ export function ProfileValueModal({
         if (!isOpen) onCancel();
       }}
     >
-      <Dialog.Content title={title} showClose onClose={onCancel} className="modal-frost">
+      <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()} title={title} showClose onClose={onCancel} className="modal-frost">
         <div className="flex flex-col gap-4">
           <div className="flex items-center gap-2">
             {scopeConfig && (

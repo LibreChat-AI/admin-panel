@@ -101,6 +101,7 @@ export function EditCapabilitiesDialog({
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={dialogTitle}
         showClose
         onClose={onClose}

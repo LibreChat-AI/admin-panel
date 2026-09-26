@@ -131,6 +131,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_access_edit_group')}
         showClose
         onClose={onClose}

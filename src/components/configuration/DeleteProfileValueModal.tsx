@@ -21,6 +21,7 @@ export function DeleteProfileValueModal({
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_scope_confirm_remove')}
         showClose
         onClose={onCancel}
