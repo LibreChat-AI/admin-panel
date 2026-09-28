@@ -25,8 +25,9 @@ const tagToVersion = (tag: string): string => (tag.startsWith('v') ? tag.slice(1
 const suggestToolId = (owner: string, repo: string): string =>
   `${owner}.${repo}`.toLowerCase().replace(/[^a-z0-9_.-]/g, '-');
 
-/** 检查结果 → ToolEditDialog 预填（TerraVoxTool 形状；tool_id 创建模式仍可改） */
-function buildPrefill(result: GiteaCheckResult): TerraVoxTool {
+/** 检查结果 → ToolEditDialog 预填（TerraVoxTool 形状；tool_id 创建模式仍可改）。
+ *  导入与「待确认更新」共用：更新确认时治理字段以已批准 manifest 为准。 */
+export function buildPrefill(result: GiteaCheckResult): TerraVoxTool {
   const toolJson = (result.tool_json ?? {}) as Record<string, JsonValue>;
   const version = str(toolJson.version) || tagToVersion(result.release?.tag ?? '');
   const distribution: { [key: string]: JsonValue } = {
@@ -63,7 +64,12 @@ function buildPrefill(result: GiteaCheckResult): TerraVoxTool {
   };
 }
 
-export function GiteaImportDialog({ open, onClose, onManualCreate, onContinue }: t.GiteaImportDialogProps) {
+export function GiteaImportDialog({
+  open,
+  onClose,
+  onManualCreate,
+  onContinue,
+}: t.GiteaImportDialogProps) {
   const localize = useLocalize();
   const [step, setStep] = useState<Step>('select');
   const [urlInput, setUrlInput] = useState('');
@@ -103,8 +109,7 @@ export function GiteaImportDialog({ open, onClose, onManualCreate, onContinue }:
   };
 
   const checkMutation = useMutation({
-    mutationFn: () =>
-      giteaCheckRepoFn({ data: { owner, repo, baseUrl: appliedUrl || undefined } }),
+    mutationFn: () => giteaCheckRepoFn({ data: { owner, repo, baseUrl: appliedUrl || undefined } }),
     onSuccess: (result) => {
       setCheckResult(result);
       setStep('report');
@@ -163,9 +168,7 @@ export function GiteaImportDialog({ open, onClose, onManualCreate, onContinue }:
             </div>
 
             {reposQuery.isLoading && (
-              <p className="text-(--cui-color-text-muted)">
-                {localize('com_tools_gitea_loading')}
-              </p>
+              <p className="text-(--cui-color-text-muted)">{localize('com_tools_gitea_loading')}</p>
             )}
             {reposQuery.isError && (
               <p role="alert" className="text-(--cui-color-text-danger)">

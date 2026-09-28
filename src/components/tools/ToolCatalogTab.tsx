@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Icon } from '@clickhouse/click-ui';
-import type { TerraVoxTool } from '@/server';
+import { Button, Icon } from '@clickhouse/click-ui';
+import type { PendingToolUpdate, TerraVoxTool } from '@/server';
 import {
   createToolFn,
   deleteToolFn,
+  giteaCheckRepoFn,
   handlersQueryOptions,
+  pendingUpdatesQueryOptions,
   toolGroupsQueryOptions,
   toolsQueryOptions,
   updateToolFn,
@@ -22,7 +24,7 @@ import { ConfirmDialog } from '@/components/access';
 import { useLocalize } from '@/hooks';
 import { notifySuccess } from '@/utils';
 import { ToolEditDialog } from './ToolEditDialog';
-import { GiteaImportDialog } from './GiteaImportDialog';
+import { buildPrefill, GiteaImportDialog } from './GiteaImportDialog';
 import { ImportToolsDialog } from './ImportToolsDialog';
 
 const TAG_STYLE =
@@ -46,6 +48,7 @@ export function ToolCatalogTab() {
   const toolsQuery = useQuery(toolsQueryOptions);
   const groupsQuery = useQuery(toolGroupsQueryOptions);
   const handlersQuery = useQuery(handlersQueryOptions);
+  const pendingQuery = useQuery(pendingUpdatesQueryOptions);
   const tools = toolsQuery.data?.tools ?? [];
   const groupMeta = toolsQuery.data?.groups ?? [];
   const groups = groupsQuery.data ?? [];
@@ -86,6 +89,35 @@ export function ToolCatalogTab() {
       setDeleteTarget(null);
       setMutError(null);
       invalidate();
+    },
+    onError: (error: Error) => setMutError(error.message),
+  });
+
+  /** 待确认更新 → check 端点预填新参数 → 以编辑模式打开对话框（提交 = PUT 确认）。 */
+  const confirmUpdateMutation = useMutation({
+    mutationFn: (update: PendingToolUpdate) =>
+      giteaCheckRepoFn({
+        data: { owner: update.owner ?? '', repo: update.repo ?? '' },
+      }),
+    onSuccess: (result, update) => {
+      const existing = tools.find((tool) => tool.tool_id === update.tool_id);
+      if (!existing) {
+        /* 目录已漂移（工具被删）——刷新后该待确认行自然消失 */
+        invalidate();
+        return;
+      }
+      /* 仓库内容字段覆盖旧值；治理字段（tool_id/expose/allowed_groups/enabled）
+       *  保持已批准状态 —— 2.8.0 治理决策。 */
+      setEditing({
+        ...existing,
+        ...buildPrefill(result),
+        tool_id: existing.tool_id,
+        expose: existing.expose,
+        allowed_groups: existing.allowed_groups,
+        enabled: existing.enabled,
+      });
+      setPrefill(null);
+      setEditOpen(true);
     },
     onError: (error: Error) => setMutError(error.message),
   });
@@ -225,6 +257,17 @@ export function ToolCatalogTab() {
         </div>
       </div>
 
+      <PendingUpdatesPanel
+        updates={pendingQuery.data ?? []}
+        checkingToolId={
+          confirmUpdateMutation.isPending
+            ? (confirmUpdateMutation.variables?.tool_id ?? null)
+            : null
+        }
+        error={pendingQuery.isError ? (pendingQuery.error as Error).message : null}
+        onConfirm={(update) => confirmUpdateMutation.mutate(update)}
+      />
+
       {mutError && (
         <p role="alert" className="text-sm text-(--cui-color-text-danger)">
           {mutError}
@@ -300,6 +343,92 @@ export function ToolCatalogTab() {
         onImported={invalidate}
       />
     </div>
+  );
+}
+
+/** zip 字节数 → 可读大小（KB/MB） */
+const formatSize = (bytes: number): string =>
+  bytes >= 1024 * 1024
+    ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+
+/** 顶部待确认更新区：仓库领先版本经管理员确认前不下发前端（2.8.0 治理决策）。 */
+function PendingUpdatesPanel({
+  updates,
+  checkingToolId,
+  error,
+  onConfirm,
+}: {
+  updates: PendingToolUpdate[];
+  checkingToolId: string | null;
+  error: string | null;
+  onConfirm: (update: PendingToolUpdate) => void;
+}) {
+  const localize = useLocalize();
+  if (updates.length === 0 && !error) {
+    return null;
+  }
+  return (
+    <section
+      aria-label={localize('com_tools_pending_title')}
+      className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-warning-muted) p-4"
+    >
+      <div className="flex flex-col gap-1">
+        <h3 className="text-sm font-medium text-(--cui-color-text-warning)">
+          {localize('com_tools_pending_title')}
+        </h3>
+        <p className="text-xs text-(--cui-color-text-muted)">
+          {localize('com_tools_pending_hint')}
+        </p>
+      </div>
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-(--cui-color-text-danger)">
+          {error}
+        </p>
+      )}
+      <ul className="mt-3 flex flex-col gap-2">
+        {updates.map((update) => {
+          const checking = checkingToolId === update.tool_id;
+          return (
+            <li
+              key={update.tool_id}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm"
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="font-medium text-(--cui-color-text-default)">
+                  {update.display_name}
+                </span>
+                <code className="text-xs text-(--cui-color-text-muted)">{update.tool_id}</code>
+              </span>
+              <span className="font-mono text-xs text-(--cui-color-text-default)">
+                {localize('com_tools_pending_versions', {
+                  current: `v${update.current_version}`,
+                  latest: `v${update.package.version}`,
+                })}
+              </span>
+              <span className="text-xs text-(--cui-color-text-muted)">
+                {`${formatSize(update.package.size)} · ${new Date(
+                  update.package.updated_at,
+                ).toLocaleDateString()}`}
+              </span>
+              <span className="ms-auto flex items-center gap-2">
+                {checking && (
+                  <span className="text-xs text-(--cui-color-text-muted)">
+                    {localize('com_tools_pending_checking')}
+                  </span>
+                )}
+                <Button
+                  type="primary"
+                  label={localize('com_tools_pending_confirm')}
+                  disabled={checking}
+                  onClick={() => onConfirm(update)}
+                />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

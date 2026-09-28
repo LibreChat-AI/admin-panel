@@ -1380,5 +1380,10 @@
   "com_tools_group_err_name": "命名空间只能包含小写字母、数字、- 和 _。",
   "com_tools_group_delete_title": "删除分组",
   "com_tools_group_delete_desc": "确定删除分组 {{name}}？仅删除分组元数据，工具 ID 不受影响。",
-  "com_tools_group_delete_not_empty": "该分组下仍有 {{count}} 个工具，请先移动或删除它们。"
+  "com_tools_group_delete_not_empty": "该分组下仍有 {{count}} 个工具，请先移动或删除它们。",
+  "com_tools_pending_title": "待确认更新",
+  "com_tools_pending_hint": "仓库中领先于已批准版本的 Release 在此确认前不会下发给前端用户。",
+  "com_tools_pending_versions": "{{current}} → {{latest}}",
+  "com_tools_pending_checking": "正在获取仓库详情…",
+  "com_tools_pending_confirm": "查看并确认"
 }

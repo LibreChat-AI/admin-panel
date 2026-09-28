@@ -112,6 +112,24 @@ export interface GiteaCheckResult {
   installable: boolean;
 }
 
+// ── 待确认更新（2.8.0 治理决策）─────────────────────────────────────
+
+export interface PendingPackageMeta {
+  version: string;
+  size: number;
+  updated_at: string;
+}
+
+/** 仓库最新稳定 Release 领先于 manifest 已批准版本的 desktop 工具。 */
+export interface PendingToolUpdate {
+  tool_id: string;
+  display_name: string;
+  owner?: string;
+  repo?: string;
+  current_version: string;
+  package: PendingPackageMeta;
+}
+
 // ── Runtime guards (shape only — the gateway validates semantics) ────
 
 const toolManifestSchema = z
@@ -142,6 +160,19 @@ const giteaCheckItemSchema = z.object({
   key: z.string(),
   level: z.enum(['ok', 'warn', 'error']),
   message: z.string(),
+});
+
+const pendingToolUpdateSchema = z.object({
+  tool_id: z.string(),
+  display_name: z.string(),
+  owner: z.string().optional(),
+  repo: z.string().optional(),
+  current_version: z.string(),
+  package: z.object({
+    version: z.string(),
+    size: z.number(),
+    updated_at: z.string(),
+  }),
 });
 
 // ── Error plumbing ───────────────────────────────────────────────────
@@ -513,3 +544,29 @@ export const giteaCheckRepoFn = createServerFn({ method: 'POST' })
     }
     return parsed.data as GiteaCheckResult;
   });
+
+// ── 待确认更新 ───────────────────────────────────────────────────────
+
+export const getPendingUpdatesFn = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<{ updates: PendingToolUpdate[] }> => {
+    const response = await apiFetch('/api/terravox/admin/tools/pending-updates');
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    const parsed = z
+      .object({ updates: z.array(pendingToolUpdateSchema) })
+      .safeParse(await response.json());
+    if (!parsed.success) {
+      throw new Error('Failed to parse pending tool updates');
+    }
+    return parsed.data as { updates: PendingToolUpdate[] };
+  },
+);
+
+/** 每分钟的刷新对齐网关 60s 的 Gitea 解析缓存；确认落库后 invalidate 即时清空。 */
+export const pendingUpdatesQueryOptions = queryOptions({
+  queryKey: ['terravox', 'pending-updates'],
+  queryFn: () => getPendingUpdatesFn().then((r) => r.updates),
+  staleTime: 60_000,
+  refetchInterval: 60_000,
+});

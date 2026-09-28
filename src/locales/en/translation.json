@@ -1380,5 +1380,10 @@
   "com_tools_group_err_name": "Namespace may only contain lowercase letters, digits, - and _.",
   "com_tools_group_delete_title": "Delete group",
   "com_tools_group_delete_desc": "Delete group {{name}}? Only the metadata is removed; tools keep their IDs.",
-  "com_tools_group_delete_not_empty": "This group still contains {{count}} tools. Move or delete them first."
+  "com_tools_group_delete_not_empty": "This group still contains {{count}} tools. Move or delete them first.",
+  "com_tools_pending_title": "Pending updates",
+  "com_tools_pending_hint": "Repo releases ahead of the approved manifest stay hidden from users until you review and confirm them here.",
+  "com_tools_pending_versions": "{{current}} → {{latest}}",
+  "com_tools_pending_checking": "Fetching repo details…",
+  "com_tools_pending_confirm": "Review & confirm"
 }
