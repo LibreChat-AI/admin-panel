@@ -138,9 +138,11 @@ const PENDING_UPDATE: Record<string, unknown> = {
   package: { version: '1.0.1', size: 753, updated_at: '2026-09-28T08:52:55Z' },
 };
 
-const MISMATCH_WARN = {
+/* 2026-09-28：gateway 将显式版本与 tag 不一致升为硬项 error（Toolhost 安装侧
+ * 同样硬校验 version == tag）—— 确认流程必须挡住，不能等安装时才失败 */
+const MISMATCH_ERROR = {
   key: 'version_mismatch',
-  level: 'warn',
+  level: 'error',
   message: 'tool.json version 1.0.0 != release tag v1.0.1',
 } as const;
 
@@ -150,10 +152,10 @@ const CHECK_RESULT = {
   release: { tag: 'v1.0.1' },
   tool_json: {
     display_name: 'Tools Demo',
-    version: '1.0.0',
+    version: '1.0.1',
     parameters: { type: 'object', properties: { query: { type: 'string' } } },
   },
-  checks: [MISMATCH_WARN],
+  checks: [{ key: 'launcher_missing', level: 'warn', message: 'launcher not defined in tool.json' }],
   installable: true,
 };
 
@@ -162,8 +164,8 @@ const CHECK_RESULT_SPARSE = {
   owner: 'wangjianbo',
   repo: 'toolsdemo',
   release: { tag: 'v1.0.1' },
-  tool_json: { version: '1.0.0' },
-  checks: [MISMATCH_WARN],
+  tool_json: { version: '1.0.1' },
+  checks: [],
   installable: false,
 };
 
@@ -172,9 +174,19 @@ const CHECK_RESULT_ERROR = {
   repo: 'toolsdemo',
   release: { tag: 'v1.0.1' },
   checks: [
-    MISMATCH_WARN,
     { key: 'zip_asset_count', level: 'error', message: 'expected exactly 1 zip asset, found 2' },
   ],
+  installable: false,
+};
+
+/* tag 与 tool.json 版本不一致（用户场景 2026-09-28：tag v1.0.1 指向 tool.json
+ * 仍是 1.0.0 的 commit）—— Toolhost 会拒装，确认必须在此挡住 */
+const CHECK_RESULT_MISMATCH = {
+  owner: 'wangjianbo',
+  repo: 'toolsdemo',
+  release: { tag: 'v1.0.1' },
+  tool_json: { version: '1.0.0' },
+  checks: [MISMATCH_ERROR],
   installable: false,
 };
 
@@ -215,10 +227,10 @@ describe('ToolCatalogTab pending updates', () => {
     expect(screen.queryByRole('region', { name: 'com_tools_pending_title' })).toBeNull();
   });
 
-  it('confirm uses the pending target version (tag) even when tool.json@tag is stale, and shows the mismatch warn', async () => {
-    /* 2026-09-28 regression: tag v1.0.1 vs tool.json 1.0.0 — the confirmed
-     * version must be the tag (the distribution identity), never the stale
-     * tool.json version, and version_mismatch must be visible. */
+  it('confirm merges repo fields at the pending target version and shows check warns', async () => {
+    /* 2026-09-28 regression: the confirmed version is the pending target (tag,
+     * the distribution identity) and repo-provided params win; soft warns stay
+     * visible in the pending panel without blocking. */
     mocks.state.tools = [EXISTING];
     mocks.state.pending = [PENDING_UPDATE];
     mocks.checkRepo.mockResolvedValue(CHECK_RESULT);
@@ -231,7 +243,7 @@ describe('ToolCatalogTab pending updates', () => {
     expect(mocks.checkRepo).toHaveBeenCalledWith({
       data: { owner: 'wangjianbo', repo: 'toolsdemo' },
     });
-    expect(await screen.findByText(/version_mismatch/)).toBeInTheDocument();
+    expect(await screen.findByText(/launcher_missing/)).toBeInTheDocument();
 
     const merged = JSON.parse(dialog.textContent ?? '{}') as Record<string, unknown>;
     expect(merged.version).toBe('1.0.1');
@@ -245,6 +257,21 @@ describe('ToolCatalogTab pending updates', () => {
     expect(merged.tool_id).toBe('wangjianbo.toolsdemo');
     expect(merged.allowed_groups).toEqual(['team-editor']);
     expect(merged.enabled).toBe(true);
+  });
+
+  it('confirm blocks when tool.json@tag version mismatches the release tag', async () => {
+    /* Toolhost refuses to install a package whose declared version differs
+     * from the tag — approving it would dead-end at install time. */
+    mocks.state.tools = [EXISTING];
+    mocks.state.pending = [PENDING_UPDATE];
+    mocks.checkRepo.mockResolvedValue(CHECK_RESULT_MISMATCH);
+    renderTab();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'com_tools_pending_confirm' }));
+    });
+    expect(await screen.findByText(/version_mismatch/)).toBeInTheDocument();
+    expect(screen.queryByTestId('edit-dialog')).toBeNull();
   });
 
   it('confirm keeps approved values for everything the repo does not provide', async () => {
