@@ -64,6 +64,56 @@ export function buildPrefill(result: GiteaCheckResult): TerraVoxTool {
   };
 }
 
+/** 「待确认更新」确认合并（2026-09-28 修复）：
+ *  - 版本以待确认目标（release tag，即 resolver/Toolhost 取包的标识）为准 ——
+ *    tool.json@tag 落后时按 tag 落库，version_mismatch 已在检查告警中可见；
+ *  - 仓库**提供**的内容字段覆盖旧值；tool.json 缺省的项（parameters/form/
+ *    result/dangerous/描述/sha256/launcher/runtime 等）**保留已批准值**，
+ *    不被 undefined/空串/回退值清掉；
+ *  - 治理字段（tool_id/expose/allowed_groups/enabled）保持已批准值。 */
+export function buildUpdateMerge(
+  existing: TerraVoxTool,
+  result: GiteaCheckResult,
+  targetVersion: string,
+): TerraVoxTool {
+  const prefill = buildPrefill(result);
+  const toolJson = (result.tool_json ?? {}) as Record<string, JsonValue>;
+  const repoDistribution = ((prefill.execution ?? {}).distribution ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const existingDistribution = ((existing.execution ?? {}).distribution ?? {}) as Record<
+    string,
+    unknown
+  >;
+  return {
+    ...existing,
+    version: targetVersion,
+    /* repo 名回退不算「仓库提供」——display_name/description 仅在 tool.json 或
+     * 仓库描述真实给出时覆盖，否则保留已批准值 */
+    display_name: str(toolJson.display_name) || existing.display_name,
+    description: str(toolJson.description) || result.repo_description || existing.description,
+    ...(toolJson.dangerous !== undefined ? { dangerous: toolJson.dangerous === true } : {}),
+    ...(prefill.parameters !== undefined ? { parameters: prefill.parameters } : {}),
+    ...(prefill.form !== undefined ? { form: prefill.form } : {}),
+    ...(prefill.result !== undefined ? { result: prefill.result } : {}),
+    ...(prefill.timeout_seconds !== undefined ? { timeout_seconds: prefill.timeout_seconds } : {}),
+    execution: {
+      ...(existing.execution ?? {}),
+      kind: 'desktop',
+      distribution: {
+        ...existingDistribution,
+        ...repoDistribution,
+        version: targetVersion,
+      },
+    },
+    tool_id: existing.tool_id,
+    expose: existing.expose,
+    allowed_groups: existing.allowed_groups,
+    enabled: existing.enabled,
+  };
+}
+
 export function GiteaImportDialog({
   open,
   onClose,

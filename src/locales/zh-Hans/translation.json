@@ -1385,5 +1385,7 @@
   "com_tools_pending_hint": "仓库中领先于已批准版本的 Release 在此确认前不会下发给前端用户。",
   "com_tools_pending_versions": "{{current}} → {{latest}}",
   "com_tools_pending_checking": "正在获取仓库详情…",
-  "com_tools_pending_confirm": "查看并确认"
+  "com_tools_pending_confirm": "查看并确认",
+  "com_tools_pending_check_failed": "仓库检查未通过，未打开确认：{{detail}}",
+  "com_tools_pending_check_warns": "检查警告：{{detail}}"
 }

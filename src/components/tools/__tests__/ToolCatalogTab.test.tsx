@@ -114,12 +114,17 @@ const EXISTING: Record<string, unknown> = {
   description: 'approved description',
   expose: ['ui'],
   allowed_groups: ['team-editor'],
+  dangerous: true,
   parameters: { type: 'object', properties: { old: { type: 'string' } } },
+  result: { renderer: 'table', config: { columns: ['a'] } },
   execution: {
     kind: 'desktop',
     distribution: {
       source: { type: 'gitea_release', owner: 'wangjianbo', repo: 'toolsdemo' },
       version: '1.0.0',
+      package_sha256: 'a'.repeat(64),
+      launcher: 'main.py',
+      runtime: 'self-contained',
     },
   },
 };
@@ -130,20 +135,47 @@ const PENDING_UPDATE: Record<string, unknown> = {
   owner: 'wangjianbo',
   repo: 'toolsdemo',
   current_version: '1.0.0',
-  package: { version: '1.1.0', size: 753, updated_at: '2026-09-27T10:00:00Z' },
+  package: { version: '1.0.1', size: 753, updated_at: '2026-09-28T08:52:55Z' },
 };
+
+const MISMATCH_WARN = {
+  key: 'version_mismatch',
+  level: 'warn',
+  message: 'tool.json version 1.0.0 != release tag v1.0.1',
+} as const;
 
 const CHECK_RESULT = {
   owner: 'wangjianbo',
   repo: 'toolsdemo',
-  release: { tag: 'v1.1.0' },
+  release: { tag: 'v1.0.1' },
   tool_json: {
     display_name: 'Tools Demo',
-    version: '1.1.0',
+    version: '1.0.0',
     parameters: { type: 'object', properties: { query: { type: 'string' } } },
   },
-  checks: [],
+  checks: [MISMATCH_WARN],
   installable: true,
+};
+
+/* tool.json 只有版本号，其余全缺 —— 确认时已批准值必须保留 */
+const CHECK_RESULT_SPARSE = {
+  owner: 'wangjianbo',
+  repo: 'toolsdemo',
+  release: { tag: 'v1.0.1' },
+  tool_json: { version: '1.0.0' },
+  checks: [MISMATCH_WARN],
+  installable: false,
+};
+
+const CHECK_RESULT_ERROR = {
+  owner: 'wangjianbo',
+  repo: 'toolsdemo',
+  release: { tag: 'v1.0.1' },
+  checks: [
+    MISMATCH_WARN,
+    { key: 'zip_asset_count', level: 'error', message: 'expected exactly 1 zip asset, found 2' },
+  ],
+  installable: false,
 };
 
 const renderTab = () => {
@@ -173,7 +205,7 @@ describe('ToolCatalogTab pending updates', () => {
 
     const section = await screen.findByRole('region', { name: 'com_tools_pending_title' });
     expect(section.textContent).toContain('v1.0.0');
-    expect(section.textContent).toContain('v1.1.0');
+    expect(section.textContent).toContain('v1.0.1');
     expect(screen.getByRole('button', { name: 'com_tools_pending_confirm' })).toBeEnabled();
 
     first.unmount();
@@ -183,7 +215,10 @@ describe('ToolCatalogTab pending updates', () => {
     expect(screen.queryByRole('region', { name: 'com_tools_pending_title' })).toBeNull();
   });
 
-  it('confirm prefills the edit dialog with repo fields; governance stays as approved', async () => {
+  it('confirm uses the pending target version (tag) even when tool.json@tag is stale, and shows the mismatch warn', async () => {
+    /* 2026-09-28 regression: tag v1.0.1 vs tool.json 1.0.0 — the confirmed
+     * version must be the tag (the distribution identity), never the stale
+     * tool.json version, and version_mismatch must be visible. */
     mocks.state.tools = [EXISTING];
     mocks.state.pending = [PENDING_UPDATE];
     mocks.checkRepo.mockResolvedValue(CHECK_RESULT);
@@ -196,19 +231,60 @@ describe('ToolCatalogTab pending updates', () => {
     expect(mocks.checkRepo).toHaveBeenCalledWith({
       data: { owner: 'wangjianbo', repo: 'toolsdemo' },
     });
+    expect(await screen.findByText(/version_mismatch/)).toBeInTheDocument();
 
     const merged = JSON.parse(dialog.textContent ?? '{}') as Record<string, unknown>;
-    /* repo content wins */
-    expect(merged.version).toBe('1.1.0');
+    expect(merged.version).toBe('1.0.1');
+    /* repo-provided params win */
     const parameters = merged.parameters as { properties: Record<string, unknown> };
     expect(parameters.properties.query).toBeDefined();
     expect(parameters.properties.old).toBeUndefined();
     const execution = merged.execution as { distribution: { version: string } };
-    expect(execution.distribution.version).toBe('1.1.0');
+    expect(execution.distribution.version).toBe('1.0.1');
     /* governance fields keep the approved values */
     expect(merged.tool_id).toBe('wangjianbo.toolsdemo');
     expect(merged.allowed_groups).toEqual(['team-editor']);
     expect(merged.enabled).toBe(true);
+  });
+
+  it('confirm keeps approved values for everything the repo does not provide', async () => {
+    mocks.state.tools = [EXISTING];
+    mocks.state.pending = [PENDING_UPDATE];
+    mocks.checkRepo.mockResolvedValue(CHECK_RESULT_SPARSE);
+    renderTab();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'com_tools_pending_confirm' }));
+    });
+    const merged = JSON.parse(
+      (await screen.findByTestId('edit-dialog')).textContent ?? '{}',
+    ) as Record<string, unknown>;
+
+    expect(merged.version).toBe('1.0.1');
+    expect(merged.display_name).toBe('Tools Demo');
+    expect(merged.description).toBe('approved description');
+    expect(merged.dangerous).toBe(true);
+    const parameters = merged.parameters as { properties: Record<string, unknown> };
+    expect(parameters.properties.old).toBeDefined();
+    expect(merged.result).toEqual({ renderer: 'table', config: { columns: ['a'] } });
+    const distribution = (merged.execution as { distribution: Record<string, string> })
+      .distribution;
+    expect(distribution.package_sha256).toBe('a'.repeat(64));
+    expect(distribution.launcher).toBe('main.py');
+    expect(distribution.runtime).toBe('self-contained');
+  });
+
+  it('confirm does not open the dialog when the repo check has hard errors', async () => {
+    mocks.state.tools = [EXISTING];
+    mocks.state.pending = [PENDING_UPDATE];
+    mocks.checkRepo.mockResolvedValue(CHECK_RESULT_ERROR);
+    renderTab();
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: 'com_tools_pending_confirm' }));
+    });
+    expect(await screen.findByText(/zip_asset_count/)).toBeInTheDocument();
+    expect(screen.queryByTestId('edit-dialog')).toBeNull();
   });
 
   it('surfaces a failed repo check as an alert', async () => {

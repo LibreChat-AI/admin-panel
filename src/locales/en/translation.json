@@ -1385,5 +1385,7 @@
   "com_tools_pending_hint": "Repo releases ahead of the approved manifest stay hidden from users until you review and confirm them here.",
   "com_tools_pending_versions": "{{current}} → {{latest}}",
   "com_tools_pending_checking": "Fetching repo details…",
-  "com_tools_pending_confirm": "Review & confirm"
+  "com_tools_pending_confirm": "Review & confirm",
+  "com_tools_pending_check_failed": "Repo check failed, update not opened: {{detail}}",
+  "com_tools_pending_check_warns": "Check warnings: {{detail}}"
 }

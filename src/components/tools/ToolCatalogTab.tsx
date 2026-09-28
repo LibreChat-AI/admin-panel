@@ -24,7 +24,7 @@ import { ConfirmDialog } from '@/components/access';
 import { useLocalize } from '@/hooks';
 import { notifySuccess } from '@/utils';
 import { ToolEditDialog } from './ToolEditDialog';
-import { buildPrefill, GiteaImportDialog } from './GiteaImportDialog';
+import { buildUpdateMerge, GiteaImportDialog } from './GiteaImportDialog';
 import { ImportToolsDialog } from './ImportToolsDialog';
 
 const TAG_STYLE =
@@ -44,6 +44,8 @@ export function ToolCatalogTab() {
   const [deleteTarget, setDeleteTarget] = useState<TerraVoxTool | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [mutError, setMutError] = useState<string | null>(null);
+  /** 待确认更新的检查告警（琥珀色，不影响继续确认）。 */
+  const [updateNotice, setUpdateNotice] = useState<string | null>(null);
 
   const toolsQuery = useQuery(toolsQueryOptions);
   const groupsQuery = useQuery(toolGroupsQueryOptions);
@@ -93,12 +95,15 @@ export function ToolCatalogTab() {
     onError: (error: Error) => setMutError(error.message),
   });
 
-  /** 待确认更新 → check 端点预填新参数 → 以编辑模式打开对话框（提交 = PUT 确认）。 */
+  /** 待确认更新 → check 端点预填新参数 → 以编辑模式打开对话框（提交 = PUT 确认）。
+   *  检查告警（如 tool.json@tag 版本落后 version_mismatch）以通知形式展示；
+   *  硬项 error（仓库不可达/无 Release/多 zip）不打开对话框。 */
   const confirmUpdateMutation = useMutation({
     mutationFn: (update: PendingToolUpdate) =>
       giteaCheckRepoFn({
         data: { owner: update.owner ?? '', repo: update.repo ?? '' },
       }),
+    onMutate: () => setUpdateNotice(null),
     onSuccess: (result, update) => {
       const existing = tools.find((tool) => tool.tool_id === update.tool_id);
       if (!existing) {
@@ -106,16 +111,27 @@ export function ToolCatalogTab() {
         invalidate();
         return;
       }
-      /* 仓库内容字段覆盖旧值；治理字段（tool_id/expose/allowed_groups/enabled）
-       *  保持已批准状态 —— 2.8.0 治理决策。 */
-      setEditing({
-        ...existing,
-        ...buildPrefill(result),
-        tool_id: existing.tool_id,
-        expose: existing.expose,
-        allowed_groups: existing.allowed_groups,
-        enabled: existing.enabled,
-      });
+      if (result.checks.some((c) => c.level === 'error')) {
+        setUpdateNotice(
+          localize('com_tools_pending_check_failed', {
+            detail: result.checks
+              .filter((c) => c.level === 'error')
+              .map((c) => `${c.key}: ${c.message}`)
+              .join(' · '),
+          }),
+        );
+        return;
+      }
+      const warns = result.checks.filter((c) => c.level === 'warn');
+      if (warns.length > 0) {
+        setUpdateNotice(
+          localize('com_tools_pending_check_warns', {
+            detail: warns.map((c) => `${c.key}: ${c.message}`).join(' · '),
+          }),
+        );
+      }
+      /* 版本以待确认目标（release tag）为准；仓库缺省字段保留已批准值 */
+      setEditing(buildUpdateMerge(existing, result, update.package.version));
       setPrefill(null);
       setEditOpen(true);
     },
@@ -265,6 +281,7 @@ export function ToolCatalogTab() {
             : null
         }
         error={pendingQuery.isError ? (pendingQuery.error as Error).message : null}
+        notice={updateNotice}
         onConfirm={(update) => confirmUpdateMutation.mutate(update)}
       />
 
@@ -357,15 +374,17 @@ function PendingUpdatesPanel({
   updates,
   checkingToolId,
   error,
+  notice,
   onConfirm,
 }: {
   updates: PendingToolUpdate[];
   checkingToolId: string | null;
   error: string | null;
+  notice: string | null;
   onConfirm: (update: PendingToolUpdate) => void;
 }) {
   const localize = useLocalize();
-  if (updates.length === 0 && !error) {
+  if (updates.length === 0 && !error && !notice) {
     return null;
   }
   return (
@@ -386,6 +405,7 @@ function PendingUpdatesPanel({
           {error}
         </p>
       )}
+      {notice && <p className="mt-2 text-xs text-(--cui-color-text-warning)">{notice}</p>}
       <ul className="mt-3 flex flex-col gap-2">
         {updates.map((update) => {
           const checking = checkingToolId === update.tool_id;
