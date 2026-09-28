@@ -1411,5 +1411,18 @@
   "com_usage_export": "导出 CSV",
   "com_usage_export_failed": "导出失败。",
   "com_usage_export_truncated": "导出已限制为前 {{count}} 条记录。",
-  "com_usage_count": "共 {{count}} 次运行"
+  "com_usage_count": "共 {{count}} 次运行",
+  "com_tools_gitea_import_kind": "工具类型",
+  "com_tools_gitea_kind_desktop": "桌面自动化",
+  "com_tools_gitea_kind_plugin": "扩展插件",
+  "com_tools_gitea_kind_web": "网页工具",
+  "com_tools_field_web_url": "工具地址",
+  "com_tools_gitea_web_url_hint": "运行网页工具时将在新标签页打开该地址。",
+  "com_tools_gitea_url_hint_web": "可选——选择仓库仅用于预填名称/描述；上方地址才是工具本体。",
+  "com_tools_err_web_url": "工具地址必须以 http(s):// 开头",
+  "com_tools_err_host_launcher": "插件必须登记宿主可执行文件（相对宿主根目录）",
+  "com_tools_field_dist_host_launcher": "宿主可执行文件（相对宿主根目录）",
+  "com_tools_field_dist_host_hints": "宿主根目录候选（每行一个）",
+  "com_tools_field_dist_install_script": "安装脚本（可选）",
+  "com_tools_field_dist_uninstall_script": "卸载脚本（可选）"
 }

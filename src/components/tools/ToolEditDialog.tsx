@@ -20,18 +20,55 @@ interface Draft {
   enabled: boolean;
   parametersJson: string;
   formJson: string;
-  execKind: 'server' | 'desktop';
+  execKind: 'server' | 'desktop' | 'plugin' | 'web';
   handler: string;
+  webUrl: string;
   distOwner: string;
   distRepo: string;
   distVersion: string;
   distSha256: string;
   distLauncher: string;
   distRuntime: string;
+  distHostLauncher: string;
+  distHostRootHints: string;
+  distInstallScript: string;
+  distUninstallScript: string;
   timeout: string;
   renderer: string;
   resultConfigJson: string;
   redactParams: string;
+}
+
+/** Draft → execution block per kind (contracts 2.11.0). `distribution` is the
+ * desktop/plugin shared Gitea registration (source + supplemental fields). */
+function buildExecution(
+  draft: Draft,
+  distribution: Record<string, unknown>,
+): Record<string, unknown> {
+  if (draft.execKind === 'server') {
+    return { kind: 'server', handler: draft.handler };
+  }
+  if (draft.execKind === 'web') {
+    return { kind: 'web', url: draft.webUrl.trim() };
+  }
+  const dist: Record<string, unknown> = { ...distribution };
+  if (draft.execKind === 'plugin') {
+    dist.host_launcher = draft.distHostLauncher.trim();
+    const hints = draft.distHostRootHints
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (hints.length > 0) {
+      dist.host_root_hints = hints;
+    }
+    if (draft.distInstallScript.trim()) {
+      dist.install_script = draft.distInstallScript.trim();
+    }
+    if (draft.distUninstallScript.trim()) {
+      dist.uninstall_script = draft.distUninstallScript.trim();
+    }
+  }
+  return { kind: draft.execKind, distribution: dist };
 }
 
 const toEditableJson = (value: unknown): string =>
@@ -63,7 +100,9 @@ export function ToolEditDialog({
   const isEdit = tool !== null;
   const existingNames = useMemo(() => groups.map((g) => g.name), [groups]);
 
-  const [draft, setDraft] = useState<Draft>(() => initDraft(tool ?? prefill ?? null, existingNames));
+  const [draft, setDraft] = useState<Draft>(() =>
+    initDraft(tool ?? prefill ?? null, existingNames),
+  );
   const [clientError, setClientError] = useState<string | null>(null);
   const [tab, setTab] = useState('basic');
 
@@ -126,6 +165,16 @@ export function ToolEditDialog({
       setTab('exec');
       return;
     }
+    if (draft.execKind === 'web' && !draft.webUrl.trim().startsWith('http')) {
+      setClientError(localize('com_tools_err_web_url'));
+      setTab('exec');
+      return;
+    }
+    if (draft.execKind === 'plugin' && !draft.distHostLauncher.trim()) {
+      setClientError(localize('com_tools_err_host_launcher'));
+      setTab('exec');
+      return;
+    }
     if (draft.execKind === 'desktop' && (!draft.distOwner.trim() || !draft.distRepo.trim())) {
       setClientError(localize('com_tools_err_owner_repo'));
       setTab('exec');
@@ -184,10 +233,7 @@ export function ToolEditDialog({
       dangerous: draft.dangerous,
       enabled: draft.enabled,
       parameters: parameters.value ?? { type: 'object', properties: {} },
-      execution:
-        draft.execKind === 'server'
-          ? { kind: 'server', handler: draft.handler }
-          : { kind: 'desktop', distribution },
+      execution: buildExecution(draft, distribution),
       result: {
         renderer: draft.renderer.trim(),
         ...(resultConfig.value !== undefined ? { config: resultConfig.value } : {}),
@@ -547,8 +593,25 @@ function ExecTab({
           >
             <option value="server">server</option>
             <option value="desktop">desktop</option>
+            <option value="plugin">plugin</option>
+            <option value="web">web</option>
           </select>
         </div>
+        {draft.execKind === 'web' && (
+          <div className="col-span-2">
+            <label className={labelClass} htmlFor="exec-web-url">
+              {localize('com_tools_field_web_url')}
+            </label>
+            <input
+              id="exec-web-url"
+              className="config-input-mono config-input w-full font-mono text-xs"
+              value={draft.webUrl}
+              onChange={(e) => onSet('webUrl', e.target.value)}
+              placeholder="https://"
+              spellCheck={false}
+            />
+          </div>
+        )}
         {draft.execKind === 'server' ? (
           <div>
             <label className={labelClass} htmlFor="exec-handler">
@@ -582,22 +645,78 @@ function ExecTab({
             />
           </div>
         )}
-        <div>
-          <label className={labelClass} htmlFor="exec-timeout">
-            {localize('com_tools_field_timeout')}
-          </label>
-          <input
-            id="exec-timeout"
-            type="number"
-            min={1}
-            className="config-input w-full"
-            value={draft.timeout}
-            onChange={(e) => onSet('timeout', e.target.value)}
-          />
+      </div>
+      {draft.execKind === 'plugin' && (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className={labelClass} htmlFor="exec-dist-host-launcher">
+              {localize('com_tools_field_dist_host_launcher')}
+            </label>
+            <input
+              id="exec-dist-host-launcher"
+              className="config-input-mono config-input w-full font-mono text-xs"
+              value={draft.distHostLauncher}
+              onChange={(e) => onSet('distHostLauncher', e.target.value)}
+              placeholder="bin/ArcGISPro.exe"
+              spellCheck={false}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="exec-dist-host-hints">
+              {localize('com_tools_field_dist_host_hints')}
+            </label>
+            <textarea
+              id="exec-dist-host-hints"
+              className="config-input-mono config-input h-20 w-full font-mono text-xs"
+              value={draft.distHostRootHints}
+              onChange={(e) => onSet('distHostRootHints', e.target.value)}
+              placeholder={'C:\\Program Files\\ArcGIS\\Pro\nD:\\SuperMap\\iDesktop'}
+              spellCheck={false}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="exec-dist-install-script">
+              {localize('com_tools_field_dist_install_script')}
+            </label>
+            <input
+              id="exec-dist-install-script"
+              className="config-input-mono config-input w-full font-mono text-xs"
+              value={draft.distInstallScript}
+              onChange={(e) => onSet('distInstallScript', e.target.value)}
+              placeholder="install.bat / install.ps1（缺省自动识别）"
+              spellCheck={false}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="exec-dist-uninstall-script">
+              {localize('com_tools_field_dist_uninstall_script')}
+            </label>
+            <input
+              id="exec-dist-uninstall-script"
+              className="config-input-mono config-input w-full font-mono text-xs"
+              value={draft.distUninstallScript}
+              onChange={(e) => onSet('distUninstallScript', e.target.value)}
+              placeholder="uninstall.bat / uninstall.ps1"
+              spellCheck={false}
+            />
+          </div>
         </div>
+      )}
+      <div>
+        <label className={labelClass} htmlFor="exec-timeout">
+          {localize('com_tools_field_timeout')}
+        </label>
+        <input
+          id="exec-timeout"
+          type="number"
+          min={1}
+          className="config-input w-full"
+          value={draft.timeout}
+          onChange={(e) => onSet('timeout', e.target.value)}
+        />
       </div>
 
-      {draft.execKind === 'desktop' && (
+      {(draft.execKind === 'desktop' || draft.execKind === 'plugin') && (
         <>
           <div>
             <label className={labelClass} htmlFor="exec-dist-repo">
@@ -756,12 +875,17 @@ function initDraft(tool: TerraVoxTool | null, existingNames: string[]): Draft {
       formJson: '',
       execKind: 'server',
       handler: '',
+      webUrl: '',
       distOwner: '',
       distRepo: '',
       distVersion: '',
       distSha256: '',
       distLauncher: '',
       distRuntime: '',
+      distHostLauncher: '',
+      distHostRootHints: '',
+      distInstallScript: '',
+      distUninstallScript: '',
       timeout: '60',
       renderer: 'json',
       resultConfigJson: '',
@@ -769,9 +893,15 @@ function initDraft(tool: TerraVoxTool | null, existingNames: string[]): Draft {
     };
   }
   const execution = (tool.execution ?? {}) as Record<string, unknown>;
-  const kind = execution.kind === 'desktop' ? 'desktop' : 'server';
+  const kind =
+    execution.kind === 'desktop' || execution.kind === 'plugin' || execution.kind === 'web'
+      ? execution.kind
+      : 'server';
   const distribution = (execution.distribution ?? {}) as Record<string, unknown>;
   const source = (distribution.source ?? {}) as Record<string, unknown>;
+  const hostHints = Array.isArray(distribution.host_root_hints)
+    ? (distribution.host_root_hints as unknown[]).map(String)
+    : [];
   const [prefix, ...rest] = tool.tool_id.split('.');
   return {
     prefix: existingNames.includes(prefix) ? prefix : '__custom__',
@@ -789,13 +919,20 @@ function initDraft(tool: TerraVoxTool | null, existingNames: string[]): Draft {
     formJson: toEditableJson(tool.form),
     execKind: kind,
     handler: typeof execution.handler === 'string' ? execution.handler : '',
+    webUrl: typeof execution.url === 'string' ? execution.url : '',
     distOwner: typeof source.owner === 'string' ? source.owner : '',
     distRepo: typeof source.repo === 'string' ? source.repo : '',
     distVersion: typeof distribution.version === 'string' ? distribution.version : '',
-    distSha256:
-      typeof distribution.package_sha256 === 'string' ? distribution.package_sha256 : '',
+    distSha256: typeof distribution.package_sha256 === 'string' ? distribution.package_sha256 : '',
     distLauncher: typeof distribution.launcher === 'string' ? distribution.launcher : '',
     distRuntime: typeof distribution.runtime === 'string' ? distribution.runtime : '',
+    distHostLauncher:
+      typeof distribution.host_launcher === 'string' ? distribution.host_launcher : '',
+    distHostRootHints: hostHints.join('\n'),
+    distInstallScript:
+      typeof distribution.install_script === 'string' ? distribution.install_script : '',
+    distUninstallScript:
+      typeof distribution.uninstall_script === 'string' ? distribution.uninstall_script : '',
     timeout: String(tool.timeout_seconds ?? 60),
     renderer: (tool.result?.renderer as string | undefined) ?? 'json',
     resultConfigJson: toEditableJson((tool.result as Record<string, unknown>)?.config),

@@ -1411,5 +1411,18 @@
   "com_usage_export": "Export CSV",
   "com_usage_export_failed": "Export failed.",
   "com_usage_export_truncated": "Export limited to the first {{count}} records.",
-  "com_usage_count": "{{count}} runs in total"
+  "com_usage_count": "{{count}} runs in total",
+  "com_tools_gitea_import_kind": "Tool type",
+  "com_tools_gitea_kind_desktop": "Desktop automation",
+  "com_tools_gitea_kind_plugin": "Extension plugin",
+  "com_tools_gitea_kind_web": "Web link",
+  "com_tools_field_web_url": "Tool URL",
+  "com_tools_gitea_web_url_hint": "Running a web tool opens this address in a new browser tab.",
+  "com_tools_gitea_url_hint_web": "Optional — picking a repo only prefills the name/description; the URL above is the tool itself.",
+  "com_tools_err_web_url": "Tool URL must start with http(s)://",
+  "com_tools_err_host_launcher": "Plugin requires the host executable path (relative to the host root)",
+  "com_tools_field_dist_host_launcher": "Host executable (relative to host root)",
+  "com_tools_field_dist_host_hints": "Host root candidates (one per line)",
+  "com_tools_field_dist_install_script": "Install script (optional)",
+  "com_tools_field_dist_uninstall_script": "Uninstall script (optional)"
 }

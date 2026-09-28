@@ -26,8 +26,12 @@ const suggestToolId = (owner: string, repo: string): string =>
   `${owner}.${repo}`.toLowerCase().replace(/[^a-z0-9_.-]/g, '-');
 
 /** 检查结果 → ToolEditDialog 预填（TerraVoxTool 形状；tool_id 创建模式仍可改）。
- *  导入与「待确认更新」共用：更新确认时治理字段以已批准 manifest 为准。 */
-export function buildPrefill(result: GiteaCheckResult): TerraVoxTool {
+ *  导入与「待确认更新」共用：更新确认时治理字段以已批准 manifest 为准。
+ *  kind=plugin（2.11.0）：execution 登记为插件包，补充 host_launcher 等字段。 */
+export function buildPrefill(
+  result: GiteaCheckResult,
+  kind: 'desktop' | 'plugin' = 'desktop',
+): TerraVoxTool {
   const toolJson = (result.tool_json ?? {}) as Record<string, JsonValue>;
   const version = str(toolJson.version) || tagToVersion(result.release?.tag ?? '');
   const distribution: { [key: string]: JsonValue } = {
@@ -45,6 +49,23 @@ export function buildPrefill(result: GiteaCheckResult): TerraVoxTool {
   if (str(toolJson.runtime)) {
     distribution.runtime = str(toolJson.runtime);
   }
+  if (kind === 'plugin') {
+    if (str(toolJson.host_launcher)) {
+      distribution.host_launcher = str(toolJson.host_launcher);
+    }
+    if (Array.isArray(toolJson.host_root_hints)) {
+      const hints = (toolJson.host_root_hints as unknown[]).map(String).filter(Boolean);
+      if (hints.length > 0) {
+        distribution.host_root_hints = hints;
+      }
+    }
+    if (str(toolJson.install_script)) {
+      distribution.install_script = str(toolJson.install_script);
+    }
+    if (str(toolJson.uninstall_script)) {
+      distribution.uninstall_script = str(toolJson.uninstall_script);
+    }
+  }
   const timeoutMinutes =
     typeof toolJson.timeout_minutes === 'number' ? toolJson.timeout_minutes : undefined;
   return {
@@ -58,9 +79,40 @@ export function buildPrefill(result: GiteaCheckResult): TerraVoxTool {
     enabled: true,
     parameters: toolJson.parameters as { [key: string]: JsonValue } | undefined,
     form: toolJson.form as { [key: string]: JsonValue } | undefined,
-    execution: { kind: 'desktop', distribution },
+    execution: { kind, distribution },
     result: toolJson.result as { [key: string]: JsonValue } | undefined,
     ...(timeoutMinutes && timeoutMinutes > 0 ? { timeout_seconds: timeoutMinutes * 60 } : {}),
+  };
+}
+
+/** web 型工具（2.11.0）：不走检查流程——地址必填，owner/repo 仅为可选预填。
+ *  display_name 回退链：repo 描述 → URL 主机名。 */
+export function buildWebPrefill(input: {
+  url: string;
+  owner?: string;
+  repo?: string;
+  repoDescription?: string;
+}): TerraVoxTool {
+  let host = '';
+  try {
+    host = new URL(input.url).hostname;
+  } catch {
+    host = input.url;
+  }
+  const toolId =
+    input.owner && input.repo
+      ? suggestToolId(input.owner, input.repo)
+      : `web.${host.replace(/[^a-z0-9_.-]/gi, '-').toLowerCase()}`;
+  return {
+    tool_id: toolId,
+    version: '1.0.0',
+    display_name: input.repo || host,
+    description: input.repoDescription || '',
+    expose: ['ui'],
+    allowed_groups: ['*'],
+    dangerous: false,
+    enabled: true,
+    execution: { kind: 'web', url: input.url },
   };
 }
 
@@ -127,6 +179,9 @@ export function GiteaImportDialog({
   const [owner, setOwner] = useState('');
   const [repo, setRepo] = useState('');
   const [checkResult, setCheckResult] = useState<GiteaCheckResult | null>(null);
+  const [importKind, setImportKind] = useState<'desktop' | 'plugin' | 'web'>('desktop');
+  const [webUrl, setWebUrl] = useState('');
+  const [webError, setWebError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -136,6 +191,9 @@ export function GiteaImportDialog({
       setOwner('');
       setRepo('');
       setCheckResult(null);
+      setImportKind('desktop');
+      setWebUrl('');
+      setWebError(null);
     }
   }, [open]);
 
@@ -193,6 +251,61 @@ export function GiteaImportDialog({
       >
         {step === 'select' ? (
           <div className="flex max-h-[55vh] flex-col gap-4 overflow-y-auto pe-1 text-sm">
+            <div
+              role="radiogroup"
+              aria-label={localize('com_tools_gitea_import_kind')}
+              className="flex gap-2"
+            >
+              {(
+                [
+                  ['desktop', 'com_tools_gitea_kind_desktop'],
+                  ['plugin', 'com_tools_gitea_kind_plugin'],
+                  ['web', 'com_tools_gitea_kind_web'],
+                ] as const
+              ).map(([value, labelKey]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={importKind === value}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs transition-colors',
+                    importKind === value
+                      ? 'border-(--cui-color-stroke-intense) bg-(--cui-color-background-active) font-medium text-(--cui-color-text-default)'
+                      : 'border-(--cui-color-stroke-default) text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover)',
+                  )}
+                  onClick={() => setImportKind(value)}
+                >
+                  {localize(labelKey)}
+                </button>
+              ))}
+            </div>
+            {importKind === 'web' && (
+              <div>
+                <label className={labelClass} htmlFor="web-tool-url">
+                  {localize('com_tools_field_web_url')}
+                </label>
+                <input
+                  id="web-tool-url"
+                  className="config-input-mono config-input w-full font-mono text-xs"
+                  spellCheck={false}
+                  value={webUrl}
+                  onChange={(e) => {
+                    setWebUrl(e.target.value);
+                    setWebError(null);
+                  }}
+                  placeholder="https://gis.example.local/app"
+                />
+                <p className="mt-1 text-xs text-(--cui-color-text-muted)">
+                  {localize('com_tools_gitea_web_url_hint')}
+                </p>
+                {webError && (
+                  <p role="alert" className="text-(--cui-color-text-danger)">
+                    {webError}
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <label className={labelClass} htmlFor="gitea-url">
                 {localize('com_tools_gitea_url')}
@@ -213,7 +326,11 @@ export function GiteaImportDialog({
                 placeholder={reposQuery.data?.base_url ?? 'https://gitea.gislife.local'}
               />
               <p className="mt-1 text-xs text-(--cui-color-text-muted)">
-                {localize('com_tools_gitea_url_hint')}
+                {localize(
+                  importKind === 'web'
+                    ? 'com_tools_gitea_url_hint_web'
+                    : 'com_tools_gitea_url_hint',
+                )}
               </p>
             </div>
 
@@ -344,25 +461,57 @@ export function GiteaImportDialog({
               onClick={onClose}
               disabled={checkMutation.isPending}
             />
-            {step === 'select' ? (
-              <Button
-                type="primary"
-                label={localize('com_tools_gitea_check')}
-                disabled={!owner || !repo || checkMutation.isPending}
-                onClick={() => checkMutation.mutate()}
-              />
-            ) : (
-              <Button
-                type="primary"
-                label={localize('com_tools_gitea_continue')}
-                disabled={hasError || checkMutation.isPending}
-                onClick={() => {
-                  if (checkResult) {
-                    onContinue(buildPrefill(checkResult));
-                  }
-                }}
-              />
-            )}
+            {(() => {
+              if (step === 'select' && importKind === 'web') {
+                return (
+                  <Button
+                    type="primary"
+                    label={localize('com_tools_gitea_continue')}
+                    disabled={checkMutation.isPending}
+                    onClick={() => {
+                      const trimmed = webUrl.trim();
+                      if (!trimmed.startsWith('http')) {
+                        setWebError(localize('com_tools_err_web_url'));
+                        return;
+                      }
+                      const repoMeta = ownerRepos.find((r) => r.name === repo);
+                      onContinue(
+                        buildWebPrefill({
+                          url: trimmed,
+                          owner: owner || undefined,
+                          repo: repo || undefined,
+                          repoDescription: repoMeta?.description,
+                        }),
+                      );
+                    }}
+                  />
+                );
+              }
+              if (step === 'select') {
+                return (
+                  <Button
+                    type="primary"
+                    label={localize('com_tools_gitea_check')}
+                    disabled={!owner || !repo || checkMutation.isPending}
+                    onClick={() => checkMutation.mutate()}
+                  />
+                );
+              }
+              return (
+                <Button
+                  type="primary"
+                  label={localize('com_tools_gitea_continue')}
+                  disabled={hasError || checkMutation.isPending}
+                  onClick={() => {
+                    if (checkResult) {
+                      onContinue(
+                        buildPrefill(checkResult, importKind === 'plugin' ? 'plugin' : 'desktop'),
+                      );
+                    }
+                  }}
+                />
+              );
+            })()}
           </div>
         </div>
       </Dialog.Content>
