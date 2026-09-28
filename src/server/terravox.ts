@@ -570,3 +570,143 @@ export const pendingUpdatesQueryOptions = queryOptions({
   staleTime: 60_000,
   refetchInterval: 60_000,
 });
+
+// ── 使用统计（run_reports，local-tool-plan §11 步骤 3）───────────────
+
+/** One direct-run usage row recorded by the toolbox (gateway `run_reports`). */
+export interface RunReport {
+  id: string;
+  user_sub: string;
+  username: string;
+  tool_id: string;
+  version: string | null;
+  status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
+  duration_ms: number | null;
+  /** Argument key names only — values are never recorded (privacy by contract). */
+  argument_keys: string[];
+  source: string;
+  created_at: string;
+}
+
+export interface RunReportFilters {
+  tool_id?: string;
+  user_sub?: string;
+  /** Inclusive ISO bounds built from local-day pickers. */
+  since?: string;
+  until?: string;
+}
+
+export const RUN_REPORTS_PAGE_SIZE = 50;
+/** Gateway caps a page at 200 — the export loop uses that maximum. */
+const RUN_REPORTS_FETCH_LIMIT = 200;
+/** Hard export ceiling: a runaway filter must not loop the gateway forever. */
+export const RUN_REPORTS_EXPORT_CAP = 10_000;
+
+const runReportSchema = z.object({
+  id: z.string(),
+  user_sub: z.string(),
+  username: z.string().optional().default(''),
+  tool_id: z.string(),
+  version: z.string().nullable().optional().default(null),
+  status: z.enum(['succeeded', 'failed', 'stopped', 'timeout']),
+  duration_ms: z.number().nullable().optional().default(null),
+  argument_keys: z.array(z.string()).optional().default([]),
+  source: z.string().optional().default(''),
+  created_at: z.string(),
+});
+
+const runReportFiltersSchema = z.object({
+  tool_id: z.string().optional(),
+  user_sub: z.string().optional(),
+  since: z.string().optional(),
+  until: z.string().optional(),
+});
+
+/** Serialize filters + paging into the gateway query string (empty values dropped). */
+export function buildRunReportsQuery(
+  filters: RunReportFilters,
+  limit: number,
+  offset: number,
+): string {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== '') {
+      params.set(key, value);
+    }
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+async function fetchRunReportsPage(
+  filters: RunReportFilters,
+  limit: number,
+  offset: number,
+): Promise<{ reports: RunReport[]; total: number }> {
+  const response = await apiFetch(
+    `/api/terravox/admin/runs/reports${buildRunReportsQuery(filters, limit, offset)}`,
+  );
+  if (!response.ok) {
+    await gatewayError(response);
+  }
+  const parsed = z
+    .object({ reports: z.array(runReportSchema), total: z.number() })
+    .safeParse(await response.json());
+  if (!parsed.success) {
+    throw new Error('Failed to parse run reports');
+  }
+  return parsed.data;
+}
+
+export const getRunReportsFn = createServerFn({ method: 'GET' })
+  .inputValidator(
+    runReportFiltersSchema.extend({
+      limit: z.number().int().min(1).max(RUN_REPORTS_FETCH_LIMIT).optional(),
+      offset: z.number().int().min(0).optional(),
+    }),
+  )
+  .handler(
+    async ({ data }): Promise<{ reports: RunReport[]; total: number }> =>
+      fetchRunReportsPage(data, data.limit ?? RUN_REPORTS_PAGE_SIZE, data.offset ?? 0),
+  );
+
+/** Paged table query — the Usage screen's main data source. */
+export const runReportsQueryOptions = (page: number, filters: RunReportFilters = {}) =>
+  queryOptions({
+    queryKey: ['terravox', 'runReports', page, filters] as const,
+    queryFn: () =>
+      getRunReportsFn({
+        data: {
+          ...filters,
+          limit: RUN_REPORTS_PAGE_SIZE,
+          offset: (Math.max(1, page) - 1) * RUN_REPORTS_PAGE_SIZE,
+        },
+      }),
+    staleTime: 60_000,
+  });
+
+/** Export path: page through the whole filter result (up to the cap) and hand
+ * the rows to the client, which builds the BOM'd UTF-8 CSV. */
+export const exportRunReportsFn = createServerFn({ method: 'POST' })
+  .inputValidator(runReportFiltersSchema)
+  .handler(async ({ data }): Promise<{ reports: RunReport[]; truncated: boolean }> => {
+    const reports: RunReport[] = [];
+    let offset = 0;
+    let total = Infinity;
+    for (;;) {
+      const page = await fetchRunReportsPage(data, RUN_REPORTS_FETCH_LIMIT, offset);
+      total = page.total;
+      reports.push(...page.reports);
+      if (reports.length >= RUN_REPORTS_EXPORT_CAP) {
+        reports.length = RUN_REPORTS_EXPORT_CAP;
+        return { reports, truncated: total > RUN_REPORTS_EXPORT_CAP };
+      }
+      if (reports.length >= total || page.reports.length < RUN_REPORTS_FETCH_LIMIT) {
+        return { reports, truncated: false };
+      }
+      offset += page.reports.length;
+    }
+  });
