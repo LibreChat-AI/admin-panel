@@ -73,8 +73,9 @@ export function UsagePage() {
     placeholderData: keepPreviousData,
   });
 
-  /** Tool dropdown options from the catalog (display_name + tool_id). */
-  const toolsQuery = useQuery(toolsQueryOptions());
+  /** Tool dropdown options from the catalog (display_name + tool_id).
+   * `toolsQueryOptions` is a static queryOptions object, not a factory. */
+  const toolsQuery = useQuery(toolsQueryOptions);
 
   const pageReports = useMemo<RunReport[]>(() => data?.reports ?? [], [data]);
   const total = data?.total ?? 0;

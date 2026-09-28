@@ -26,7 +26,10 @@ vi.mock('@/server', () => ({
     capturedQuery = { page, filters };
     return { queryKey: ['terravox', 'runReports', page, filters] };
   },
-  toolsQueryOptions: () => ({ queryKey: ['terravox', 'tools', 'all'] }),
+  /** Shape-faithful: the real export is a static queryOptions OBJECT, not a
+   * factory — a `() => ({...})` mock here once hid a production-only
+   * "toolsQueryOptions is not a function" crash (fixed 2026-09-28). */
+  toolsQueryOptions: { queryKey: ['terravox', 'tools', 'all'] },
 }));
 
 vi.mock('@tanstack/react-query', () => ({
