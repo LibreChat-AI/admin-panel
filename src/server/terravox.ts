@@ -39,6 +39,9 @@ export interface TerraVoxTool {
   expose?: string[];
   allowed_groups?: string[];
   dangerous?: boolean;
+  display_group?: string;
+  help_url?: string;
+  usage_stats?: boolean;
   parameters?: { [key: string]: JsonValue };
   form?: { [key: string]: JsonValue };
   execution?: { [key: string]: JsonValue };
@@ -577,7 +580,7 @@ export const pendingUpdatesQueryOptions = queryOptions({
 export interface RunReport {
   id: string;
   user_sub: string;
-  username: string;
+  username: string | null;
   tool_id: string;
   version: string | null;
   status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
@@ -709,4 +712,141 @@ export const exportRunReportsFn = createServerFn({ method: 'POST' })
       }
       offset += page.reports.length;
     }
+  });
+
+// ── Service registry (contracts 2.16.0) ─────────────────────────────
+
+/** 一个绑定 = 一幅地图（iserver_map）或一个数据源（iserver_data）。 */
+export interface TerraVoxService {
+  id: string;
+  name: string;
+  type: 'iserver_map' | 'iserver_data';
+  base_url: string;
+  service_path: string;
+  datasource: string;
+  allowed_groups: string[];
+  enabled: boolean;
+  status: 'available' | 'unavailable' | 'unprobed';
+  probe_detail: string;
+  probed_at: string | null;
+}
+
+export interface TerraVoxServiceInput {
+  name: string;
+  type: string;
+  base_url: string;
+  service_path: string;
+  datasource: string;
+  allowed_groups: string[];
+  enabled: boolean;
+}
+
+const serviceSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: z.string(),
+  base_url: z.string(),
+  service_path: z.string(),
+  datasource: z.string(),
+  allowed_groups: z.array(z.string()),
+  enabled: z.boolean(),
+  status: z.string(),
+  probe_detail: z.string(),
+  probed_at: z.string().nullable().optional().default(null),
+});
+
+export const getServicesFn = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<{ services: TerraVoxService[]; total: number }> => {
+    const response = await apiFetch('/api/terravox/admin/services');
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    const json = (await response.json()) as { services?: unknown[]; total?: number };
+    const parsed = z.array(serviceSchema).safeParse(json.services ?? []);
+    if (!parsed.success) {
+      throw new Error('Failed to parse service registry');
+    }
+    return { services: parsed.data as TerraVoxService[], total: json.total ?? parsed.data.length };
+  },
+);
+
+export const servicesQueryOptions = queryOptions({
+  queryKey: ['terravox', 'admin', 'services'],
+  queryFn: () => getServicesFn(),
+  staleTime: 15_000,
+});
+
+export const createServiceFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ service: z.record(z.string(), z.any()) }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch('/api/terravox/admin/services', {
+      method: 'POST',
+      body: JSON.stringify(data.service),
+    });
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    return response.json();
+  });
+
+export const updateServiceFn = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      serviceId: z.string(),
+      service: z.record(z.string(), z.any()),
+    }),
+  )
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/terravox/admin/services/${encodeURIComponent(data.serviceId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data.service),
+      },
+    );
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    return response.json();
+  });
+
+export const deleteServiceFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ serviceId: z.string() }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/terravox/admin/services/${encodeURIComponent(data.serviceId)}`,
+      { method: 'DELETE' },
+    );
+    if (!response.ok && response.status !== 204) {
+      await gatewayError(response);
+    }
+    return { ok: true };
+  });
+
+export const probeServiceFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ serviceId: z.string() }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/terravox/admin/services/${encodeURIComponent(data.serviceId)}/probe`,
+      { method: 'POST' },
+    );
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    return response.json();
+  });
+
+export const getServiceDatasourcesFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ serviceId: z.string() }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/terravox/admin/services/${encodeURIComponent(data.serviceId)}/datasources`,
+    );
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    return (await response.json()) as {
+      datasources: string[];
+      dataset_counts: Record<string, number>;
+    };
   });

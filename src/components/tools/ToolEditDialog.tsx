@@ -13,6 +13,9 @@ interface Draft {
   version: string;
   displayName: string;
   description: string;
+  displayGroup: string;
+  helpUrl: string;
+  usageStats: boolean;
   exposeUi: boolean;
   exposeMcp: boolean;
   allowedGroups: string[];
@@ -231,6 +234,7 @@ export function ToolEditDialog({
       expose: [draft.exposeUi && 'ui', draft.exposeMcp && 'mcp'].filter(Boolean),
       allowed_groups: draft.allowedGroups,
       dangerous: draft.dangerous,
+      usage_stats: draft.usageStats,
       enabled: draft.enabled,
       parameters: parameters.value ?? { type: 'object', properties: {} },
       execution: buildExecution(draft, distribution),
@@ -247,6 +251,12 @@ export function ToolEditDialog({
     }
     if (redact.length > 0) {
       manifest.audit = { redact_params: redact };
+    }
+    if (draft.displayGroup.trim()) {
+      manifest.display_group = draft.displayGroup.trim();
+    }
+    if (draft.helpUrl.trim()) {
+      manifest.help_url = draft.helpUrl.trim();
     }
     onSubmit(manifest);
   };
@@ -442,6 +452,33 @@ function BasicTab({
 
       <div className="grid grid-cols-2 gap-4">
         <div>
+          <label className={labelClass} htmlFor="tool-display-group">
+            {localize('com_tools_field_display_group')}
+          </label>
+          <input
+            id="tool-display-group"
+            className="config-input w-full"
+            value={draft.displayGroup}
+            placeholder={localize('com_tools_display_group_hint')}
+            onChange={(e) => onSet('displayGroup', e.target.value)}
+          />
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="tool-help-url">
+            {localize('com_tools_field_help_url')}
+          </label>
+          <input
+            id="tool-help-url"
+            className="config-input w-full"
+            value={draft.helpUrl}
+            placeholder="https://..."
+            onChange={(e) => onSet('helpUrl', e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4">
+        <div>
           <span className={labelClass}>{localize('com_tools_field_expose')}</span>
           <div className="flex gap-4">
             <label className="flex items-center gap-2">
@@ -479,6 +516,14 @@ function BasicTab({
                 checked={draft.dangerous}
                 onCheckedChange={(v) => onSet('dangerous', v)}
                 aria-label={localize('com_tools_field_dangerous')}
+              />
+            </span>
+            <span className="flex items-center justify-between gap-2">
+              <span>{localize('com_tools_field_usage_stats')}</span>
+              <Switch
+                checked={draft.usageStats}
+                onCheckedChange={(v) => onSet('usageStats', v)}
+                aria-label={localize('com_tools_field_usage_stats')}
               />
             </span>
           </div>
@@ -866,6 +911,9 @@ function initDraft(tool: TerraVoxTool | null, existingNames: string[]): Draft {
       version: '1.0.0',
       displayName: '',
       description: '',
+      displayGroup: '',
+      helpUrl: '',
+      usageStats: true,
       exposeUi: true,
       exposeMcp: false,
       allowedGroups: ['*'],
@@ -910,6 +958,9 @@ function initDraft(tool: TerraVoxTool | null, existingNames: string[]): Draft {
     version: tool.version ?? '1.0.0',
     displayName: tool.display_name ?? '',
     description: tool.description ?? '',
+    displayGroup: typeof tool.display_group === 'string' ? tool.display_group : '',
+    helpUrl: typeof tool.help_url === 'string' ? tool.help_url : '',
+    usageStats: tool.usage_stats !== false,
     exposeUi: (tool.expose ?? []).includes('ui'),
     exposeMcp: (tool.expose ?? []).includes('mcp'),
     allowedGroups: tool.allowed_groups ?? ['*'],
