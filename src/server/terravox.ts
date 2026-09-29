@@ -605,7 +605,7 @@ export const RUN_REPORTS_EXPORT_CAP = 10_000;
 const runReportSchema = z.object({
   id: z.string(),
   user_sub: z.string(),
-  username: z.string().optional().default(''),
+  username: z.string().nullable().optional().default(''),
   tool_id: z.string(),
   version: z.string().nullable().optional().default(null),
   status: z.enum(['succeeded', 'failed', 'stopped', 'timeout']),
