@@ -93,6 +93,7 @@ export function ToolEditDialog({
   tool,
   prefill,
   groups,
+  displayGroupOptions,
   handlers,
   saving,
   error,
@@ -294,6 +295,7 @@ export function ToolEditDialog({
               draft={draft}
               isEdit={isEdit}
               toolId={toolId}
+              displayGroupOptions={displayGroupOptions}
               groups={existingNames}
               onSet={set}
               onToggleGroup={toggleGroup}
@@ -344,6 +346,7 @@ function BasicTab({
   draft,
   isEdit,
   toolId,
+  displayGroupOptions,
   groups,
   onSet,
   onToggleGroup,
@@ -351,6 +354,7 @@ function BasicTab({
   draft: Draft;
   isEdit: boolean;
   toolId: string;
+  displayGroupOptions: string[];
   groups: string[];
   onSet: <K extends keyof Draft>(key: K, value: Draft[K]) => void;
   onToggleGroup: (name: string) => void;
@@ -458,10 +462,17 @@ function BasicTab({
           <input
             id="tool-display-group"
             className="config-input w-full"
+            list="tool-display-group-options"
             value={draft.displayGroup}
             placeholder={localize('com_tools_display_group_hint')}
             onChange={(e) => onSet('displayGroup', e.target.value)}
           />
+          {/* 展示分组：现有分组点选 + 可输入新组（自由文本，纯 UI 归类） */}
+          <datalist id="tool-display-group-options">
+            {displayGroupOptions.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
         </div>
         <div>
           <label className={labelClass} htmlFor="tool-help-url">

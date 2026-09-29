@@ -19,3 +19,6 @@ playwright-report/
 blob-report/
 playwright/.cache/
 playwright/.auth/
+
+# tsc incremental build artifact
+tsconfig.tsbuildinfo

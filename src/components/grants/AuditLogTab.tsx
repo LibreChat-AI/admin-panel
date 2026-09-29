@@ -37,7 +37,7 @@ import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
 import { cn } from '@/utils';
 
 const AUDIT_ACTIONS: readonly AuditAction[] = ['grant.assigned', 'grant.removed'] as const;
-const TARGET_TYPE_OPTIONS: readonly PrincipalType[] = [
+const TARGET_TYPE_OPTIONS = [
   PrincipalType.USER,
   PrincipalType.GROUP,
   PrincipalType.ROLE,

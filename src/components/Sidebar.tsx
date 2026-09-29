@@ -32,7 +32,7 @@ const navItems: t.NavItem[] = [
   },
   { labelKey: 'com_nav_grants', path: '/grants', icon: 'lock' },
   { labelKey: 'com_nav_tools', path: '/tools', icon: 'plug' },
-  { labelKey: 'com_nav_usage', path: '/usage', icon: 'bar-chart' },
+  // 使用统计并入 /tools?tab=usage（2.16.0），侧栏不再单列
   { labelKey: 'com_nav_services', path: '/services', icon: 'server' },
   { labelKey: 'com_nav_help', path: '/help', icon: 'question' },
 ];

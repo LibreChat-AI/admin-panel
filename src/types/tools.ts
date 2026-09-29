@@ -1,6 +1,6 @@
 import type { TerraVoxGroup, TerraVoxTool } from '@/server/terravox';
 
-export type ToolsTab = 'catalog' | 'groups';
+export type ToolsTab = 'catalog' | 'groups' | 'usage';
 
 export interface ToolsPageProps {
   activeTab: ToolsTab;
@@ -13,6 +13,8 @@ export interface ToolEditDialogProps {
   /** Gitea 导入预填：以创建模式打开但预填仓库解析出的字段（tool 仍为 null）。 */
   prefill?: TerraVoxTool | null;
   groups: TerraVoxGroup[];
+  /** 现有展示分组值聚合（datalist 点选；也可输入新组）。 */
+  displayGroupOptions: string[];
   handlers: string[];
   saving: boolean;
   error?: ToolEditError;

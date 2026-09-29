@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Icon } from '@clickhouse/click-ui';
 import type { PendingToolUpdate, TerraVoxTool } from '@/server';
@@ -52,7 +52,6 @@ export function ToolCatalogTab() {
   const handlersQuery = useQuery(handlersQueryOptions);
   const pendingQuery = useQuery(pendingUpdatesQueryOptions);
   const tools = toolsQuery.data?.tools ?? [];
-  const groupMeta = toolsQuery.data?.groups ?? [];
   const groups = groupsQuery.data ?? [];
 
   const invalidate = () => {
@@ -78,6 +77,24 @@ export function ToolCatalogTab() {
 
   const toggleMutation = useMutation({
     mutationFn: (vars: { toolId: string; enabled: boolean }) => toggleToolFn({ data: vars }),
+    onSuccess: () => {
+      setMutError(null);
+      invalidate();
+    },
+    onError: (error: Error) => setMutError(error.message),
+  });
+
+  /** 行内快速改展示分组：manifest 原样回写，仅增删 display_group（2.16.0）。 */
+  const moveGroupMutation = useMutation({
+    mutationFn: async (vars: { tool: TerraVoxTool; group: string }) => {
+      const manifest: Record<string, unknown> = { ...vars.tool };
+      if (vars.group) {
+        manifest.display_group = vars.group;
+      } else {
+        delete manifest.display_group;
+      }
+      await updateToolFn({ data: { toolId: vars.tool.tool_id, manifest } });
+    },
     onSuccess: () => {
       setMutError(null);
       invalidate();
@@ -138,11 +155,6 @@ export function ToolCatalogTab() {
     onError: (error: Error) => setMutError(error.message),
   });
 
-  const displayName = (ns: string): string => {
-    const meta = groupMeta.find((g) => g.name === ns);
-    return meta?.display_name || ns;
-  };
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const sorted = [...tools].sort((a, b) => a.tool_id.localeCompare(b.tool_id));
@@ -153,6 +165,34 @@ export function ToolCatalogTab() {
       [tool.tool_id, tool.display_name, tool.description].some((s) => s?.toLowerCase().includes(q)),
     );
   }, [tools, search]);
+
+  /** 展示分组值聚合（分组节标题 + 编辑弹窗 datalist）。 */
+  const displayGroups = useMemo(
+    () =>
+      [
+        ...new Set(
+          tools.flatMap((tool) => (tool.display_group?.trim() ? [tool.display_group.trim()] : [])),
+        ),
+      ].sort((a, b) => a.localeCompare(b)),
+    [tools],
+  );
+
+  /** 按展示分组分节（管理端分组维度统一为 display_group，2.16.0）；
+   *  未分组的沉底成节，节内按 tool_id 稳定排序。 */
+  const grouped = useMemo(() => {
+    const byGroup = new Map<string, TerraVoxTool[]>();
+    for (const tool of filtered) {
+      const group = tool.display_group?.trim() ?? '';
+      const list = byGroup.get(group) ?? [];
+      list.push(tool);
+      byGroup.set(group, list);
+    }
+    return [...byGroup.entries()].sort(([a], [b]) => {
+      if (a === '') return 1;
+      if (b === '') return -1;
+      return a.localeCompare(b);
+    });
+  }, [filtered]);
 
   /** 「手动创建」/ 清空预填：以空白创建模式打开编辑对话框 */
   const openCreate = () => {
@@ -218,22 +258,42 @@ export function ToolCatalogTab() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((tool) => (
-              <ToolRow
-                key={tool.tool_id}
-                tool={tool}
-                groupName={displayName(tool.tool_id.split('.')[0] ?? tool.tool_id)}
-                toggling={
-                  toggleMutation.isPending && toggleMutation.variables?.toolId === tool.tool_id
-                }
-                onToggle={(enabled) => toggleMutation.mutate({ toolId: tool.tool_id, enabled })}
-                onEdit={() => {
-                  setEditing(tool);
-                  setEditOpen(true);
-                }}
-                onCopy={() => void copyId(tool)}
-                onDelete={() => setDeleteTarget(tool)}
-              />
+            {grouped.map(([group, items]) => (
+              <Fragment key={group || '__ungrouped__'}>
+                <tr className="bg-(--cui-color-background-muted)">
+                  <td
+                    colSpan={6}
+                    className="px-4 py-2 text-xs font-semibold text-(--cui-color-text-muted)"
+                  >
+                    {group || localize('com_tools_group_ungrouped')}
+                    <span className="ms-2 font-normal">{items.length}</span>
+                  </td>
+                </tr>
+                {items.map((tool) => (
+                  <ToolRow
+                    key={tool.tool_id}
+                    tool={tool}
+                    groups={displayGroups}
+                    moving={
+                      moveGroupMutation.isPending &&
+                      moveGroupMutation.variables?.tool.tool_id === tool.tool_id
+                    }
+                    onMoveGroup={(group) => moveGroupMutation.mutate({ tool, group })}
+                    toggling={
+                      toggleMutation.isPending && toggleMutation.variables?.toolId === tool.tool_id
+                    }
+                    onToggle={(enabled) =>
+                      toggleMutation.mutate({ toolId: tool.tool_id, enabled })
+                    }
+                    onEdit={() => {
+                      setEditing(tool);
+                      setEditOpen(true);
+                    }}
+                    onCopy={() => void copyId(tool)}
+                    onDelete={() => setDeleteTarget(tool)}
+                  />
+                ))}
+              </Fragment>
             ))}
           </tbody>
         </table>
@@ -298,6 +358,7 @@ export function ToolCatalogTab() {
         tool={editing}
         prefill={prefill}
         groups={groups}
+        displayGroupOptions={displayGroups}
         handlers={handlersQuery.data ?? []}
         saving={saveMutation.isPending}
         error={
@@ -454,7 +515,9 @@ function PendingUpdatesPanel({
 
 function ToolRow({
   tool,
-  groupName,
+  groups,
+  moving,
+  onMoveGroup,
   toggling,
   onToggle,
   onEdit,
@@ -462,7 +525,9 @@ function ToolRow({
   onDelete,
 }: {
   tool: TerraVoxTool;
-  groupName: string;
+  groups: string[];
+  moving: boolean;
+  onMoveGroup: (group: string) => void;
   toggling: boolean;
   onToggle: (enabled: boolean) => void;
   onEdit: () => void;
@@ -471,6 +536,11 @@ function ToolRow({
 }) {
   const localize = useLocalize();
   const enabled = tool.enabled !== false;
+  const current = tool.display_group?.trim() ?? '';
+  const options =
+    current && !groups.includes(current)
+      ? [...groups, current].sort((a, b) => a.localeCompare(b))
+      : groups;
   return (
     <tr className="border-b border-(--cui-color-stroke-default) last:border-b-0">
       <td className="px-4 py-3">
@@ -485,7 +555,21 @@ function ToolRow({
         </div>
       </td>
       <td className="px-4 py-3">
-        <span className={TAG_STYLE}>{groupName}</span>
+        {/* 展示分组：下拉直改（= display_group），空值即未分组 */}
+        <select
+          className="max-w-44 rounded-md border border-(--cui-color-stroke-default) bg-transparent px-2 py-1 text-xs text-(--cui-color-text-default)"
+          value={current}
+          disabled={moving}
+          onChange={(e) => onMoveGroup(e.target.value)}
+          aria-label={localize('com_tools_col_group')}
+        >
+          <option value="">{localize('com_tools_group_ungrouped')}</option>
+          {options.map((group) => (
+            <option key={group} value={group}>
+              {group}
+            </option>
+          ))}
+        </select>
       </td>
       <td className="px-4 py-3 text-(--cui-color-text-muted)">{tool.version}</td>
       <td className="px-4 py-3">

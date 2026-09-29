@@ -1,10 +1,10 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { ToolsPage } from '@/components/tools';
 
-type Tab = 'catalog' | 'groups';
+type Tab = 'catalog' | 'groups' | 'usage';
 
 function isValidTab(value?: string): value is Tab {
-  return value === 'catalog' || value === 'groups';
+  return value === 'catalog' || value === 'groups' || value === 'usage';
 }
 
 export const Route = createFileRoute('/_app/tools')({

@@ -14,7 +14,7 @@ type QueuedPage = {
 
 let queued: QueuedPage[] = [];
 
-const apiFetchMock = vi.fn(async () => {
+const apiFetchMock = vi.fn(async (..._args: unknown[]) => {
   const page = queued.shift();
   if (!page) {
     throw new Error('unexpected apiFetch call');

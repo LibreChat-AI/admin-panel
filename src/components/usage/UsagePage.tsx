@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Badge, Button, DatePicker, Select, TextField } from '@clickhouse/click-ui';
 import type { RunReport, RunReportFilters } from '@/server';
 import {
@@ -44,6 +44,7 @@ const TOOL_ALL = '__all__';
  */
 export function UsagePage() {
   const localize = useLocalize();
+  const queryClient = useQueryClient();
   const [toolId, setToolId] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -227,7 +228,13 @@ export function UsagePage() {
           />
         )}
 
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="secondary"
+            iconLeft="refresh"
+            onClick={() => void queryClient.invalidateQueries({ queryKey: ['terravox'] })}
+            label={localize('com_usage_refresh')}
+          />
           <Button
             type="secondary"
             iconLeft="download"

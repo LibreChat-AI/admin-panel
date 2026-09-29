@@ -44,6 +44,9 @@ vi.mock('@tanstack/react-query', () => ({
       : { data: toolsState, isPending: false, isFetching: false, isError: false },
   ),
   keepPreviousData: Symbol('keepPreviousData'),
+  useQueryClient: () => ({
+    invalidateQueries: vi.fn(),
+  }),
 }));
 
 vi.mock('@/hooks', () => ({
