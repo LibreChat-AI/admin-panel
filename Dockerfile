@@ -4,10 +4,11 @@ WORKDIR /app
 
 # --- Install ---
 FROM base AS deps
+ENV BUN_CONFIG_MAX_HTTP_REQUESTS=12
 COPY package.json bun.lock .npmrc ./
 COPY patches/ patches/
 COPY tools/ tools/
-RUN bun install --frozen-lockfile
+RUN ok=0; for i in $(seq 1 12); do bun install --frozen-lockfile && ok=1 && break; echo "network retry $i"; done; [ "$ok" = 1 ]
 
 # --- Build ---
 FROM base AS build
@@ -20,11 +21,11 @@ RUN bun run build
 
 # --- Production dependencies (patches applied, then devDeps stripped) ---
 FROM base AS prod-deps
+ENV BUN_CONFIG_MAX_HTTP_REQUESTS=12
 COPY package.json bun.lock .npmrc ./
 COPY patches/ patches/
 COPY tools/ tools/
-RUN bun install --frozen-lockfile \
-    && bun install --frozen-lockfile --production
+RUN ok=0; for i in $(seq 1 12); do bun install --frozen-lockfile && bun install --frozen-lockfile --production && ok=1 && break; echo "network retry $i"; done; [ "$ok" = 1 ]
 
 # --- Runtime ---
 FROM base AS runtime
