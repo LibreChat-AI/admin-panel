@@ -55,6 +55,8 @@ export interface TerraVoxGroup {
   display_name: string;
   description: string;
   sort_order: number;
+  /** 该组工具的可见组（2.17.0）；空 = 不限（全员可见）。 */
+  allowed_groups: string[];
   tool_count: number;
   /** false = implicit namespace derived from existing tools (no DB row). */
   explicit: boolean;
@@ -149,6 +151,7 @@ const toolGroupSchema = z.object({
   display_name: z.string().optional().default(''),
   description: z.string().optional().default(''),
   sort_order: z.number().optional().default(0),
+  allowed_groups: z.array(z.string()).optional().default([]),
   tool_count: z.number().optional().default(0),
   explicit: z.boolean().optional().default(false),
 });
@@ -288,6 +291,7 @@ const groupInputSchema = z.object({
   display_name: z.string().optional(),
   description: z.string().optional(),
   sort_order: z.number().optional(),
+  allowed_groups: z.array(z.string()).optional(),
 });
 
 export const createToolGroupFn = createServerFn({ method: 'POST' })

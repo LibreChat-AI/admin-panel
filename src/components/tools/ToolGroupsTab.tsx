@@ -45,6 +45,7 @@ export function ToolGroupsTab() {
       display_name: string;
       description: string;
       sort_order: number;
+      allowed_groups: string[];
     }) =>
       input.name
         ? createToolGroupFn({ data: input })
@@ -54,6 +55,7 @@ export function ToolGroupsTab() {
               display_name: input.display_name,
               description: input.description,
               sort_order: input.sort_order,
+              allowed_groups: input.allowed_groups,
             },
           }),
     onSuccess: () => {
@@ -149,6 +151,15 @@ export function ToolGroupsTab() {
               <p className="line-clamp-2 text-xs text-(--cui-color-text-muted)">
                 {group.description}
               </p>
+            )}
+            {group.allowed_groups.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {group.allowed_groups.map((name) => (
+                  <span key={name} className={TAG_STYLE}>
+                    {name === '*' ? localize('com_tools_all_groups') : name}
+                  </span>
+                ))}
+              </div>
             )}
             <div className="mt-auto flex items-center gap-2 pt-1">
               <span className={TAG_STYLE}>

@@ -3,7 +3,6 @@ import { Button, Dialog, Switch, Tabs } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import type { TerraVoxTool } from '@/server';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 /** Editable draft of a manifest: scalars as strings, JSON blocks as text. */
 interface Draft {
@@ -120,14 +119,6 @@ export function ToolEditDialog({
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setDraft((prev) => ({ ...prev, [key]: value }));
-
-  const toggleGroup = (name: string) =>
-    setDraft((prev) => ({
-      ...prev,
-      allowedGroups: prev.allowedGroups.includes(name)
-        ? prev.allowedGroups.filter((g) => g !== name)
-        : [...prev.allowedGroups, name],
-    }));
 
   const toolId = isEdit ? tool.tool_id : buildToolId(draft);
 
@@ -298,7 +289,6 @@ export function ToolEditDialog({
               displayGroupOptions={displayGroupOptions}
               groups={existingNames}
               onSet={set}
-              onToggleGroup={toggleGroup}
             />
           )}
           {tab === 'params' && <ParamsTab draft={draft} onSet={set} />}
@@ -349,15 +339,14 @@ function BasicTab({
   displayGroupOptions,
   groups,
   onSet,
-  onToggleGroup,
 }: {
   draft: Draft;
   isEdit: boolean;
   toolId: string;
   displayGroupOptions: string[];
+  /** tool_id 命名空间前缀候选（与分组/权限无关）。 */
   groups: string[];
   onSet: <K extends keyof Draft>(key: K, value: Draft[K]) => void;
-  onToggleGroup: (name: string) => void;
 }) {
   const localize = useLocalize();
   const labelClass = 'mb-1 block font-medium text-(--cui-color-text-default)';
@@ -541,33 +530,6 @@ function BasicTab({
         </div>
       </div>
 
-      <div>
-        <span className={labelClass}>{localize('com_tools_field_allowed_groups')}</span>
-        <div className="flex flex-wrap gap-2">
-          {['*', ...groups].map((name) => {
-            const active = draft.allowedGroups.includes(name);
-            return (
-              <button
-                key={name}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onToggleGroup(name)}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-xs transition-colors',
-                  active
-                    ? 'border-(--cui-color-accent-primary) bg-(--cui-color-accent-primary-muted) text-(--cui-color-text-default)'
-                    : 'border-(--cui-color-stroke-default) text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover)',
-                )}
-              >
-                {name === '*' ? localize('com_tools_all_groups') : name}
-              </button>
-            );
-          })}
-        </div>
-        <p className="mt-1 text-xs text-(--cui-color-text-muted)">
-          {localize('com_tools_allowed_groups_hint')}
-        </p>
-      </div>
     </div>
   );
 }

@@ -47,6 +47,7 @@ export interface ToolGroupEditDialogProps {
     display_name: string;
     description: string;
     sort_order: number;
+    allowed_groups: string[];
   }) => void;
   onClose: () => void;
 }

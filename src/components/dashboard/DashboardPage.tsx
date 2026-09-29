@@ -39,12 +39,6 @@ const QUICK_LINKS: (t.NavItem & { descKey: string })[] = [
     descKey: 'com_dash_tools_desc',
   },
   {
-    labelKey: 'com_nav_usage',
-    path: '/usage',
-    icon: 'bar-chart',
-    descKey: 'com_dash_usage_desc',
-  },
-  {
     labelKey: 'com_nav_services',
     path: '/services',
     icon: 'server',

@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import type * as t from '@/types';
+import { cn } from '@/utils';
 import { FormDialog } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 
-const NAME_RE = /^[a-z0-9_-]+$/;
+/** 组名：1..64 个非空白字符（2.17.0 放宽，允许中文显示组名）。 */
+const NAME_RE = /^[^|\s]{1,64}$/;
+/** 常用 Nextcloud 角色组；"*"=全部。 */
+const KNOWN_GROUPS = ['team-manager', 'team-editor', 'team-viewer'];
 
-/** Create / edit a group's explicit metadata. Namespace (name) is only
- * settable at creation — it is the tool_id prefix tools live under. */
+/** Create / edit a display group (2.17.0): metadata + the group's visibility
+ * domains. Name is only settable at creation. An empty allowed_groups list
+ * means "no restriction" — every logged-in user sees the group's tools. */
 export function ToolGroupEditDialog({
   open,
   group,
@@ -21,6 +26,8 @@ export function ToolGroupEditDialog({
   const [displayName, setDisplayName] = useState('');
   const [description, setDescription] = useState('');
   const [sortOrder, setSortOrder] = useState('0');
+  const [allowedGroups, setAllowedGroups] = useState<string[]>([]);
+  const [customGroup, setCustomGroup] = useState('');
   const [clientError, setClientError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -29,9 +36,28 @@ export function ToolGroupEditDialog({
       setDisplayName(group?.display_name ?? '');
       setDescription(group?.description ?? '');
       setSortOrder(String(group?.sort_order ?? 0));
+      setAllowedGroups(group?.allowed_groups ?? []);
+      setCustomGroup('');
       setClientError(null);
     }
   }, [open, group]);
+
+  const chipNames = [
+    ...new Set(['*', ...KNOWN_GROUPS, ...allowedGroups.filter((g) => g !== '*')]),
+  ];
+
+  const toggleGroup = (name: string) =>
+    setAllowedGroups((prev) =>
+      prev.includes(name) ? prev.filter((g) => g !== name) : [...prev, name],
+    );
+
+  const addCustomGroup = () => {
+    const next = customGroup.trim();
+    if (next && !allowedGroups.includes(next)) {
+      setAllowedGroups((prev) => [...prev, next]);
+    }
+    setCustomGroup('');
+  };
 
   const handleSubmit = () => {
     setClientError(null);
@@ -44,6 +70,7 @@ export function ToolGroupEditDialog({
       display_name: displayName.trim(),
       description: description.trim(),
       sort_order: Number(sortOrder) || 0,
+      allowed_groups: allowedGroups,
     });
   };
 
@@ -74,7 +101,7 @@ export function ToolGroupEditDialog({
             </label>
             <input
               id="group-name"
-              className="config-input w-full font-mono"
+              className="config-input w-full"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="spatial"
@@ -119,6 +146,56 @@ export function ToolGroupEditDialog({
           />
           <p className="mt-1 text-xs text-(--cui-color-text-muted)">
             {localize('com_tools_group_sort_hint')}
+          </p>
+        </div>
+        <div>
+          <span className="mb-1 block font-medium">
+            {localize('com_tools_group_allowed_groups')}
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {chipNames.map((name) => {
+              const active = allowedGroups.includes(name);
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => toggleGroup(name)}
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-xs transition-colors',
+                    active
+                      ? 'border-(--cui-color-accent-primary) bg-(--cui-color-accent-primary-muted) text-(--cui-color-text-default)'
+                      : 'border-(--cui-color-stroke-default) text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover)',
+                  )}
+                >
+                  {name === '*' ? localize('com_tools_all_groups') : name}
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <input
+              className="config-input w-full max-w-48"
+              value={customGroup}
+              placeholder={localize('com_services_group_custom_placeholder')}
+              onChange={(e) => setCustomGroup(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addCustomGroup();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="shrink-0 rounded-lg border border-(--cui-color-stroke-default) px-3 py-1 text-xs transition-colors hover:bg-(--cui-color-background-hover)"
+              onClick={addCustomGroup}
+            >
+              {localize('com_services_group_add')}
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-(--cui-color-text-muted)">
+            {localize('com_tools_group_allowed_hint')}
           </p>
         </div>
       </div>

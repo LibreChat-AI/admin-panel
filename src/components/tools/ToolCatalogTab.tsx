@@ -166,15 +166,11 @@ export function ToolCatalogTab() {
     );
   }, [tools, search]);
 
-  /** 展示分组值聚合（分组节标题 + 编辑弹窗 datalist）。 */
+  /** 分组选项（2.17.0）：注册分组清单（网关已排序：显式按 sort_order，隐式沉底）。
+   *  未注册的 display_group 值由网关以隐式分组形态出现在同一清单里。 */
   const displayGroups = useMemo(
-    () =>
-      [
-        ...new Set(
-          tools.flatMap((tool) => (tool.display_group?.trim() ? [tool.display_group.trim()] : [])),
-        ),
-      ].sort((a, b) => a.localeCompare(b)),
-    [tools],
+    () => (groupsQuery.data ?? []).map((g) => g.name),
+    [groupsQuery.data],
   );
 
   /** 按展示分组分节（管理端分组维度统一为 display_group，2.16.0）；

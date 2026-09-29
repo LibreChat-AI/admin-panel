@@ -1296,8 +1296,6 @@
   "com_tools_field_flags": "开关",
   "com_tools_field_enabled": "启用",
   "com_tools_field_dangerous": "危险（执行需二次确认）",
-  "com_tools_field_allowed_groups": "允许使用的组",
-  "com_tools_allowed_groups_hint": "允许运行此工具的角色组。",
   "com_tools_field_parameters": "参数（JSON Schema）",
   "com_tools_parameters_hint": "必须是 type:object 的 JSON Schema，工具表单与 MCP inputSchema 由此推导。",
   "com_tools_field_form": "表单提示（JSON）",
@@ -1366,7 +1364,7 @@
   "com_tools_import_updated": "更新",
   "com_tools_import_skipped": "跳过",
   "com_tools_import_failed": "失败",
-  "com_tools_groups_hint": "分组即工具 ID 的命名空间（第一个点之前的前缀）；排序值控制工具箱侧栏的分组顺序。",
+  "com_tools_groups_hint": "工具分组（display_group）：既是工具编排方式，也是可见性域——注册分组后可配置该组工具对哪些用户组可见（语义同服务绑定）。排序值控制工具箱侧栏顺序。",
   "com_tools_group_add_button": "添加分组",
   "com_tools_groups_empty": "暂无分组。",
   "com_tools_group_implicit": "隐式",
@@ -1375,7 +1373,7 @@
   "com_tools_group_add_title": "添加分组",
   "com_tools_group_edit_title": "编辑分组",
   "com_tools_group_field_name": "命名空间",
-  "com_tools_group_name_hint": "小写字母、数字、- 和 _；带此前缀的工具归属该分组。",
+  "com_tools_group_name_hint": "1–64 个字符，不含空格与 |；可用中文。创建后不可改。",
   "com_tools_group_field_display_name": "显示名称",
   "com_tools_group_field_description": "描述",
   "com_tools_group_field_sort_order": "排序值",
@@ -1465,7 +1463,9 @@
   "com_dash_usage_desc": "查看工具使用统计与运行记录。",
   "com_dash_services_desc": "绑定地图/数据服务并管理可见性。",
   "com_tools_field_display_group": "展示分组",
-  "com_tools_display_group_hint": "留空 = 其他",
+  "com_tools_display_group_hint": "选择工具分组；分组配置的可见组决定该工具对哪些用户可见（分组页可管理）。",
   "com_tools_field_help_url": "帮助文档地址",
-  "com_tools_field_usage_stats": "使用统计"
+  "com_tools_field_usage_stats": "使用统计",
+  "com_tools_group_allowed_groups": "该组工具的可见组",
+  "com_tools_group_allowed_hint": "不选 = 不限（全员可见）。仅归入本分组的工具受其约束。"
 }

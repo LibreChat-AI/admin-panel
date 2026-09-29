@@ -1296,8 +1296,6 @@
   "com_tools_field_flags": "Switches",
   "com_tools_field_enabled": "Enabled",
   "com_tools_field_dangerous": "Dangerous (requires confirmation)",
-  "com_tools_field_allowed_groups": "Allowed groups",
-  "com_tools_allowed_groups_hint": "Which role groups may run this tool.",
   "com_tools_field_parameters": "Parameters (JSON Schema)",
   "com_tools_parameters_hint": "Must be a type:object JSON Schema; the tool form and the MCP inputSchema derive from it.",
   "com_tools_field_form": "Form hints (JSON)",
@@ -1366,7 +1364,7 @@
   "com_tools_import_updated": "Update",
   "com_tools_import_skipped": "Skip",
   "com_tools_import_failed": "Failed",
-  "com_tools_groups_hint": "Groups are tool_id namespaces (the prefix before the first dot); sort order controls toolbox sidebar ordering.",
+  "com_tools_groups_hint": "Tool groups (display_group): both the arrangement and the visibility domain — a registered group can restrict which user groups see its tools (same semantics as service bindings). Sort order controls the toolbox sidebar.",
   "com_tools_group_add_button": "Add group",
   "com_tools_groups_empty": "No groups yet.",
   "com_tools_group_implicit": "implicit",
@@ -1375,7 +1373,7 @@
   "com_tools_group_add_title": "Add group",
   "com_tools_group_edit_title": "Edit group",
   "com_tools_group_field_name": "Namespace",
-  "com_tools_group_name_hint": "Lowercase letters, digits, - and _; tools with this prefix belong to the group.",
+  "com_tools_group_name_hint": "1–64 characters, no spaces or '|'; Chinese allowed. Immutable after creation.",
   "com_tools_group_field_display_name": "Display name",
   "com_tools_group_field_description": "Description",
   "com_tools_group_field_sort_order": "Sort order",
@@ -1465,7 +1463,9 @@
   "com_dash_usage_desc": "Tool usage statistics and run history.",
   "com_dash_services_desc": "Bind map/data services and manage visibility.",
   "com_tools_field_display_group": "Display group",
-  "com_tools_display_group_hint": "Empty = Other",
+  "com_tools_display_group_hint": "Pick the tool's group; the group's allowed-groups setting decides who can see this tool (managed on the Groups tab).",
   "com_tools_field_help_url": "Help URL",
-  "com_tools_field_usage_stats": "Usage stats"
+  "com_tools_field_usage_stats": "Usage stats",
+  "com_tools_group_allowed_groups": "Allowed user groups for this group's tools",
+  "com_tools_group_allowed_hint": "None selected = no restriction (visible to everyone). Only tools assigned to this group are affected."
 }
