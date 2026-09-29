@@ -84,6 +84,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_access_create_role')}
         showClose
         onClose={resetAndClose}

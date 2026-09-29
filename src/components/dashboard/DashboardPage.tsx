@@ -32,6 +32,24 @@ const QUICK_LINKS: (t.NavItem & { descKey: string })[] = [
     icon: 'question',
     descKey: 'com_dash_help_desc',
   },
+  {
+    labelKey: 'com_nav_tools',
+    path: '/tools',
+    icon: 'plug',
+    descKey: 'com_dash_tools_desc',
+  },
+  {
+    labelKey: 'com_nav_usage',
+    path: '/usage',
+    icon: 'bar-chart',
+    descKey: 'com_dash_usage_desc',
+  },
+  {
+    labelKey: 'com_nav_services',
+    path: '/services',
+    icon: 'server',
+    descKey: 'com_dash_services_desc',
+  },
 ];
 
 export function DashboardPage() {

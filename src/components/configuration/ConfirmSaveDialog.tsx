@@ -29,6 +29,7 @@ export function ConfirmSaveDialog({
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_config_confirm_save_title')}
         showClose
         onClose={onCancel}

@@ -13,6 +13,9 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app/index'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
+import { Route as AppUsageRouteImport } from './routes/_app/usage'
+import { Route as AppToolsRouteImport } from './routes/_app/tools'
+import { Route as AppServicesRouteImport } from './routes/_app/services'
 import { Route as AppHelpRouteImport } from './routes/_app/help'
 import { Route as AppGrantsRouteImport } from './routes/_app/grants'
 import { Route as AppAccessRouteImport } from './routes/_app/access'
@@ -36,6 +39,21 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppUsersRoute = AppUsersRouteImport.update({
   id: '/users',
   path: '/users',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppUsageRoute = AppUsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppToolsRoute = AppToolsRouteImport.update({
+  id: '/tools',
+  path: '/tools',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppServicesRoute = AppServicesRouteImport.update({
+  id: '/services',
+  path: '/services',
   getParentRoute: () => AppRoute,
 } as any)
 const AppHelpRoute = AppHelpRouteImport.update({
@@ -70,6 +88,9 @@ export interface FileRoutesByFullPath {
   '/access': typeof AppAccessRoute
   '/grants': typeof AppGrantsRoute
   '/help': typeof AppHelpRoute
+  '/services': typeof AppServicesRoute
+  '/tools': typeof AppToolsRoute
+  '/usage': typeof AppUsageRoute
   '/users': typeof AppUsersRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/configuration/': typeof AppConfigurationIndexRoute
@@ -79,6 +100,9 @@ export interface FileRoutesByTo {
   '/access': typeof AppAccessRoute
   '/grants': typeof AppGrantsRoute
   '/help': typeof AppHelpRoute
+  '/services': typeof AppServicesRoute
+  '/tools': typeof AppToolsRoute
+  '/usage': typeof AppUsageRoute
   '/users': typeof AppUsersRoute
   '/': typeof AppIndexRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
@@ -91,6 +115,9 @@ export interface FileRoutesById {
   '/_app/access': typeof AppAccessRoute
   '/_app/grants': typeof AppGrantsRoute
   '/_app/help': typeof AppHelpRoute
+  '/_app/services': typeof AppServicesRoute
+  '/_app/tools': typeof AppToolsRoute
+  '/_app/usage': typeof AppUsageRoute
   '/_app/users': typeof AppUsersRoute
   '/_app/': typeof AppIndexRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
@@ -104,6 +131,9 @@ export interface FileRouteTypes {
     | '/access'
     | '/grants'
     | '/help'
+    | '/services'
+    | '/tools'
+    | '/usage'
     | '/users'
     | '/auth/openid/callback'
     | '/configuration/'
@@ -113,6 +143,9 @@ export interface FileRouteTypes {
     | '/access'
     | '/grants'
     | '/help'
+    | '/services'
+    | '/tools'
+    | '/usage'
     | '/users'
     | '/'
     | '/auth/openid/callback'
@@ -124,6 +157,9 @@ export interface FileRouteTypes {
     | '/_app/access'
     | '/_app/grants'
     | '/_app/help'
+    | '/_app/services'
+    | '/_app/tools'
+    | '/_app/usage'
     | '/_app/users'
     | '/_app/'
     | '/auth/openid/callback'
@@ -164,6 +200,27 @@ declare module '@tanstack/react-router' {
       path: '/users'
       fullPath: '/users'
       preLoaderRoute: typeof AppUsersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/usage': {
+      id: '/_app/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof AppUsageRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/tools': {
+      id: '/_app/tools'
+      path: '/tools'
+      fullPath: '/tools'
+      preLoaderRoute: typeof AppToolsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/services': {
+      id: '/_app/services'
+      path: '/services'
+      fullPath: '/services'
+      preLoaderRoute: typeof AppServicesRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/help': {
@@ -208,6 +265,9 @@ interface AppRouteChildren {
   AppAccessRoute: typeof AppAccessRoute
   AppGrantsRoute: typeof AppGrantsRoute
   AppHelpRoute: typeof AppHelpRoute
+  AppServicesRoute: typeof AppServicesRoute
+  AppToolsRoute: typeof AppToolsRoute
+  AppUsageRoute: typeof AppUsageRoute
   AppUsersRoute: typeof AppUsersRoute
   AppIndexRoute: typeof AppIndexRoute
   AppConfigurationIndexRoute: typeof AppConfigurationIndexRoute
@@ -217,6 +277,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppAccessRoute: AppAccessRoute,
   AppGrantsRoute: AppGrantsRoute,
   AppHelpRoute: AppHelpRoute,
+  AppServicesRoute: AppServicesRoute,
+  AppToolsRoute: AppToolsRoute,
+  AppUsageRoute: AppUsageRoute,
   AppUsersRoute: AppUsersRoute,
   AppIndexRoute: AppIndexRoute,
   AppConfigurationIndexRoute: AppConfigurationIndexRoute,

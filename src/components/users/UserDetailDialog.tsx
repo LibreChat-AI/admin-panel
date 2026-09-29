@@ -209,6 +209,7 @@ export function UserDetailDialog({
         }}
       >
         <Dialog.Content
+          onInteractOutside={(event) => event.preventDefault()}
           title={dialogTitle}
           showClose
           onClose={handleClose}

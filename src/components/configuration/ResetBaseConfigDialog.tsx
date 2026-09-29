@@ -19,6 +19,7 @@ export function ResetBaseConfigDialog({
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_config_reset_base_title')}
         showClose
         onClose={onCancel}

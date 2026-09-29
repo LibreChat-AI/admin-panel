@@ -199,6 +199,7 @@ export function ImportYamlDialog({
       }}
     >
       <Dialog.Content
+        onInteractOutside={(event) => event.preventDefault()}
         title={localize('com_config_import_yaml_title')}
         showClose
         onClose={handleClose}

@@ -86,6 +86,7 @@ export function ProfileIndicator({
         }}
       >
         <Dialog.Content
+          onInteractOutside={(event) => event.preventDefault()}
           title={localize('com_scope_cascade_title')}
           showClose
           onClose={handleClose}
