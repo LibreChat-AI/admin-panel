@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Icon } from '@clickhouse/click-ui';
 import type { PendingToolUpdate, TerraVoxTool } from '@/server';
@@ -31,6 +31,67 @@ const TAG_STYLE =
   'rounded-full border border-(--cui-color-stroke-default) px-2 py-0.5 text-xs text-(--cui-color-text-muted)';
 const DANGER_STYLE =
   'rounded-full bg-(--cui-color-background-warning-muted) px-2 py-0.5 text-xs text-(--cui-color-text-warning)';
+
+/** 行内分组单元格：input+datalist（与编辑对话框的展示分组控件同风格）。
+ *  草稿本地暂存，失焦/回车提交；外部值回流时同步草稿。 */
+function GroupCell({
+  value,
+  groups,
+  disabled,
+  label,
+  placeholder,
+  onCommit,
+}: {
+  value: string;
+  groups: string[];
+  disabled: boolean;
+  label: string;
+  placeholder: string;
+  onCommit: (group: string) => void;
+}) {
+  const listId = useId();
+  const [draft, setDraft] = useState(value);
+  const synced = useRef(value);
+  useEffect(() => {
+    if (synced.current !== value) {
+      synced.current = value;
+      setDraft(value);
+    }
+  }, [value]);
+  const commit = () => {
+    const next = draft.trim();
+    if (next === synced.current) {
+      return;
+    }
+    synced.current = next;
+    setDraft(next);
+    onCommit(next);
+  };
+  return (
+    <>
+      <input
+        className="config-input h-7 w-36 px-2 py-0.5 text-xs"
+        list={listId}
+        value={draft}
+        disabled={disabled}
+        aria-label={label}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.currentTarget.blur();
+          }
+        }}
+      />
+      <datalist id={listId}>
+        {groups.map((group) => (
+          <option key={group} value={group} />
+        ))}
+      </datalist>
+    </>
+  );
+}
 
 export function ToolCatalogTab() {
   const localize = useLocalize();
@@ -551,21 +612,16 @@ function ToolRow({
         </div>
       </td>
       <td className="px-4 py-3">
-        {/* 展示分组：下拉直改（= display_group），空值即未分组 */}
-        <select
-          className="max-w-44 rounded-md border border-(--cui-color-stroke-default) bg-transparent px-2 py-1 text-xs text-(--cui-color-text-default)"
+        {/* 展示分组：input+datalist 直改（= display_group），清空即未分组。
+            与编辑对话框同控件风格；失焦/回车提交，避免逐键 PATCH。 */}
+        <GroupCell
           value={current}
+          groups={options}
           disabled={moving}
-          onChange={(e) => onMoveGroup(e.target.value)}
-          aria-label={localize('com_tools_col_group')}
-        >
-          <option value="">{localize('com_tools_group_ungrouped')}</option>
-          {options.map((group) => (
-            <option key={group} value={group}>
-              {group}
-            </option>
-          ))}
-        </select>
+          label={localize('com_tools_col_group')}
+          placeholder={localize('com_tools_group_ungrouped')}
+          onCommit={(group) => onMoveGroup(group)}
+        />
       </td>
       <td className="px-4 py-3 text-(--cui-color-text-muted)">{tool.version}</td>
       <td className="px-4 py-3">
