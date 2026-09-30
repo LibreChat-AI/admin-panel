@@ -1470,5 +1470,19 @@
   "com_tools_group_allowed_hint": "不选 = 不限（全员可见）。仅归入本分组的工具受其约束。",
   "com_services_basemap": "底图",
   "com_services_basemap_set": "设为底图",
-  "com_services_basemap_clear": "取消底图"
+  "com_services_basemap_clear": "取消底图",
+  "com_services_field_map_name": "地图名（可选）",
+  "com_services_map_name_hint": "如 dom",
+  "com_services_map_name_hint2": "留空 = 服务级绑定（添加图层时列出服务内全部地图）；设为底图需指定地图。",
+  "com_services_discover": "自动探测",
+  "com_services_discover_title": "从 iServer 基地址探测服务",
+  "com_services_discover_base": "iServer 基地址",
+  "com_services_discover_base_hint": "如 http://192.168.5.28:8090（可带 /iserver）",
+  "com_services_discover_run": "探测",
+  "com_services_discover_bind": "绑定所选",
+  "com_services_discover_running": "探测中…",
+  "com_services_discover_maps_n": "{n} 幅地图",
+  "com_services_discover_ds_n": "{n} 个数据源",
+  "com_services_discover_unavailable": "不可用",
+  "com_services_discover_empty": "该基地址下没有可绑定的 REST 服务"
 }

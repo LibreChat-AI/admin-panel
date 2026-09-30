@@ -15,6 +15,7 @@ import { ConfirmDialog } from '@/components/access';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 import { ServiceEditDialog } from './ServiceEditDialog';
+import { DiscoverDialog } from './DiscoverDialog';
 
 const TAG =
   'rounded-full border border-(--cui-color-stroke-default) px-2 py-0.5 text-xs text-(--cui-color-text-muted)';
@@ -34,6 +35,7 @@ export function ServicesPage() {
   const [editing, setEditing] = useState<TerraVoxService | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TerraVoxService | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
+  const [discoverOpen, setDiscoverOpen] = useState(false);
 
   const servicesQuery = useQuery(servicesQueryOptions);
   const services = servicesQuery.data?.services ?? [];
@@ -48,6 +50,7 @@ export function ServicesPage() {
     baseUrl: string;
     servicePath: string;
     datasource: string;
+    mapName?: string;
     allowedGroups: string[];
     enabled: boolean;
   }) => ({
@@ -56,6 +59,7 @@ export function ServicesPage() {
     base_url: draft.baseUrl.trim(),
     service_path: draft.servicePath.trim(),
     datasource: draft.datasource.trim(),
+    map_name: (draft.mapName ?? '').trim(),
     allowed_groups: draft.allowedGroups,
     enabled: draft.enabled,
   });
@@ -119,6 +123,13 @@ export function ServicesPage() {
         >
           <Icon name="plus" size="sm" />
           {localize('com_services_add_button')}
+        </button>
+        <button
+          type="button"
+          onClick={() => setDiscoverOpen(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) px-3 py-1.5 text-sm font-medium text-(--cui-color-text-default) transition-colors hover:bg-(--cui-color-background-hover)"
+        >
+          {localize('com_services_discover')}
         </button>
       </div>
 
@@ -246,6 +257,17 @@ export function ServicesPage() {
           setEditOpen(false);
           setEditing(null);
         }}
+      />
+
+      <DiscoverDialog
+        open={discoverOpen}
+        onClose={() => setDiscoverOpen(false)}
+        onBound={() => {
+          setDiscoverOpen(false);
+          setMutError(null);
+          invalidate();
+        }}
+        onError={(message) => setMutError(message)}
       />
 
       <ConfirmDialog

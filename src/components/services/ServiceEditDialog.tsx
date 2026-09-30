@@ -13,6 +13,8 @@ interface Draft {
   baseUrl: string;
   servicePath: string;
   datasource: string;
+  /** 地图绑定可指定服务内具体地图（2.18.0）；空 = 服务级（添加图层时列出选择）。 */
+  mapName: string;
   allowedGroups: string[];
   enabled: boolean;
 }
@@ -158,6 +160,21 @@ export function ServiceEditDialog({ open, service, saving, error, onSubmit, onCl
           </span>
         </label>
 
+        {draft.type === 'iserver_map' && (
+          <label className="flex flex-col gap-1">
+            <span className={labelClass}>
+              {localize('com_services_field_map_name')}
+            </span>
+            <input
+              className="config-input w-full"
+              value={draft.mapName}
+              placeholder={localize('com_services_map_name_hint')}
+              onChange={(e) => set('mapName', e.target.value)}
+            />
+            <span className={hintClass}>{localize('com_services_map_name_hint2')}</span>
+          </label>
+        )}
+
         {draft.type === 'iserver_data' && (
           <label className="flex flex-col gap-1">
             <span className={labelClass}>{localize('com_services_field_datasource')}</span>
@@ -239,6 +256,7 @@ function toDraft(service: TerraVoxService | null): Draft {
       baseUrl: '',
       servicePath: '',
       datasource: '',
+      mapName: '',
       allowedGroups: ['*'],
       enabled: true,
     };
@@ -249,6 +267,7 @@ function toDraft(service: TerraVoxService | null): Draft {
     baseUrl: service.base_url,
     servicePath: service.service_path,
     datasource: service.datasource,
+    mapName: service.map_name ?? '',
     allowedGroups: service.allowed_groups,
     enabled: service.enabled,
   };

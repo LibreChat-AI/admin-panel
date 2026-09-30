@@ -732,6 +732,7 @@ export interface TerraVoxService {
   service_path: string;
   datasource: string;
   allowed_groups: string[];
+  map_name: string;
   is_basemap: boolean;
   enabled: boolean;
   status: 'available' | 'unavailable' | 'unprobed';
@@ -844,6 +845,35 @@ export const setServiceBasemapFn = createServerFn({ method: 'POST' })
       await gatewayError(response);
     }
     return response.json();
+  });
+
+/** 自动发现候选服务（2.18.0）：iServer 基地址 → REST 地图/数据服务清单。 */
+export interface DiscoveredService {
+  name: string;
+  type: 'iserver_map' | 'iserver_data' | 'unknown';
+  service_path: string;
+  status: 'available' | 'unavailable';
+  detail: string;
+  maps: string[];
+  datasources: string[];
+}
+
+export const discoverServicesFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ baseUrl: z.string().min(1).max(512) }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch('/api/terravox/admin/services/discover', {
+      method: 'POST',
+      body: JSON.stringify({ base_url: data.baseUrl.trim() }),
+    });
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    const json = (await response.json()) as {
+      base: string;
+      services: DiscoveredService[];
+      total: number;
+    };
+    return json;
   });
 
 export const probeServiceFn = createServerFn({ method: 'POST' })

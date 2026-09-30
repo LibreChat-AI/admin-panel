@@ -1470,5 +1470,19 @@
   "com_tools_group_allowed_hint": "None selected = no restriction (visible to everyone). Only tools assigned to this group are affected.",
   "com_services_basemap": "Basemap",
   "com_services_basemap_set": "Set as basemap",
-  "com_services_basemap_clear": "Unset basemap"
+  "com_services_basemap_clear": "Unset basemap",
+  "com_services_field_map_name": "Map name (optional)",
+  "com_services_map_name_hint": "e.g. dom",
+  "com_services_map_name_hint2": "Empty = service-level binding (maps listed when adding layers); required to set as basemap.",
+  "com_services_discover": "Discover",
+  "com_services_discover_title": "Discover services from an iServer base URL",
+  "com_services_discover_base": "iServer base URL",
+  "com_services_discover_base_hint": "e.g. http://192.168.5.28:8090 (with or without /iserver)",
+  "com_services_discover_run": "Discover",
+  "com_services_discover_bind": "Bind selected",
+  "com_services_discover_running": "Discovering…",
+  "com_services_discover_maps_n": "{n} maps",
+  "com_services_discover_ds_n": "{n} datasources",
+  "com_services_discover_unavailable": "unavailable",
+  "com_services_discover_empty": "No bindable REST services at this base URL"
 }
