@@ -1,12 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { TerraVoxService } from '@/server';
-import {
-  getBasemapsFn,
-  getServiceDatasourcesFn,
-  listServiceMapsFn,
-  replaceBasemapsFn,
-} from '@/server';
+import { getServiceDatasourcesFn } from '@/server';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 import { FormDialog } from '@/components/shared';
@@ -182,11 +177,6 @@ export function ServiceEditDialog({ open, service, saving, error, onSubmit, onCl
           </label>
         )}
 
-        {/* 底图设置（2.19.0）：编辑模式下列出服务内地图，多选保存为底图组 */}
-        {draft.type === 'iserver_map' && service?.id && (
-          <BasemapSection serviceId={service.id} />
-        )}
-
         {/* 数据服务：列出数据源，点选回填 */}
         {draft.type === 'iserver_data' && service?.id && (
           <DatasourceSection
@@ -289,124 +279,6 @@ function toDraft(service: TerraVoxService | null): Draft {
     allowedGroups: service.allowed_groups,
     enabled: service.enabled,
   };
-}
-
-/** 底图设置：列出服务内地图 → 多选 → 整组保存（支持影像+注记等多幅）。 */
-function BasemapSection({ serviceId }: { serviceId: string }) {
-  const localize = useLocalize();
-  const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState<string[]>([]);
-  const groupQuery = useQuery({
-    queryKey: ['terravox', 'admin', 'basemaps'],
-    queryFn: getBasemapsFn,
-    enabled: open,
-  });
-  const mapsQuery = useQuery({
-    queryKey: ['terravox', 'admin', 'service-maps', serviceId],
-    queryFn: () => listServiceMapsFn({ data: { serviceId } }),
-    enabled: open,
-  });
-
-  const save = useMutation({
-    mutationFn: () => {
-      const entries = mapsQuery.data?.maps ?? [];
-      const items = entries
-        .filter((m) => picked.includes(m.name))
-        .map((m) => {
-          const { baseUrl, servicePath } = splitServiceUrl(m.path || '');
-          return { base_url: baseUrl, service_path: servicePath, map_name: m.name };
-        });
-      return replaceBasemapsFn({ data: { basemaps: items } });
-    },
-  });
-
-  const current = groupQuery.data?.basemaps ?? [];
-  const currentKey = new Set(current.map((b) => b.map_name));
-  const effectivePicked = open && picked.length === 0 && !save.isSuccess
-    ? (mapsQuery.data?.maps ?? []).filter((m) => currentKey.has(m.name)).map((m) => m.name)
-    : picked;
-
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-(--cui-color-stroke-default) p-3">
-      <div className="flex items-center gap-2">
-        <span className={labelClass}>{localize('com_services_basemap_section')}</span>
-        <button
-          type="button"
-          className="rounded-lg border border-(--cui-color-stroke-default) px-2 py-1 text-xs text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover)"
-          onClick={() => setOpen((v) => !v)}
-        >
-          {open ? localize('com_ui_close') : localize('com_services_basemap_list_maps')}
-        </button>
-      </div>
-      <p className={hintClass}>
-        {current.length > 0
-          ? `${localize('com_services_basemap_current')}: ${current.map((b) => b.map_name).join('、')}`
-          : localize('com_services_basemap_none')}
-      </p>
-      {open && (
-        <>
-          {mapsQuery.isLoading && <p className={hintClass}>{localize('com_toolbox_cloud_loading')}</p>}
-          {mapsQuery.isError && (
-            <p className="text-(--cui-color-text-danger) text-xs">
-              {(mapsQuery.error as Error).message}
-            </p>
-          )}
-          <div className="flex flex-col gap-0.5">
-            {(mapsQuery.data?.maps ?? []).map((m) => {
-              const on = effectivePicked.includes(m.name);
-              return (
-                <button
-                  key={m.name}
-                  type="button"
-                  aria-pressed={on}
-                  className="flex items-center gap-2 rounded px-1 py-0.5 text-start text-xs hover:bg-(--cui-color-background-hover)"
-                  onClick={() =>
-                    setPicked((prev) =>
-                      prev.includes(m.name)
-                        ? prev.filter((x) => x !== m.name)
-                        : [...prev, m.name],
-                    )
-                  }
-                >
-                  <span
-                    className={cn(
-                      'flex size-3.5 shrink-0 items-center justify-center rounded border',
-                      on
-                        ? 'border-(--cui-color-accent-primary) bg-(--cui-color-accent-primary)'
-                        : 'border-(--cui-color-stroke-default)',
-                    )}
-                    aria-hidden="true"
-                  >
-                    {on && <span className="size-1.5 rounded-sm bg-white" />}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                </button>
-              );
-            })}
-          </div>
-          <button
-            type="button"
-            disabled={save.isPending || effectivePicked.length === 0}
-            onClick={() => save.mutate()}
-            className="self-start rounded-lg bg-(--cui-color-accent-primary) px-3 py-1.5 text-xs font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-          >
-            {localize('com_services_basemap_save')}
-            {effectivePicked.length > 0 ? ` (${effectivePicked.length})` : ''}
-          </button>
-          {save.isSuccess && (
-            <p className="text-xs text-(--cui-color-icon-success)">
-              {localize('com_services_basemap_saved')}
-            </p>
-          )}
-          {save.isError && (
-            <p className="text-(--cui-color-text-danger) text-xs">
-              {(save.error as Error).message}
-            </p>
-          )}
-        </>
-      )}
-    </div>
-  );
 }
 
 /** 数据服务：列出数据源清单，点选回填 datasource 输入框。 */

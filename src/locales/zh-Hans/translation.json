@@ -1493,5 +1493,11 @@
   "com_services_basemap_current": "当前底图组",
   "com_services_basemap_none": "未设置底图",
   "com_services_list_datasources": "列出数据源",
-  "com_services_basemap_saved": "底图组已保存"
+  "com_services_basemap_saved": "底图组已保存",
+  "com_services_tab_bindings": "服务绑定",
+  "com_services_tab_basemaps": "底图管理",
+  "com_basemaps_hint": "底图组按叠放顺序渲染在地图最底层（前者在下，可叠加影像与注记等多幅）。修改后刷新地图浏览器生效。",
+  "com_basemaps_current": "当前底图组",
+  "com_basemaps_order_hint": "（自下而上）",
+  "com_basemaps_pick": "从已绑定的地图服务选择地图"
 }

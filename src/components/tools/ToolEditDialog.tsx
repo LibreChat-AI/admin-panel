@@ -477,28 +477,8 @@ function BasicTab({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <span className={labelClass}>{localize('com_tools_field_expose')}</span>
-          <div className="flex gap-4">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={draft.exposeUi}
-                onChange={(e) => onSet('exposeUi', e.target.checked)}
-              />
-              ui
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={draft.exposeMcp}
-                onChange={(e) => onSet('exposeMcp', e.target.checked)}
-              />
-              mcp
-            </label>
-          </div>
-        </div>
+      {/* 暴露面（ui/mcp）已直编在工具清单行上（2.20.0），对话框不再重复 */}
+      <div className="grid grid-cols-1 gap-4">
         <div>
           <span className={labelClass}>{localize('com_tools_field_flags')}</span>
           <div className="flex flex-col gap-2">

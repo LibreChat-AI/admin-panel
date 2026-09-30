@@ -15,6 +15,7 @@ import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 import { ServiceEditDialog } from './ServiceEditDialog';
 import { DiscoverDialog } from './DiscoverDialog';
+import { BasemapsManager } from './BasemapsManager';
 
 const TAG =
   'rounded-full border border-(--cui-color-stroke-default) px-2 py-0.5 text-xs text-(--cui-color-text-muted)';
@@ -35,6 +36,8 @@ export function ServicesPage() {
   const [deleteTarget, setDeleteTarget] = useState<TerraVoxService | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
   const [discoverOpen, setDiscoverOpen] = useState(false);
+  /* 服务管理两个标签：服务绑定 / 底图管理（2.20.0） */
+  const [tab, setTab] = useState<'bindings' | 'basemaps'>('bindings');
 
   const servicesQuery = useQuery(servicesQueryOptions);
   const services = servicesQuery.data?.services ?? [];
@@ -100,6 +103,33 @@ export function ServicesPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      <div role="tablist" className="flex gap-1 border-b border-(--cui-color-stroke-default)">
+        {([
+          ['bindings', localize('com_services_tab_bindings')],
+          ['basemaps', localize('com_services_tab_basemaps')],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={cn(
+              '-mb-px rounded-t-lg border border-b-0 px-3 py-1.5 text-sm transition-colors',
+              tab === key
+                ? 'border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) font-medium text-(--cui-color-text-default)'
+                : 'border-transparent text-(--cui-color-text-muted) hover:text-(--cui-color-text-default)',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'basemaps' && <BasemapsManager />}
+
+      {tab === 'bindings' && (
+      <>
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-xs text-(--cui-color-text-muted)">{localize('com_services_hint')}</p>
         <button
@@ -255,6 +285,8 @@ export function ServicesPage() {
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
       />
+      </>
+      )}
     </div>
   );
 }

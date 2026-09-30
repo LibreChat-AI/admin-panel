@@ -1493,5 +1493,11 @@
   "com_services_basemap_current": "Current basemap group",
   "com_services_basemap_none": "No basemap configured",
   "com_services_list_datasources": "List datasources",
-  "com_services_basemap_saved": "Basemap group saved"
+  "com_services_basemap_saved": "Basemap group saved",
+  "com_services_tab_bindings": "Bindings",
+  "com_services_tab_basemaps": "Basemaps",
+  "com_basemaps_hint": "The basemap group renders at the bottom of the map in order (first = bottom; stack imagery and annotation layers). Refresh the map browser after changes.",
+  "com_basemaps_current": "Current basemap group",
+  "com_basemaps_order_hint": "(bottom to top)",
+  "com_basemaps_pick": "Pick maps from bound map services"
 }

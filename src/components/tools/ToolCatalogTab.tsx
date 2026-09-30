@@ -27,8 +27,6 @@ import { ToolEditDialog } from './ToolEditDialog';
 import { buildUpdateMerge, GiteaImportDialog } from './GiteaImportDialog';
 import { ImportToolsDialog } from './ImportToolsDialog';
 
-const TAG_STYLE =
-  'rounded-full border border-(--cui-color-stroke-default) px-2 py-0.5 text-xs text-(--cui-color-text-muted)';
 const DANGER_STYLE =
   'rounded-full bg-(--cui-color-background-warning-muted) px-2 py-0.5 text-xs text-(--cui-color-text-warning)';
 
@@ -138,6 +136,20 @@ export function ToolCatalogTab() {
 
   const toggleMutation = useMutation({
     mutationFn: (vars: { toolId: string; enabled: boolean }) => toggleToolFn({ data: vars }),
+    onSuccess: () => {
+      setMutError(null);
+      invalidate();
+    },
+    onError: (error: Error) => setMutError(error.message),
+  });
+
+  /** 行内快速改暴露面（2.20.0）：manifest 原样回写，仅设置 expose。 */
+  const exposeMutation = useMutation({
+    mutationFn: async (vars: { tool: TerraVoxTool; expose: string[] }) => {
+      const manifest: Record<string, unknown> = { ...vars.tool };
+      manifest.expose = vars.expose;
+      await updateToolFn({ data: { toolId: vars.tool.tool_id, manifest } });
+    },
     onSuccess: () => {
       setMutError(null);
       invalidate();
@@ -339,6 +351,12 @@ export function ToolCatalogTab() {
                     toggling={
                       toggleMutation.isPending && toggleMutation.variables?.toolId === tool.tool_id
                     }
+                    onExposeToggle={(tool, front) => {
+                      const expose = (tool.expose ?? []).includes(front)
+                        ? (tool.expose ?? []).filter((f) => f !== front)
+                        : [...(tool.expose ?? []), front];
+                      exposeMutation.mutate({ tool, expose });
+                    }}
                     onToggle={(enabled) =>
                       toggleMutation.mutate({ toolId: tool.tool_id, enabled })
                     }
@@ -577,6 +595,7 @@ function ToolRow({
   onMoveGroup,
   toggling,
   onToggle,
+  onExposeToggle,
   onEdit,
   onCopy,
   onDelete,
@@ -587,6 +606,7 @@ function ToolRow({
   onMoveGroup: (group: string) => void;
   toggling: boolean;
   onToggle: (enabled: boolean) => void;
+  onExposeToggle: (tool: TerraVoxTool, front: 'ui' | 'mcp') => void;
   onEdit: () => void;
   onCopy: () => void;
   onDelete: () => void;
@@ -625,12 +645,22 @@ function ToolRow({
       </td>
       <td className="px-4 py-3 text-(--cui-color-text-muted)">{tool.version}</td>
       <td className="px-4 py-3">
-        <div className="flex flex-wrap gap-1">
-          {(tool.expose ?? []).map((front) => (
-            <span key={front} className={TAG_STYLE}>
-              {front}
-            </span>
-          ))}
+        {/* 暴露面直编（2.20.0）：ui / mcp 两个开关直接落在行上 */}
+        <div className="flex items-center gap-3">
+          {(['ui', 'mcp'] as const).map((front) => {
+            const on = (tool.expose ?? []).includes(front);
+            return (
+              <label key={front} className="flex items-center gap-1.5 text-xs text-(--cui-color-text-muted)">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  disabled={moving}
+                  onChange={() => onExposeToggle(tool, front)}
+                />
+                {front}
+              </label>
+            );
+          })}
         </div>
       </td>
       <td className="px-4 py-3">

@@ -836,6 +836,7 @@ export const deleteServiceFn = createServerFn({ method: 'POST' })
 
 /** 底图组（2.19.0）：按叠放序的多幅底图，整组读写。 */
 export interface BasemapItem {
+  id?: string;
   base_url: string;
   service_path: string;
   map_name: string;

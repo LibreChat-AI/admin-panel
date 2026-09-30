@@ -48,6 +48,7 @@ export function DiscoverDialog({
   const [base, setBase] = useState('');
   const [pick, setPick] = useState<PickState>({ maps: new Set(), datasources: new Set() });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState('');
   const [clientError, setClientError] = useState<string | null>(null);
   const [progress, setProgress] = useState('');
 
@@ -59,6 +60,7 @@ export function DiscoverDialog({
       setExpanded(new Set());
       setClientError(null);
       setProgress('');
+      setFilter('');
     }
   }, [open]);
 
@@ -223,13 +225,24 @@ export function DiscoverDialog({
         )}
 
         {results.length > 0 && (
+          <input
+            type="search"
+            className="config-input w-full"
+            placeholder={localize('com_toolbox_map_search')}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        )}
+        {results.length > 0 && (
           <div className="flex max-h-[45vh] flex-col gap-1 overflow-y-auto rounded-lg border border-(--cui-color-stroke-default) p-2">
             {available.length === 0 && (
               <p className="p-3 text-center text-xs text-(--cui-color-text-muted)">
                 {localize('com_services_discover_empty')}
               </p>
             )}
-            {available.map((svc) => {
+            {available
+              .filter((svc) => svc.name.toLowerCase().includes(filter.trim().toLowerCase()))
+              .map((svc) => {
               const isMap = svc.type === 'iserver_map';
               const dsKeys = svc.datasources.map((ds) => `${svc.name}/${ds}`);
               const checked = isMap
