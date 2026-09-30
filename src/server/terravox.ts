@@ -584,6 +584,8 @@ export const pendingUpdatesQueryOptions = queryOptions({
 export interface RunReport {
   id: string;
   user_sub: string;
+  /** 工具显示名（2.19.0）；空 = 未记录，展示回退 tool_id。 */
+  tool_name?: string | null;
   username: string | null;
   /** 用户显示名（OIDC name claim，如中文名）；空 = 未提供，展示回退 username。 */
   user_name?: string | null;
@@ -614,6 +616,7 @@ export const RUN_REPORTS_EXPORT_CAP = 10_000;
 const runReportSchema = z.object({
   id: z.string(),
   user_sub: z.string(),
+  tool_name: z.string().nullable().optional().default(''),
   username: z.string().nullable().optional().default(''),
   user_name: z.string().nullable().optional().default(''),
   tool_id: z.string(),
@@ -733,7 +736,6 @@ export interface TerraVoxService {
   datasource: string;
   allowed_groups: string[];
   map_name: string;
-  is_basemap: boolean;
   enabled: boolean;
   status: 'available' | 'unavailable' | 'unprobed';
   probe_detail: string;
@@ -758,7 +760,6 @@ const serviceSchema = z.object({
   service_path: z.string(),
   datasource: z.string(),
   allowed_groups: z.array(z.string()),
-  is_basemap: z.boolean().optional().default(false),
   enabled: z.boolean(),
   status: z.string(),
   probe_detail: z.string(),
@@ -833,18 +834,55 @@ export const deleteServiceFn = createServerFn({ method: 'POST' })
     return { ok: true };
   });
 
-/** 设/取消地图浏览器默认底图（唯一，2.17.0）。 */
-export const setServiceBasemapFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ serviceId: z.string(), on: z.boolean() }))
+/** 底图组（2.19.0）：按叠放序的多幅底图，整组读写。 */
+export interface BasemapItem {
+  base_url: string;
+  service_path: string;
+  map_name: string;
+  url?: string;
+}
+
+export const getBasemapsFn = createServerFn({ method: 'GET' }).handler(async () => {
+  const response = await apiFetch('/api/terravox/admin/basemaps');
+  if (!response.ok) {
+    await gatewayError(response);
+  }
+  return (await response.json()) as { basemaps: BasemapItem[] };
+});
+
+export const replaceBasemapsFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ basemaps: z.array(z.object({
+    base_url: z.string(),
+    service_path: z.string(),
+    map_name: z.string().min(1),
+  })).max(10) }))
   .handler(async ({ data }) => {
-    const response = await apiFetch(
-      `/api/terravox/admin/services/${encodeURIComponent(data.serviceId)}/basemap?on=${data.on}`,
-      { method: 'POST' },
-    );
+    const response = await apiFetch('/api/terravox/admin/basemaps', {
+      method: 'PUT',
+      body: JSON.stringify({ basemaps: data.basemaps }),
+    });
     if (!response.ok) {
       await gatewayError(response);
     }
     return response.json();
+  });
+
+/** 列出地图服务绑定内的全部地图（管理端底图设置/编辑用）。 */
+export const listServiceMapsFn = createServerFn({ method: 'GET' })
+  .inputValidator(z.object({ serviceId: z.string() }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/terravox/admin/services/${encodeURIComponent(data.serviceId)}/maps`,
+    );
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    return (await response.json()) as {
+      id: string;
+      name: string;
+      maps: { name: string; path: string }[];
+      total: number;
+    };
   });
 
 /** 自动发现候选服务（2.18.0）：iServer 基地址 → REST 地图/数据服务清单。 */

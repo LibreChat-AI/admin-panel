@@ -1484,5 +1484,14 @@
   "com_services_discover_maps_n": "{n} 幅地图",
   "com_services_discover_ds_n": "{n} 个数据源",
   "com_services_discover_unavailable": "不可用",
-  "com_services_discover_empty": "该基地址下没有可绑定的 REST 服务"
+  "com_services_discover_empty": "该基地址下没有可绑定的 REST 服务",
+  "com_services_field_service_url": "服务地址",
+  "com_services_service_url_hint": "完整地址，如 http://192.168.5.28:8090/iserver/services/data-BeiJing/rest/data",
+  "com_services_basemap_section": "底图设置",
+  "com_services_basemap_list_maps": "列出地图",
+  "com_services_basemap_save": "保存为底图组",
+  "com_services_basemap_current": "当前底图组",
+  "com_services_basemap_none": "未设置底图",
+  "com_services_list_datasources": "列出数据源",
+  "com_services_basemap_saved": "底图组已保存"
 }

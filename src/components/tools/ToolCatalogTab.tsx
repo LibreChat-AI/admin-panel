@@ -15,7 +15,7 @@ import {
 } from '@/server';
 import {
   EmptyState,
-  KebabMenu,
+  InlineAction,
   LoadingState,
   SearchInput,
   StatusToggle,
@@ -642,17 +642,18 @@ function ToolRow({
         />
       </td>
       <td className="px-4 py-3 text-end">
-        <KebabMenu
-          items={[
-            { label: localize('com_ui_edit'), onClick: onEdit },
-            { label: localize('com_tools_copy_id'), onClick: onCopy },
-            {
-              label: localize('com_ui_delete'),
-              onClick: onDelete,
-              danger: true,
-            },
-          ]}
-        />
+        {/* 行内操作（2.19.0）：平铺按钮替代三点菜单 */}
+        <div className="flex items-center justify-end gap-1">
+          <InlineAction label={localize('com_ui_edit')} onClick={onEdit}>
+            ✎
+          </InlineAction>
+          <InlineAction label={localize('com_tools_copy_id')} onClick={onCopy}>
+            ⧉
+          </InlineAction>
+          <InlineAction label={localize('com_ui_delete')} danger onClick={onDelete}>
+            ✕
+          </InlineAction>
+        </div>
       </td>
     </tr>
   );

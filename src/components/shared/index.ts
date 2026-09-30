@@ -18,3 +18,4 @@ export { StatusToggle } from './StatusToggle';
 export { StickyActionBar } from './StickyActionBar';
 export { TrashButton } from './TrashButton';
 export { UserSearchInline } from './UserSearchInline';
+export { InlineAction } from './InlineAction';

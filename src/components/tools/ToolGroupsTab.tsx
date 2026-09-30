@@ -8,7 +8,7 @@ import {
   toolGroupsQueryOptions,
   updateToolGroupFn,
 } from '@/server';
-import { EmptyState, KebabMenu, LoadingState } from '@/components/shared';
+import { EmptyState, InlineAction, LoadingState } from '@/components/shared';
 import { ConfirmDialog } from '@/components/access';
 import { useLocalize } from '@/hooks';
 import { ToolGroupEditDialog } from './ToolGroupEditDialog';
@@ -130,22 +130,25 @@ export function ToolGroupsTab() {
                 </div>
                 <code className="text-xs text-(--cui-color-text-muted)">{group.name}</code>
               </div>
-              <KebabMenu
-                items={[
-                  {
-                    label: localize('com_ui_edit'),
-                    onClick: () => {
-                      setEditing(group);
-                      setEditOpen(true);
-                    },
-                  },
-                  {
-                    label: localize('com_ui_delete'),
-                    onClick: () => setDeleteTarget(group),
-                    danger: true,
-                  },
-                ]}
-              />
+              {/* 行内操作（2.19.0）：平铺按钮替代三点菜单 */}
+              <div className="flex shrink-0 items-center gap-1">
+                <InlineAction
+                  label={localize('com_ui_edit')}
+                  onClick={() => {
+                    setEditing(group);
+                    setEditOpen(true);
+                  }}
+                >
+                  ✎
+                </InlineAction>
+                <InlineAction
+                  label={localize('com_ui_delete')}
+                  danger
+                  onClick={() => setDeleteTarget(group)}
+                >
+                  ✕
+                </InlineAction>
+              </div>
             </div>
             {group.description && (
               <p className="line-clamp-2 text-xs text-(--cui-color-text-muted)">

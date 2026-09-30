@@ -6,11 +6,10 @@ import {
   createServiceFn,
   deleteServiceFn,
   probeServiceFn,
-  setServiceBasemapFn,
   servicesQueryOptions,
   updateServiceFn,
 } from '@/server';
-import { EmptyState, KebabMenu, LoadingState } from '@/components/shared';
+import { EmptyState, InlineAction, LoadingState } from '@/components/shared';
 import { ConfirmDialog } from '@/components/access';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
@@ -82,16 +81,6 @@ export function ServicesPage() {
 
   const probeMutation = useMutation({
     mutationFn: (serviceId: string) => probeServiceFn({ data: { serviceId } }),
-    onSuccess: () => {
-      setMutError(null);
-      invalidate();
-    },
-    onError: (error: Error) => setMutError(error.message),
-  });
-
-  const basemapMutation = useMutation({
-    mutationFn: (vars: { serviceId: string; on: boolean }) =>
-      setServiceBasemapFn({ data: vars }),
     onSuccess: () => {
       setMutError(null);
       invalidate();
@@ -180,9 +169,6 @@ export function ServicesPage() {
                       {localize(`com_services_status_${service.status}`)}
                     </span>
                   </span>
-                  {service.is_basemap && (
-                    <span className={TAG}>{localize('com_services_basemap')}</span>
-                  )}
                   {!service.enabled && (
                     <span className={TAG}>{localize('com_services_disabled')}</span>
                   )}
@@ -194,42 +180,31 @@ export function ServicesPage() {
                     : ''}
                 </code>
               </div>
-              <KebabMenu
-                items={[
-                  {
-                    label: localize('com_ui_edit'),
-                    onClick: () => {
-                      setEditing(service);
-                      setEditOpen(true);
-                    },
-                  },
-                  {
-                    label: localize('com_services_probe'),
-                    onClick: () => probeMutation.mutate(service.id),
-                  },
-                  ...(service.type === 'iserver_map'
-                    ? [
-                        {
-                          label: localize(
-                            service.is_basemap
-                              ? 'com_services_basemap_clear'
-                              : 'com_services_basemap_set',
-                          ),
-                          onClick: () =>
-                            basemapMutation.mutate({
-                              serviceId: service.id,
-                              on: !service.is_basemap,
-                            }),
-                        },
-                      ]
-                    : []),
-                  {
-                    label: localize('com_ui_delete'),
-                    onClick: () => setDeleteTarget(service),
-                    danger: true,
-                  },
-                ]}
-              />
+              {/* 行内操作（2.19.0）：平铺按钮替代三点菜单，减少操作成本 */}
+              <div className="flex shrink-0 items-center gap-1">
+                <InlineAction
+                  label={localize('com_ui_edit')}
+                  onClick={() => {
+                    setEditing(service);
+                    setEditOpen(true);
+                  }}
+                >
+                  ✎
+                </InlineAction>
+                <InlineAction
+                  label={localize('com_services_probe')}
+                  onClick={() => probeMutation.mutate(service.id)}
+                >
+                  ⟳
+                </InlineAction>
+                <InlineAction
+                  label={localize('com_ui_delete')}
+                  danger
+                  onClick={() => setDeleteTarget(service)}
+                >
+                  ✕
+                </InlineAction>
+              </div>
             </div>
             {service.probe_detail && (
               <p className="line-clamp-2 text-xs text-(--cui-color-text-muted)">

@@ -27,12 +27,6 @@ const QUICK_LINKS: (t.NavItem & { descKey: string })[] = [
     descKey: 'com_dash_grants_desc',
   },
   {
-    labelKey: 'com_nav_help',
-    path: '/help',
-    icon: 'question',
-    descKey: 'com_dash_help_desc',
-  },
-  {
     labelKey: 'com_nav_tools',
     path: '/tools',
     icon: 'plug',
@@ -43,6 +37,12 @@ const QUICK_LINKS: (t.NavItem & { descKey: string })[] = [
     path: '/services',
     icon: 'server',
     descKey: 'com_dash_services_desc',
+  },
+  {
+    labelKey: 'com_nav_help',
+    path: '/help',
+    icon: 'question',
+    descKey: 'com_dash_help_desc',
   },
 ];
 

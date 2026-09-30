@@ -49,6 +49,7 @@ export function buildRunReportsCsv(reports: RunReport[], header: string[]): stri
         report.created_at,
         report.user_name || report.username,
         report.user_sub,
+        report.tool_name || report.tool_id,
         report.tool_id,
         report.version ?? '',
         report.status,

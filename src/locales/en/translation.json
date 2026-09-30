@@ -1484,5 +1484,14 @@
   "com_services_discover_maps_n": "{n} maps",
   "com_services_discover_ds_n": "{n} datasources",
   "com_services_discover_unavailable": "unavailable",
-  "com_services_discover_empty": "No bindable REST services at this base URL"
+  "com_services_discover_empty": "No bindable REST services at this base URL",
+  "com_services_field_service_url": "Service URL",
+  "com_services_service_url_hint": "Full URL, e.g. http://192.168.5.28:8090/iserver/services/data-BeiJing/rest/data",
+  "com_services_basemap_section": "Basemap settings",
+  "com_services_basemap_list_maps": "List maps",
+  "com_services_basemap_save": "Save as basemap group",
+  "com_services_basemap_current": "Current basemap group",
+  "com_services_basemap_none": "No basemap configured",
+  "com_services_list_datasources": "List datasources",
+  "com_services_basemap_saved": "Basemap group saved"
 }

@@ -72,7 +72,9 @@ vi.mock('@/components/access', () => ({
 
 vi.mock('@/components/shared', () => ({
   EmptyState: ({ message }: { message?: string }) => <div>{message}</div>,
-  KebabMenu: () => <div />,
+  InlineAction: ({ label, onClick }: { label: string; onClick?: () => void }) => (
+    <button aria-label={label} onClick={onClick} />
+  ),
   LoadingState: () => <div>loading</div>,
   SearchInput: () => <input aria-label="search" />,
   StatusToggle: () => <div />,

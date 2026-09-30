@@ -360,8 +360,17 @@ function UsageTableRow({
           )}
         </div>
       </td>
-      <td className="px-4 py-3 font-mono text-xs text-(--cui-color-text-default)">
-        {report.tool_id}
+      <td className="px-4 py-3">
+        <div className="flex flex-col">
+          <span className="text-(--cui-color-text-default)">
+            {report.tool_name || report.tool_id}
+          </span>
+          {report.tool_name && (
+            <span aria-hidden="true" className="font-mono text-[10px] text-(--cui-color-text-muted)">
+              {report.tool_id}
+            </span>
+          )}
+        </div>
       </td>
       <td className="px-4 py-3 text-(--cui-color-text-default)">{report.version ?? '—'}</td>
       <td className="px-4 py-3">

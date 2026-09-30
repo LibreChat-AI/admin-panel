@@ -60,7 +60,7 @@ describe('buildRunReportsCsv', () => {
     const lines = csv.slice(1).trimEnd().split('\r\n');
     expect(lines).toHaveLength(2);
     expect(lines[1]).toBe(
-      '2026-09-28T10:00:00Z,wangjianbo,user-wang,wangjianbo.toolsdemo,,succeeded,,text;count,toolbox,rep1',
+      '2026-09-28T10:00:00Z,wangjianbo,user-wang,wangjianbo.toolsdemo,wangjianbo.toolsdemo,,succeeded,,text;count,toolbox,rep1',
     );
   });
 

@@ -217,7 +217,7 @@ describe('UsagePage', () => {
     expect(filename).toMatch(/^tool-usage-\d{4}-\d{2}-\d{2}\.csv$/);
     expect(csv.charCodeAt(0)).toBe(0xfeff);
     expect(csv).toContain('com_usage_col_time');
-    expect(csv).toContain('wangjianbo,user-wang,wangjianbo.toolsdemo,1.0.0,failed');
+    expect(csv).toContain('wangjianbo,user-wang,wangjianbo.toolsdemo,wangjianbo.toolsdemo,1.0.0,failed');
   });
 
   it('export failure announces instead of dying silently', async () => {
