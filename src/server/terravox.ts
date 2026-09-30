@@ -585,6 +585,8 @@ export interface RunReport {
   id: string;
   user_sub: string;
   username: string | null;
+  /** 用户显示名（OIDC name claim，如中文名）；空 = 未提供，展示回退 username。 */
+  user_name?: string | null;
   tool_id: string;
   version: string | null;
   status: 'succeeded' | 'failed' | 'stopped' | 'timeout';
@@ -613,6 +615,7 @@ const runReportSchema = z.object({
   id: z.string(),
   user_sub: z.string(),
   username: z.string().nullable().optional().default(''),
+  user_name: z.string().nullable().optional().default(''),
   tool_id: z.string(),
   version: z.string().nullable().optional().default(null),
   status: z.enum(['succeeded', 'failed', 'stopped', 'timeout']),

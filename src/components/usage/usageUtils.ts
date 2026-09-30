@@ -47,7 +47,7 @@ export function buildRunReportsCsv(reports: RunReport[], header: string[]): stri
     lines.push(
       escape([
         report.created_at,
-        report.username,
+        report.user_name || report.username,
         report.user_sub,
         report.tool_id,
         report.version ?? '',

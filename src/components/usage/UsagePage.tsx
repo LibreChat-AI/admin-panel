@@ -351,9 +351,9 @@ function UsageTableRow({
       <td className="px-4 py-3">
         <div className="flex flex-col">
           <span className="font-medium text-(--cui-color-text-default)">
-            {report.username || report.user_sub}
+            {report.user_name || report.username || report.user_sub}
           </span>
-          {report.username && (
+          {(report.user_name || report.username) && (
             <span aria-hidden="true" className="text-[10px] text-(--cui-color-text-muted)">
               {report.user_sub}
             </span>
