@@ -732,6 +732,7 @@ export interface TerraVoxService {
   service_path: string;
   datasource: string;
   allowed_groups: string[];
+  is_basemap: boolean;
   enabled: boolean;
   status: 'available' | 'unavailable' | 'unprobed';
   probe_detail: string;
@@ -756,6 +757,7 @@ const serviceSchema = z.object({
   service_path: z.string(),
   datasource: z.string(),
   allowed_groups: z.array(z.string()),
+  is_basemap: z.boolean().optional().default(false),
   enabled: z.boolean(),
   status: z.string(),
   probe_detail: z.string(),
@@ -828,6 +830,20 @@ export const deleteServiceFn = createServerFn({ method: 'POST' })
       await gatewayError(response);
     }
     return { ok: true };
+  });
+
+/** 设/取消地图浏览器默认底图（唯一，2.17.0）。 */
+export const setServiceBasemapFn = createServerFn({ method: 'POST' })
+  .inputValidator(z.object({ serviceId: z.string(), on: z.boolean() }))
+  .handler(async ({ data }) => {
+    const response = await apiFetch(
+      `/api/terravox/admin/services/${encodeURIComponent(data.serviceId)}/basemap?on=${data.on}`,
+      { method: 'POST' },
+    );
+    if (!response.ok) {
+      await gatewayError(response);
+    }
+    return response.json();
   });
 
 export const probeServiceFn = createServerFn({ method: 'POST' })

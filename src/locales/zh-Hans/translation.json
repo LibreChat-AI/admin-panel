@@ -1467,5 +1467,8 @@
   "com_tools_field_help_url": "帮助文档地址",
   "com_tools_field_usage_stats": "使用统计",
   "com_tools_group_allowed_groups": "该组工具的可见组",
-  "com_tools_group_allowed_hint": "不选 = 不限（全员可见）。仅归入本分组的工具受其约束。"
+  "com_tools_group_allowed_hint": "不选 = 不限（全员可见）。仅归入本分组的工具受其约束。",
+  "com_services_basemap": "底图",
+  "com_services_basemap_set": "设为底图",
+  "com_services_basemap_clear": "取消底图"
 }

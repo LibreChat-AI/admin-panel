@@ -1467,5 +1467,8 @@
   "com_tools_field_help_url": "Help URL",
   "com_tools_field_usage_stats": "Usage stats",
   "com_tools_group_allowed_groups": "Allowed user groups for this group's tools",
-  "com_tools_group_allowed_hint": "None selected = no restriction (visible to everyone). Only tools assigned to this group are affected."
+  "com_tools_group_allowed_hint": "None selected = no restriction (visible to everyone). Only tools assigned to this group are affected.",
+  "com_services_basemap": "Basemap",
+  "com_services_basemap_set": "Set as basemap",
+  "com_services_basemap_clear": "Unset basemap"
 }

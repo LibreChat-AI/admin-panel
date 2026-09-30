@@ -6,6 +6,7 @@ import {
   createServiceFn,
   deleteServiceFn,
   probeServiceFn,
+  setServiceBasemapFn,
   servicesQueryOptions,
   updateServiceFn,
 } from '@/server';
@@ -77,6 +78,16 @@ export function ServicesPage() {
 
   const probeMutation = useMutation({
     mutationFn: (serviceId: string) => probeServiceFn({ data: { serviceId } }),
+    onSuccess: () => {
+      setMutError(null);
+      invalidate();
+    },
+    onError: (error: Error) => setMutError(error.message),
+  });
+
+  const basemapMutation = useMutation({
+    mutationFn: (vars: { serviceId: string; on: boolean }) =>
+      setServiceBasemapFn({ data: vars }),
     onSuccess: () => {
       setMutError(null);
       invalidate();
@@ -158,6 +169,9 @@ export function ServicesPage() {
                       {localize(`com_services_status_${service.status}`)}
                     </span>
                   </span>
+                  {service.is_basemap && (
+                    <span className={TAG}>{localize('com_services_basemap')}</span>
+                  )}
                   {!service.enabled && (
                     <span className={TAG}>{localize('com_services_disabled')}</span>
                   )}
@@ -182,6 +196,22 @@ export function ServicesPage() {
                     label: localize('com_services_probe'),
                     onClick: () => probeMutation.mutate(service.id),
                   },
+                  ...(service.type === 'iserver_map'
+                    ? [
+                        {
+                          label: localize(
+                            service.is_basemap
+                              ? 'com_services_basemap_clear'
+                              : 'com_services_basemap_set',
+                          ),
+                          onClick: () =>
+                            basemapMutation.mutate({
+                              serviceId: service.id,
+                              on: !service.is_basemap,
+                            }),
+                        },
+                      ]
+                    : []),
                   {
                     label: localize('com_ui_delete'),
                     onClick: () => setDeleteTarget(service),
