@@ -92,8 +92,14 @@ export function DiscoverDialog({
     mutationFn: async () => {
       const targets: { name: string; type: string; service_path: string; datasource: string }[] =
         [];
+      /* 只绑当前搜索过滤下可见的勾选项（所见即所绑）：搜索框只过滤显示曾
+       * 导致过滤后点绑定把被隐藏的预勾选服务一并绑入（2026-09-30 误绑事故）。 */
+      const needle = filter.trim().toLowerCase();
       for (const svc of results) {
         if (svc.status !== 'available') {
+          continue;
+        }
+        if (needle && !svc.name.toLowerCase().includes(needle)) {
           continue;
         }
         if (svc.type === 'iserver_map' && pick.maps.has(svc.name)) {
