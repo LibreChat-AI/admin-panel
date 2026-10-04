@@ -4,6 +4,7 @@ import type * as t from '@/types';
 import type { TerraVoxTool } from '@/server';
 import { useLocalize } from '@/hooks';
 import { SelectField } from '../configuration/fields/SelectField';
+import { ParamBuilder } from './ParamBuilder';
 
 /** Editable draft of a manifest: scalars as strings, JSON blocks as text. */
 interface Draft {
@@ -524,42 +525,15 @@ function ParamsTab({
   draft: Draft;
   onSet: <K extends keyof Draft>(key: K, value: Draft[K]) => void;
 }) {
-  const localize = useLocalize();
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <label className="mb-1 block font-medium" htmlFor="tool-parameters">
-          {localize('com_tools_field_parameters')}
-        </label>
-        <textarea
-          id="tool-parameters"
-          className="config-input-mono config-input min-h-40 w-full resize-y font-mono text-xs"
-          spellCheck={false}
-          value={draft.parametersJson}
-          onChange={(e) => onSet('parametersJson', e.target.value)}
-          placeholder='{ "type": "object", "properties": {} }'
-        />
-        <p className="mt-1 text-xs text-(--cui-color-text-muted)">
-          {localize('com_tools_parameters_hint')}
-        </p>
-      </div>
-      <div>
-        <label className="mb-1 block font-medium" htmlFor="tool-form">
-          {localize('com_tools_field_form')}
-        </label>
-        <textarea
-          id="tool-form"
-          className="config-input-mono config-input min-h-40 w-full resize-y font-mono text-xs"
-          spellCheck={false}
-          value={draft.formJson}
-          onChange={(e) => onSet('formJson', e.target.value)}
-          placeholder='{ "order": [], "fields": {} }'
-        />
-        <p className="mt-1 text-xs text-(--cui-color-text-muted)">
-          {localize('com_tools_form_hint')}
-        </p>
-      </div>
-    </div>
+    <ParamBuilder
+      parametersJson={draft.parametersJson}
+      formJson={draft.formJson}
+      onChange={(parametersJson, formJson) => {
+        onSet('parametersJson', parametersJson);
+        onSet('formJson', formJson);
+      }}
+    />
   );
 }
 
