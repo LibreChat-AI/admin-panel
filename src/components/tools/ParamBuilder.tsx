@@ -373,6 +373,7 @@ export function ParamBuilder({
           <Button
             variant="secondary"
             size="sm"
+            label={localize('com_param_add')}
             disabled={mode !== 'visual' || jsonError !== null}
             onClick={() => {
               /* portal 进所属弹窗根（body 无主题变量且被遮罩挡住）；坐标按
@@ -399,7 +400,7 @@ export function ParamBuilder({
             }}
           >
             <span id="param-add-anchor" className="inline-block">
-              {localize('com_param_add')} ▾
+              ▾
             </span>
           </Button>
           {addOpen &&
