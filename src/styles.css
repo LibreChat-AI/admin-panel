@@ -910,3 +910,9 @@ body > div:has(+ .modal-frost) {
   background-color: var(--cui-color-feedback-user-bg);
   color: var(--cui-color-feedback-user-fg);
 }
+
+/* click-ui Select 弹层列表高度限制：长列表（如参数类型预设）在弹窗内不越界 */
+[data-radix-popper-content-wrapper] [role="listbox"] {
+  max-height: 45vh;
+  overflow-y: auto;
+}

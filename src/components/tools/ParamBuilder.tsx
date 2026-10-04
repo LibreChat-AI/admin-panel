@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { Button, Select } from '@clickhouse/click-ui';
+import { Select } from '@clickhouse/click-ui';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -62,10 +61,6 @@ interface Manifest {
 }
 
 const NAME_RE = /^[\w.-]+$/;
-const NONE = '__none__';
-
-const emptyHint = (): Record<string, unknown> => ({});
-
 function inferWidget(prop: Record<string, unknown>, hint: Record<string, unknown>): ParamWidget {
   const w = typeof hint.widget === 'string' ? (hint.widget as ParamWidget) : '';
   if (w) {
@@ -178,6 +173,14 @@ function serialize(rows: ParamRow[]): { parametersJson: string; formJson: string
   };
 }
 
+/** 默认值按类型强转（数字/整数转数值，空串为未设置）。 */
+function coerceDefault(raw: string, type: ParamType): unknown {
+  if (type === 'number' || type === 'integer') {
+    return raw === '' ? undefined : Number(raw);
+  }
+  return raw;
+}
+
 /** 卡片折叠态类型徽章文案。 */
 const TYPE_LABEL: Record<ParamType, string> = {
   string: '字符串',
@@ -208,10 +211,7 @@ export function ParamBuilder({
   const [mode, setMode] = useState<'visual' | 'json'>('visual');
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const [addOpen, setAddOpen] = useState(false);
-  const [addPos, setAddPos] = useState({ top: 0, right: 0, maxHeight: 420 });
-  const [addColors, setAddColors] = useState({ bg: '', text: '' });
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [addValue, setAddValue] = useState('');
 
   /* 外部 JSON → 行（仅在與上次输出不同时 parse：打开对话框 / JSON 模式手改） */
   useEffect(() => {
@@ -366,86 +366,25 @@ export function ParamBuilder({
             </button>
           ))}
         </div>
-        <div className="relative">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={mode !== 'visual' || jsonError !== null}
-            onClick={() => {
-              /* portal 进弹窗根 + 坐标按弹窗计算：弹窗带 transform（backdrop
-               * 模糊）时是其 fixed 后代包含块，且 overflow 裁掉出界部分
-               * （实测）。菜单最大高受弹窗剩余空间约束，超出内部滚动
-               * （同 click-ui Select 弹层策略）。--cui-* 变量运行时为空，
-               * 底色/文字直接取弹窗计算后的实底值。 */
-              const el = document.getElementById('param-add-anchor');
-              if (el) {
-                const a = el.getBoundingClientRect();
-                const dlg = el.closest('[role="dialog"]');
-                if (dlg) {
-                  const d = dlg.getBoundingClientRect();
-                  const cs = getComputedStyle(dlg);
-                  setAddColors({ bg: cs.backgroundColor, text: cs.color });
-                  const top = a.bottom - d.top + 4;
-                  const maxHeight = d.height - top - 8;
-                  setAddPos({
-                    top,
-                    right: d.right - a.right,
-                    maxHeight: Math.max(120, maxHeight),
-                  });
-                } else {
-                  setAddPos({
-                    top: a.bottom + 4,
-                    right: window.innerWidth - a.right,
-                    maxHeight: 420,
-                  });
-                }
+        <div className="w-40">
+          <Select
+            value={addValue}
+            onSelect={(v) => {
+              const preset = ADD_PRESETS.find((x) => x.key === v);
+              setAddValue('');
+              if (preset) {
+                addParam(preset);
               }
-              setAddOpen((o) => !o);
             }}
+            placeholder={localize('com_param_add')}
+            aria-label={localize('com_param_add')}
           >
-            <span id="param-add-anchor" className="inline-block">
-              {localize('com_param_add')} ▾
-            </span>
-          </Button>
-          {addOpen &&
-            createPortal(
-              <div
-                className="fixed z-[9999] w-44 rounded-lg py-1 shadow-lg"
-                role="menu"
-                style={{
-                  top: addPos.top,
-                  right: addPos.right,
-                  maxHeight: addPos.maxHeight,
-                  overflowY: 'auto',
-                  backgroundColor: addColors.bg || '#1f1f1c',
-                  color: addColors.text || '#ececec',
-                  border: '1px solid rgba(128, 128, 128, 0.4)',
-                }}
-              >
-                {ADD_PRESETS.map((preset) => (
-                  <button
-                    key={preset.key}
-                    type="button"
-                    role="menuitem"
-                    className="w-full px-3 py-1.5 text-start text-sm"
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'rgba(128, 128, 128, 0.25)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
-                    onClick={() => addParam(preset)}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>,
-              /* portal 进所属弹窗根元素而非 body：body 无主题变量（背景透
-               * 明）且在遮罩之下点不到。页面存在多个 [role=dialog] 包装
-               * （含隐藏空壳），必须从锚点按钮向上找可见的那个。 */
-              document.getElementById('param-add-anchor')?.closest('[role="dialog"]') ??
-              document.body,
-            )}
+            {ADD_PRESETS.map((preset) => (
+              <Select.Item key={preset.key} value={preset.key}>
+                {preset.label}
+              </Select.Item>
+            ))}
+          </Select>
         </div>
       </div>
 
@@ -616,12 +555,7 @@ export function ParamBuilder({
                             value={String(row.def ?? '')}
                             onChange={(e) =>
                               patchRow(index, {
-                                def:
-                                  row.type === 'number' || row.type === 'integer'
-                                    ? e.target.value === ''
-                                      ? undefined
-                                      : Number(e.target.value)
-                                    : e.target.value,
+                                def: coerceDefault(e.target.value, row.type),
                               })
                             }
                           />
