@@ -282,7 +282,7 @@ export function ToolEditDialog({
           </Tabs.TriggersList>
         </Tabs>
 
-        <div className="mt-4 flex max-h-[55vh] flex-col gap-4 overflow-y-auto pe-1 text-sm">
+        <div className="mt-4 flex max-h-[65vh] min-h-[55vh] flex-col gap-4 overflow-y-auto pe-1 text-sm">
           {tab === 'basic' && (
             <BasicTab
               draft={draft}
