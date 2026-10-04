@@ -403,7 +403,10 @@ export function ParamBuilder({
                   </button>
                 ))}
               </div>,
-              document.body,
+              /* portal 进弹窗容器而非 body：body 上没有主题 CSS 变量（背景
+               * 透明）且会叠在弹窗遮罩之下（点不到）。弹窗根元素既在遮罩
+               * 之上又继承变量；fixed 定位不受其 overflow 影响。 */
+              document.querySelector('[role="dialog"]') ?? document.body,
             )}
         </div>
       </div>
