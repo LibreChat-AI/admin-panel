@@ -14,6 +14,8 @@ import { LoadingState } from '@/components/shared';
 /**
  * 底图管理（2.20.0）：从已绑定的地图服务里选地图加入底图组。数组顺序即
  * 叠放顺序（前者在下，如影像在下、注记在上）；支持一幅或多幅。
+ * 选择区为双列表（2.21.1，同前端添加图层弹窗）：左列服务（可搜索），右列
+ * 该服务下的地图（可搜索、多选勾选），切换服务时清空本服务的选择。
  */
 
 const check =
@@ -33,11 +35,14 @@ function Check({ on }: { on: boolean }) {
   );
 }
 
+const match = (text: string, q: string) => text.toLowerCase().includes(q.trim().toLowerCase());
+
 export function BasemapsManager() {
   const localize = useLocalize();
   const queryClient = useQueryClient();
   const [serviceId, setServiceId] = useState('');
-  const [filter, setFilter] = useState('');
+  const [svcFilter, setSvcFilter] = useState('');
+  const [mapFilter, setMapFilter] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
 
   const servicesQuery = useQuery({ queryFn: getServicesFn, queryKey: ['terravox', 'admin', 'services'] });
@@ -70,9 +75,8 @@ export function BasemapsManager() {
   });
 
   const maps = mapsQuery.data?.maps ?? [];
-  const shown = maps.filter(
-    (m) => !filter.trim() || m.name.toLowerCase().includes(filter.trim().toLowerCase()),
-  );
+  const shownMaps = maps.filter((m) => match(m.name, mapFilter));
+  const shownServices = services.filter((s) => match(s.name, svcFilter));
   /* 当前组里属于本服务的地图名（打开清单时默认勾上，便于增删） */
   const currentNames = new Set(
     (groupQuery.data?.basemaps ?? [])
@@ -120,6 +124,7 @@ export function BasemapsManager() {
 
   const group = groupQuery.data?.basemaps ?? [];
   const pickedCount = effectivePicked.length;
+  const activeService = services.find((s) => s.id === serviceId);
 
   return (
     <div className="flex flex-col gap-4">
@@ -168,64 +173,93 @@ export function BasemapsManager() {
       </div>
 
       <div className="flex flex-col gap-2 rounded-lg border border-(--cui-color-stroke-default) p-4">
-        <div className="flex items-center gap-2">
-          <span className="font-medium text-(--cui-color-text-default)">
-            {localize('com_basemaps_pick')}
-          </span>
-          <select
-            className="max-w-64 rounded-md border border-(--cui-color-stroke-default) bg-transparent px-2 py-1 text-xs text-(--cui-color-text-default)"
-            value={serviceId}
-            onChange={(e) => {
-              setServiceId(e.target.value);
-              setPicked([]);
-            }}
-            aria-label={localize('com_tools_col_service')}
-          >
-            {services.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <input
-          type="search"
-          className="config-input w-full max-w-72"
-          placeholder={localize('com_toolbox_map_search')}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        {mapsQuery.isLoading && <LoadingState />}
-        {mapsQuery.isError && (
-          <p className="text-sm text-(--cui-color-text-danger)">
-            {(mapsQuery.error as Error).message}
-          </p>
-        )}
-        <div className="flex max-h-80 flex-col gap-0.5 overflow-y-auto">
-          {shown.map((m) => {
-            const on = effectivePicked.includes(m.name);
-            return (
-              <button
-                key={m.name}
-                type="button"
-                aria-pressed={on}
-                className="flex items-center gap-2 rounded px-1 py-1 text-start text-sm hover:bg-(--cui-color-background-hover)"
-                onClick={() =>
-                  setPicked((prev) =>
-                    prev.includes(m.name)
-                      ? prev.filter((x) => x !== m.name)
-                      : [...prev, m.name],
-                  )
-                }
-              >
-                <Check on={on} />
-                <span className="min-w-0 flex-1 truncate">{m.name}</span>
-              </button>
-            );
-          })}
-          {!mapsQuery.isLoading && maps.length === 0 && (
-            <p className="p-2 text-xs text-(--cui-color-text-muted)">—</p>
-          )}
+        <span className="font-medium text-(--cui-color-text-default)">
+          {localize('com_basemaps_pick')}
+        </span>
+        <div className="grid grid-cols-2 gap-3">
+          {/* ── 左列：服务（可搜索，点击选中） ── */}
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold uppercase text-(--cui-color-text-muted)">
+              {localize('com_basemaps_pick_service')}
+            </p>
+            <input
+              type="search"
+              className="config-input w-full rounded-md border border-(--cui-color-stroke-default) bg-transparent px-2 py-1 text-xs text-(--cui-color-text-default)"
+              placeholder={localize('com_basemaps_search')}
+              aria-label={localize('com_basemaps_search')}
+              value={svcFilter}
+              onChange={(e) => setSvcFilter(e.target.value)}
+            />
+            <div className="flex max-h-80 min-h-40 flex-col gap-0.5 overflow-y-auto rounded-md border border-(--cui-color-stroke-default) p-1">
+              {shownServices.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={cn(
+                    'flex items-center gap-2 rounded px-2 py-1.5 text-start text-sm transition-colors hover:bg-(--cui-color-background-hover)',
+                    serviceId === s.id && 'bg-(--cui-color-background-hover)',
+                  )}
+                  onClick={() => {
+                    setServiceId(s.id);
+                    setPicked([]);
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate">{s.name}</span>
+                </button>
+              ))}
+              {services.length === 0 && (
+                <p className="p-2 text-center text-xs text-(--cui-color-text-muted)">—</p>
+              )}
+            </div>
+          </div>
+          {/* ── 右列：所选服务的地图（可搜索，多选勾选） ── */}
+          <div className="flex flex-col gap-1">
+            <p className="text-xs font-semibold uppercase text-(--cui-color-text-muted)">
+              {activeService
+                ? localize('com_basemaps_pick_layer_of', { service: activeService.name })
+                : localize('com_basemaps_pick_layer')}
+            </p>
+            <input
+              type="search"
+              className="config-input w-full rounded-md border border-(--cui-color-stroke-default) bg-transparent px-2 py-1 text-xs text-(--cui-color-text-default)"
+              placeholder={localize('com_basemaps_search')}
+              aria-label={localize('com_basemaps_search')}
+              value={mapFilter}
+              onChange={(e) => setMapFilter(e.target.value)}
+            />
+            <div className="flex max-h-80 min-h-40 flex-col gap-0.5 overflow-y-auto rounded-md border border-(--cui-color-stroke-default) p-1">
+              {mapsQuery.isLoading && <LoadingState />}
+              {mapsQuery.isError && (
+                <p className="p-2 text-xs text-(--cui-color-text-danger)">
+                  {(mapsQuery.error as Error).message}
+                </p>
+              )}
+              {shownMaps.map((m) => {
+                const on = effectivePicked.includes(m.name);
+                return (
+                  <button
+                    key={m.name}
+                    type="button"
+                    aria-pressed={on}
+                    className="flex items-center gap-2 rounded px-1 py-1 text-start text-sm hover:bg-(--cui-color-background-hover)"
+                    onClick={() =>
+                      setPicked((prev) =>
+                        prev.includes(m.name)
+                          ? prev.filter((x) => x !== m.name)
+                          : [...prev, m.name],
+                      )
+                    }
+                  >
+                    <Check on={on} />
+                    <span className="min-w-0 flex-1 truncate">{m.name}</span>
+                  </button>
+                );
+              })}
+              {!mapsQuery.isLoading && maps.length === 0 && !!serviceId && (
+                <p className="p-2 text-center text-xs text-(--cui-color-text-muted)">—</p>
+              )}
+            </div>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button

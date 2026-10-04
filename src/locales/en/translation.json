@@ -1499,5 +1499,9 @@
   "com_basemaps_hint": "The basemap group renders at the bottom of the map in order (first = bottom; stack imagery and annotation layers). Refresh the map browser after changes.",
   "com_basemaps_current": "Current basemap group",
   "com_basemaps_order_hint": "(bottom to top)",
-  "com_basemaps_pick": "Pick maps from bound map services"
+  "com_basemaps_pick": "Pick maps from bound map services",
+  "com_basemaps_pick_service": "Pick a service",
+  "com_basemaps_pick_layer": "Pick maps",
+  "com_basemaps_pick_layer_of": "Maps of {{service}}",
+  "com_basemaps_search": "Search"
 }
