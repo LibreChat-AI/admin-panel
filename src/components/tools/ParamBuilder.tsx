@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
-import { Button } from '@clickhouse/click-ui';
+import { Button, Select } from '@clickhouse/click-ui';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
