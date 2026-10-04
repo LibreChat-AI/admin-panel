@@ -370,6 +370,7 @@ export function ParamBuilder({
           ))}
         </div>
         <div className="relative">
+          <span id="param-add-anchor" className="inline-block">
           <Button
             variant="secondary"
             size="sm"
@@ -398,11 +399,8 @@ export function ParamBuilder({
               }
               setAddOpen((o) => !o);
             }}
-          >
-            <span id="param-add-anchor" className="inline-block">
-              ▾
-            </span>
-          </Button>
+          />
+          </span>
           {addOpen &&
             createPortal(
               <div
