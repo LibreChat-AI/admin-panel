@@ -261,12 +261,12 @@ export function BasemapsManager() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-end gap-2">
           <button
             type="button"
             disabled={save.isPending}
             onClick={saveGroup}
-            className="rounded-lg bg-(--cui-color-accent-primary) px-3 py-1.5 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+            className="rounded-lg border border-(--cui-color-accent-primary) px-3 py-1.5 text-sm font-medium text-(--cui-color-accent-primary) transition-colors hover:bg-(--cui-color-background-hover) disabled:opacity-50"
           >
             {localize('com_services_basemap_save')}
             {pickedCount > 0 ? ` (${pickedCount})` : ''}
