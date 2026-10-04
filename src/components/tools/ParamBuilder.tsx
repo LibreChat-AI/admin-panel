@@ -209,7 +209,7 @@ export function ParamBuilder({
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
-  const [addPos, setAddPos] = useState({ top: 0, right: 0 });
+  const [addPos, setAddPos] = useState({ top: 0, right: 0, maxHeight: 420 });
   const [addColors, setAddColors] = useState({ bg: '', text: '' });
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
@@ -372,17 +372,32 @@ export function ParamBuilder({
             size="sm"
             disabled={mode !== 'visual' || jsonError !== null}
             onClick={() => {
-              /* portal + fixed：弹窗内 absolute 会被 overflow 裁剪（实测）。
-               * --cui-* 变量运行时为空（应用配色另有来源），菜单底色/文字
-               * 直接取弹窗计算后的实底值，hover 用主题无关的白色叠加。 */
+              /* portal 进弹窗根 + 坐标按弹窗计算：弹窗带 transform（backdrop
+               * 模糊）时是其 fixed 后代包含块，且 overflow 裁掉出界部分
+               * （实测）。菜单最大高受弹窗剩余空间约束，超出内部滚动
+               * （同 click-ui Select 弹层策略）。--cui-* 变量运行时为空，
+               * 底色/文字直接取弹窗计算后的实底值。 */
               const el = document.getElementById('param-add-anchor');
               if (el) {
-                const r = el.getBoundingClientRect();
-                setAddPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+                const a = el.getBoundingClientRect();
                 const dlg = el.closest('[role="dialog"]');
                 if (dlg) {
+                  const d = dlg.getBoundingClientRect();
                   const cs = getComputedStyle(dlg);
                   setAddColors({ bg: cs.backgroundColor, text: cs.color });
+                  const top = a.bottom - d.top + 4;
+                  const maxHeight = d.height - top - 8;
+                  setAddPos({
+                    top,
+                    right: d.right - a.right,
+                    maxHeight: Math.max(120, maxHeight),
+                  });
+                } else {
+                  setAddPos({
+                    top: a.bottom + 4,
+                    right: window.innerWidth - a.right,
+                    maxHeight: 420,
+                  });
                 }
               }
               setAddOpen((o) => !o);
@@ -400,6 +415,8 @@ export function ParamBuilder({
                 style={{
                   top: addPos.top,
                   right: addPos.right,
+                  maxHeight: addPos.maxHeight,
+                  overflowY: 'auto',
                   backgroundColor: addColors.bg || '#1f1f1c',
                   color: addColors.text || '#ececec',
                   border: '1px solid rgba(128, 128, 128, 0.4)',
