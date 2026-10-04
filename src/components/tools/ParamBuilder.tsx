@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { Button, Select } from '@clickhouse/click-ui';
 import { useLocalize } from '@/hooks';
@@ -208,8 +209,8 @@ export function ParamBuilder({
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
+  const [addPos, setAddPos] = useState({ top: 0, right: 0 });
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const addRef = useRef<HTMLDivElement>(null);
 
   /* 外部 JSON → 行（仅在與上次输出不同时 parse：打开对话框 / JSON 模式手改） */
   useEffect(() => {
@@ -369,29 +370,41 @@ export function ParamBuilder({
             variant="secondary"
             size="sm"
             disabled={mode !== 'visual' || jsonError !== null}
-            onClick={() => setAddOpen((o) => !o)}
+            onClick={() => {
+              /* portal + fixed：弹窗内 absolute 会被 overflow 裁剪（实测） */
+              const el = document.getElementById('param-add-anchor');
+              if (el) {
+                const r = el.getBoundingClientRect();
+                setAddPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+              }
+              setAddOpen((o) => !o);
+            }}
           >
-            {localize('com_param_add')} ▾
+            <span id="param-add-anchor" className="inline-block">
+              {localize('com_param_add')} ▾
+            </span>
           </Button>
-          {addOpen && (
-            <div
-              ref={addRef}
-              className="absolute end-0 z-50 mt-1 w-44 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-primary) py-1 shadow-lg"
-              role="menu"
-            >
-              {ADD_PRESETS.map((preset) => (
-                <button
-                  key={preset.key}
-                  type="button"
-                  role="menuitem"
-                  className="w-full px-3 py-1.5 text-start text-sm hover:bg-(--cui-color-background-hover)"
-                  onClick={() => addParam(preset)}
-                >
-                  {preset.label}
-                </button>
-              ))}
-            </div>
-          )}
+          {addOpen &&
+            createPortal(
+              <div
+                className="fixed z-[9999] w-44 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-primary) py-1 shadow-lg"
+                role="menu"
+                style={{ top: addPos.top, right: addPos.right }}
+              >
+                {ADD_PRESETS.map((preset) => (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    role="menuitem"
+                    className="w-full px-3 py-1.5 text-start text-sm hover:bg-(--cui-color-background-hover)"
+                    onClick={() => addParam(preset)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>,
+              document.body,
+            )}
         </div>
       </div>
 
