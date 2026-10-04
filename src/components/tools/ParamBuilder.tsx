@@ -211,6 +211,9 @@ export function ParamBuilder({
   const [rows, setRows] = useState<ParamRow[]>([]);
   const [mode, setMode] = useState<'visual' | 'json'>('visual');
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addPos, setAddPos] = useState({ top: 0, right: 0, maxHeight: 420 });
+  const [addColors, setAddColors] = useState({ bg: '', text: '' });
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   /* 外部 JSON → 行（仅在與上次输出不同时 parse：打开对话框 / JSON 模式手改） */
