@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Icon } from '@clickhouse/click-ui';
+import { Button, Icon, Select } from '@clickhouse/click-ui';
 import type { PendingToolUpdate, TerraVoxTool } from '@/server';
 import {
   createToolFn,
@@ -30,8 +30,8 @@ import { ImportToolsDialog } from './ImportToolsDialog';
 const DANGER_STYLE =
   'rounded-full bg-(--cui-color-background-warning-muted) px-2 py-0.5 text-xs text-(--cui-color-text-warning)';
 
-/** 行内分组单元格：input+datalist（与编辑对话框的展示分组控件同风格）。
- *  草稿本地暂存，失焦/回车提交；外部值回流时同步草稿。 */
+/** 行内分组单元格：配置页同款标准下拉（click-ui Select，与编辑对话框的
+ *  展示分组控件同款）；未分组以「未分组」项表示，选中即提交。 */
 function GroupCell({
   value,
   groups,
@@ -47,47 +47,25 @@ function GroupCell({
   placeholder: string;
   onCommit: (group: string) => void;
 }) {
-  const listId = useId();
-  const [draft, setDraft] = useState(value);
-  const synced = useRef(value);
-  useEffect(() => {
-    if (synced.current !== value) {
-      synced.current = value;
-      setDraft(value);
-    }
-  }, [value]);
-  const commit = () => {
-    const next = draft.trim();
-    if (next === synced.current) {
-      return;
-    }
-    synced.current = next;
-    setDraft(next);
-    onCommit(next);
-  };
+  const localize = useLocalize();
   return (
-    <>
-      <input
-        className="config-input h-7 w-36 px-2 py-0.5 text-xs"
-        list={listId}
-        value={draft}
+    <div className="w-40">
+      <Select
+        value={value || '__none__'}
+        onSelect={(v) => onCommit(v === '__none__' ? '' : v)}
         disabled={disabled}
         aria-label={label}
         placeholder={placeholder}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.currentTarget.blur();
-          }
-        }}
-      />
-      <datalist id={listId}>
-        {groups.map((group) => (
-          <option key={group} value={group} />
-        ))}
-      </datalist>
-    </>
+      >
+        {[{ value: '__none__', label: localize('com_tools_display_group_none') }]
+          .concat(groups.map((g) => ({ value: g, label: g })))
+          .map((o) => (
+            <Select.Item key={o.value || '__none__'} value={o.value}>
+              {o.label}
+            </Select.Item>
+          ))}
+      </Select>
+    </div>
   );
 }
 

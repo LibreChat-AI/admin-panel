@@ -1464,6 +1464,7 @@
   "com_dash_services_desc": "Bind map/data services and manage visibility.",
   "com_tools_field_display_group": "Display group",
   "com_tools_display_group_hint": "Pick the tool's group; the group's allowed-groups setting decides who can see this tool (managed on the Groups tab).",
+  "com_tools_display_group_none": "No group",
   "com_tools_field_help_url": "Help URL",
   "com_tools_field_usage_stats": "Usage stats",
   "com_tools_group_allowed_groups": "Allowed user groups for this group's tools",

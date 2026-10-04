@@ -1464,6 +1464,7 @@
   "com_dash_services_desc": "绑定地图/数据服务并管理可见性。",
   "com_tools_field_display_group": "展示分组",
   "com_tools_display_group_hint": "选择工具分组；分组配置的可见组决定该工具对哪些用户可见（分组页可管理）。",
+  "com_tools_display_group_none": "未分组",
   "com_tools_field_help_url": "帮助文档地址",
   "com_tools_field_usage_stats": "使用统计",
   "com_tools_group_allowed_groups": "该组工具的可见组",

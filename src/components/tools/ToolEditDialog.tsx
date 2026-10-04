@@ -3,6 +3,7 @@ import { Button, Dialog, Switch, Tabs } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import type { TerraVoxTool } from '@/server';
 import { useLocalize } from '@/hooks';
+import { SelectField } from '../configuration/fields/SelectField';
 
 /** Editable draft of a manifest: scalars as strings, JSON blocks as text. */
 interface Draft {
@@ -444,25 +445,25 @@ function BasicTab({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className={labelClass} htmlFor="tool-display-group">
-            {localize('com_tools_field_display_group')}
-          </label>
-          <input
-            id="tool-display-group"
-            className="config-input w-full"
-            list="tool-display-group-options"
-            value={draft.displayGroup}
-            placeholder={localize('com_tools_display_group_hint')}
-            onChange={(e) => onSet('displayGroup', e.target.value)}
-          />
-          {/* 展示分组：现有分组点选 + 可输入新组（自由文本，纯 UI 归类） */}
-          <datalist id="tool-display-group-options">
-            {displayGroupOptions.map((option) => (
-              <option key={option} value={option} />
-            ))}
-          </datalist>
-        </div>
+      <div>
+        <label className={labelClass} htmlFor="tool-display-group">
+          {localize('com_tools_field_display_group')}
+        </label>
+        {/* 配置页同款标准下拉（click-ui Select）：不再用 datalist 自由文本 */}
+        <SelectField
+          id="tool-display-group"
+          value={draft.displayGroup || '__none__'}
+          options={[
+            { value: '__none__', label: localize('com_tools_display_group_none') },
+            ...displayGroupOptions
+              .filter((g) => g !== draft.displayGroup)
+              .map((g) => ({ value: g, label: g })),
+          ]}
+          onChange={(v) => onSet('displayGroup', v === '__none__' ? '' : v)}
+          placeholder={localize('com_tools_display_group_hint')}
+          aria-label={localize('com_tools_field_display_group')}
+        />
+      </div>
         <div>
           <label className={labelClass} htmlFor="tool-help-url">
             {localize('com_tools_field_help_url')}
