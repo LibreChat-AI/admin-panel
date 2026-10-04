@@ -210,6 +210,7 @@ export function ParamBuilder({
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [addPos, setAddPos] = useState({ top: 0, right: 0 });
+  const [addColors, setAddColors] = useState({ bg: '', text: '' });
   const [dragIndex, setDragIndex] = useState<number | null>(null);
 
   /* 外部 JSON → 行（仅在與上次输出不同时 parse：打开对话框 / JSON 模式手改） */
@@ -371,11 +372,18 @@ export function ParamBuilder({
             size="sm"
             disabled={mode !== 'visual' || jsonError !== null}
             onClick={() => {
-              /* portal + fixed：弹窗内 absolute 会被 overflow 裁剪（实测） */
+              /* portal + fixed：弹窗内 absolute 会被 overflow 裁剪（实测）。
+               * --cui-* 变量运行时为空（应用配色另有来源），菜单底色/文字
+               * 直接取弹窗计算后的实底值，hover 用主题无关的白色叠加。 */
               const el = document.getElementById('param-add-anchor');
               if (el) {
                 const r = el.getBoundingClientRect();
                 setAddPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+                const dlg = el.closest('[role="dialog"]');
+                if (dlg) {
+                  const cs = getComputedStyle(dlg);
+                  setAddColors({ bg: cs.backgroundColor, text: cs.color });
+                }
               }
               setAddOpen((o) => !o);
             }}
@@ -387,16 +395,28 @@ export function ParamBuilder({
           {addOpen &&
             createPortal(
               <div
-                className="fixed z-[9999] w-44 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-primary) py-1 shadow-lg"
+                className="fixed z-[9999] w-44 rounded-lg py-1 shadow-lg"
                 role="menu"
-                style={{ top: addPos.top, right: addPos.right }}
+                style={{
+                  top: addPos.top,
+                  right: addPos.right,
+                  backgroundColor: addColors.bg || '#1f1f1c',
+                  color: addColors.text || '#ececec',
+                  border: '1px solid rgba(128, 128, 128, 0.4)',
+                }}
               >
                 {ADD_PRESETS.map((preset) => (
                   <button
                     key={preset.key}
                     type="button"
                     role="menuitem"
-                    className="w-full px-3 py-1.5 text-start text-sm hover:bg-(--cui-color-background-hover)"
+                    className="w-full px-3 py-1.5 text-start text-sm"
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'rgba(128, 128, 128, 0.25)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
                     onClick={() => addParam(preset)}
                   >
                     {preset.label}
