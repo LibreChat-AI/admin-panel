@@ -9,6 +9,7 @@ export type * from './layout';
 export type * from './role';
 export type * from './scope';
 export type * from './server';
+export type * from './terravox';
 export type * from './shared';
 export type * from './theme';
 export type * from './tools';
