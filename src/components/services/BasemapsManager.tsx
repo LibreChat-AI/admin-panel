@@ -8,9 +8,8 @@ import {
   replaceBasemapsFn,
 } from '@/server';
 import { useLocalize } from '@/hooks';
-import { SearchInput } from '@/components/shared';
+import { LoadingState, SearchInput } from '@/components/shared';
 import { cn } from '@/utils';
-import { LoadingState } from '@/components/shared';
 
 /**
  * 底图管理（2.20.0）：从已绑定的地图服务里选地图加入底图组。数组顺序即
