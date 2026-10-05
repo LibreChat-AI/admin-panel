@@ -98,6 +98,11 @@ export const SECTION_META: Record<
     descriptionKey: 'com_config_section_messageFilter_desc',
     tab: 'features',
   },
+  filters: {
+    titleKey: 'com_config_section_filters',
+    descriptionKey: 'com_config_section_filters_desc',
+    tab: 'features',
+  },
   langfuse: {
     titleKey: 'com_config_section_langfuse',
     descriptionKey: 'com_config_section_langfuse_desc',
@@ -187,6 +192,16 @@ export const SECTION_META: Record<
   skillSync: {
     titleKey: 'com_config_section_skillSync',
     descriptionKey: 'com_config_section_skillSync_desc',
+    tab: 'system',
+  },
+  permissions: {
+    titleKey: 'com_config_section_permissions',
+    descriptionKey: 'com_config_section_permissions_desc',
+    tab: 'system',
+  },
+  openapi: {
+    titleKey: 'com_config_section_openapi',
+    descriptionKey: 'com_config_section_openapi_desc',
     tab: 'system',
   },
 };

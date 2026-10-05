@@ -1,4 +1,8 @@
+import { ResourceType } from 'librechat-data-provider';
 import type { AdminAuditLogEntry, AuditAction } from '@librechat/data-schemas';
+import type { PrincipalType } from 'librechat-data-provider';
+import type * as t from '@/types';
+import { getScopeTypeConfig } from '@/constants';
 
 /** The capability a grant entry concerns now lives in `metadata.capability`
  * (other event categories omit it). Returns '' when absent or non-string. */
@@ -10,12 +14,64 @@ export function auditCapability(entry: Pick<AdminAuditLogEntry, 'metadata'>): st
 export const ACTION_BADGE_STATE: Record<AuditAction, 'success' | 'danger'> = {
   'grant.assigned': 'success',
   'grant.removed': 'danger',
+  'permission.insights_assigned': 'success',
+  'permission.insights_removed': 'danger',
 };
 
 export const ACTION_LABEL_KEY: Record<AuditAction, string> = {
   'grant.assigned': 'com_audit_action_assigned',
   'grant.removed': 'com_audit_action_removed',
+  'permission.insights_assigned': 'com_audit_action_insights_assigned',
+  'permission.insights_removed': 'com_audit_action_insights_removed',
 };
+
+export const ACTION_SUMMARY_KEY: Record<AuditAction, string> = {
+  'grant.assigned': 'com_audit_detail_summary_assigned',
+  'grant.removed': 'com_audit_detail_summary_removed',
+  'permission.insights_assigned': 'com_audit_detail_summary_insights_assigned',
+  'permission.insights_removed': 'com_audit_detail_summary_insights_removed',
+};
+
+const INSIGHTS_PERMISSION = 'VIEW_INSIGHTS';
+
+function isInsightsAction(action: AuditAction): boolean {
+  return action === 'permission.insights_assigned' || action === 'permission.insights_removed';
+}
+
+/** Capability grants carry `metadata.capability`; Insights entries change the
+ * agent-level `VIEW_INSIGHTS` permission bit instead. */
+export function auditSubject(
+  entry: Pick<AdminAuditLogEntry, 'action' | 'metadata'>,
+  localize: (key: string) => string,
+): t.AuditSubject {
+  if (isInsightsAction(entry.action)) {
+    return { label: localize('com_audit_insights_permission'), value: INSIGHTS_PERMISSION };
+  }
+  const capability = auditCapability(entry);
+  return { label: capabilityLabel(capability, localize), value: capability };
+}
+
+/** Insights entries target the agent; the affected principal lives in metadata. */
+export function auditGrantee(
+  entry: Pick<AdminAuditLogEntry, 'metadata'>,
+): t.AuditGrantee | undefined {
+  const type = entry.metadata?.principalType;
+  const id = entry.metadata?.principalId;
+  if (typeof type !== 'string' || typeof id !== 'string') return undefined;
+  return { type, id };
+}
+
+const AGENT_TARGET_CONFIG: Pick<t.ScopeTypeConfigEntry, 'icon' | 'labelKey'> = {
+  icon: 'sparkle',
+  labelKey: 'com_audit_target_agent',
+};
+
+export function auditTargetConfig(
+  targetType: string,
+): Pick<t.ScopeTypeConfigEntry, 'icon' | 'labelKey'> {
+  if (targetType === ResourceType.AGENT) return AGENT_TARGET_CONFIG;
+  return getScopeTypeConfig(targetType as PrincipalType);
+}
 
 /** Parse a `YYYY-MM-DD` filter value as a local-time date so the DatePicker
  * round-trips the same calendar day the user picked, regardless of TZ.

@@ -14,6 +14,7 @@ const PERMISSION_TYPE_ORDER: PermissionTypes[] = [
   PermissionTypes.REMOTE_AGENTS,
   PermissionTypes.SKILLS,
   PermissionTypes.SHARED_LINKS,
+  PermissionTypes.SCHEDULES,
   PermissionTypes.BOOKMARKS,
   PermissionTypes.MULTI_CONVO,
   PermissionTypes.TEMPORARY_CHAT,
