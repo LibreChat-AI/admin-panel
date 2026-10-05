@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { Button, Dropdown, Select } from '@clickhouse/click-ui';
+import { Button, Checkbox, Dropdown, RadioGroup, Select } from '@clickhouse/click-ui';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -61,15 +61,8 @@ interface Manifest {
 }
 
 const NAME_RE = /^[\w.-]+$/;
-function inferWidget(prop: Record<string, unknown>, hint: Record<string, unknown>): ParamWidget {
-  const w = typeof hint.widget === 'string' ? (hint.widget as ParamWidget) : '';
-  if (w) {
-    return w;
-  }
-  if (Array.isArray(prop.enum)) {
-    return '';
-  }
-  return '';
+function inferWidget(hint: Record<string, unknown>): ParamWidget {
+  return typeof hint.widget === 'string' ? (hint.widget as ParamWidget) : '';
 }
 
 function parseManifest(pJson: string, fJson: string): { rows: ParamRow[]; error: string | null } {
@@ -84,12 +77,10 @@ function parseManifest(pJson: string, fJson: string): { rows: ParamRow[]; error:
     const rows: ParamRow[] = names
       .filter((n) => props[n] || hints[n]?.widget === 'upload')
       .map((name) => {
-        const prop = { ...(props[name] as Record<string, unknown> | undefined ?? {}) };
-        const hint = { ...(hints[name] as Record<string, unknown> | undefined ?? {}) };
+        const prop = { ...((props[name] as Record<string, unknown> | undefined) ?? {}) };
+        const hint = { ...((hints[name] as Record<string, unknown> | undefined) ?? {}) };
         const type = (
-          typeof prop.type === 'string' && prop.type !== 'object'
-            ? prop.type
-            : 'string'
+          typeof prop.type === 'string' && prop.type !== 'object' ? prop.type : 'string'
         ) as ParamType;
         return {
           name,
@@ -99,7 +90,7 @@ function parseManifest(pJson: string, fJson: string): { rows: ParamRow[]; error:
           label: typeof hint.label === 'string' ? hint.label : '',
           help: typeof hint.help === 'string' ? hint.help : '',
           placeholder: typeof hint.placeholder === 'string' ? hint.placeholder : '',
-          widget: inferWidget(prop, hint),
+          widget: inferWidget(hint),
           enumValues: Array.isArray(prop.enum) ? (prop.enum as string[]).map(String) : [],
           choices: Array.isArray(hint.choices) ? (hint.choices as string[]).map(String) : [],
           choicesFrom: typeof hint.choices_from === 'string' ? hint.choices_from : '',
@@ -229,7 +220,6 @@ export function ParamBuilder({
       setJsonError(error);
       setMode('json');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parametersJson, formJson]);
 
   const emit = (next: ParamRow[]) => {
@@ -255,24 +245,67 @@ export function ParamBuilder({
 
   const ADD_PRESETS: AddPreset[] = useMemo(
     () => [
-      { key: 'string', label: localize('com_param_add_string'), make: () => ({ type: 'string', widget: '' }) },
-      { key: 'number', label: localize('com_param_add_number'), make: () => ({ type: 'number', widget: '' }) },
-      { key: 'integer', label: localize('com_param_add_integer'), make: () => ({ type: 'integer', widget: '' }) },
-      { key: 'boolean', label: localize('com_param_add_boolean'), make: () => ({ type: 'boolean', widget: '' }) },
+      {
+        key: 'string',
+        label: localize('com_param_add_string'),
+        make: () => ({ type: 'string', widget: '' }),
+      },
+      {
+        key: 'number',
+        label: localize('com_param_add_number'),
+        make: () => ({ type: 'number', widget: '' }),
+      },
+      {
+        key: 'integer',
+        label: localize('com_param_add_integer'),
+        make: () => ({ type: 'integer', widget: '' }),
+      },
+      {
+        key: 'boolean',
+        label: localize('com_param_add_boolean'),
+        make: () => ({ type: 'boolean', widget: '' }),
+      },
       {
         key: 'array',
         label: localize('com_param_add_array_multiselect'),
         make: () => ({ type: 'array', widget: 'multiselect', choices: [] }),
       },
-      { key: 'textarea', label: localize('com_param_add_textarea'), make: () => ({ type: 'string', widget: 'textarea' }) },
-      { key: 'date', label: localize('com_param_add_date'), make: () => ({ type: 'string', widget: 'date' }) },
-      { key: 'datetime', label: localize('com_param_add_datetime'), make: () => ({ type: 'string', widget: 'datetime' }) },
-      { key: 'file', label: localize('com_param_add_file'), make: () => ({ type: 'string', widget: 'file' }) },
-      { key: 'directory', label: localize('com_param_add_directory'), make: () => ({ type: 'string', widget: 'directory' }) },
-      { key: 'upload', label: localize('com_param_add_upload'), make: () => ({ type: 'string', widget: 'upload', required: true }) },
-      { key: 'hidden', label: localize('com_param_add_hidden'), make: () => ({ type: 'string', widget: 'hidden' }) },
+      {
+        key: 'textarea',
+        label: localize('com_param_add_textarea'),
+        make: () => ({ type: 'string', widget: 'textarea' }),
+      },
+      {
+        key: 'date',
+        label: localize('com_param_add_date'),
+        make: () => ({ type: 'string', widget: 'date' }),
+      },
+      {
+        key: 'datetime',
+        label: localize('com_param_add_datetime'),
+        make: () => ({ type: 'string', widget: 'datetime' }),
+      },
+      {
+        key: 'file',
+        label: localize('com_param_add_file'),
+        make: () => ({ type: 'string', widget: 'file' }),
+      },
+      {
+        key: 'directory',
+        label: localize('com_param_add_directory'),
+        make: () => ({ type: 'string', widget: 'directory' }),
+      },
+      {
+        key: 'upload',
+        label: localize('com_param_add_upload'),
+        make: () => ({ type: 'string', widget: 'upload', required: true }),
+      },
+      {
+        key: 'hidden',
+        label: localize('com_param_add_hidden'),
+        make: () => ({ type: 'string', widget: 'hidden' }),
+      },
     ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
@@ -358,9 +391,7 @@ export function ParamBuilder({
               )}
               onClick={() => setMode(m)}
             >
-              {m === 'visual'
-                ? localize('com_param_mode_visual')
-                : localize('com_param_mode_json')}
+              {m === 'visual' ? localize('com_param_mode_visual') : localize('com_param_mode_json')}
             </button>
           ))}
         </div>
@@ -376,10 +407,7 @@ export function ParamBuilder({
             </Dropdown.Trigger>
             <Dropdown.Content className="param-add-menu">
               {ADD_PRESETS.map((preset) => (
-                <Dropdown.Item
-                  key={preset.key}
-                  onSelect={() => addParam(preset)}
-                >
+                <Dropdown.Item key={preset.key} onSelect={() => addParam(preset)}>
                   {preset.label}
                 </Dropdown.Item>
               ))}
@@ -422,7 +450,8 @@ export function ParamBuilder({
         <div className="flex flex-col gap-2">
           {rows.map((row, index) => {
             const open = expanded.has(index);
-            const nameBad = !NAME_RE.test(row.name) || rows.some((r, i) => i !== index && r.name === row.name);
+            const nameBad =
+              !NAME_RE.test(row.name) || rows.some((r, i) => i !== index && r.name === row.name);
             return (
               <div
                 key={`${row.name}:${index}`}
@@ -435,8 +464,10 @@ export function ParamBuilder({
                 {/* 折叠态行头 */}
                 <div className="flex items-center gap-1.5 px-2 py-1.5">
                   <span
-                    className="cursor-grab touch-none select-none px-0.5 text-(--cui-color-text-muted) active:cursor-grabbing"
-                    onPointerDown={(e) => onDragPointerDown(e as ReactPointerEvent<HTMLElement>, index)}
+                    className="cursor-grab touch-none px-0.5 text-(--cui-color-text-muted) select-none active:cursor-grabbing"
+                    onPointerDown={(e) =>
+                      onDragPointerDown(e as ReactPointerEvent<HTMLElement>, index)
+                    }
                     onPointerMove={onDragPointerMove}
                     onPointerUp={onDragPointerUp}
                     aria-hidden="true"
@@ -464,19 +495,16 @@ export function ParamBuilder({
                       {row.widget ? ` · ${row.widget}` : ''}
                     </span>
                   </button>
-                  <label className="flex shrink-0 items-center gap-1 text-xs text-(--cui-color-text-muted)">
-                    <input
-                      type="checkbox"
-                      className="accent-(--cui-color-accent-primary)"
-                      checked={row.required}
-                      onChange={(e) => patchRow(index, { required: e.target.checked })}
-                    />
-                    {localize('com_param_required')}
-                  </label>
+                  <Checkbox
+                    className="shrink-0"
+                    checked={row.required}
+                    onCheckedChange={(v) => patchRow(index, { required: v === true })}
+                    label={localize('com_param_required')}
+                  />
                   <button
                     type="button"
                     className="rounded p-0.5 text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-danger)"
-                    aria-label="remove"
+                    aria-label={localize('com_ui_delete')}
                     onClick={() => removeRow(index)}
                   >
                     ✕
@@ -572,9 +600,7 @@ export function ParamBuilder({
                           value={row.widget || ''}
                           onSelect={(v) => patchRow(index, { widget: (v || '') as ParamWidget })}
                         >
-                          <Select.Item value="">
-                            {localize('com_param_widget_auto')}
-                          </Select.Item>
+                          <Select.Item value="">{localize('com_param_widget_auto')}</Select.Item>
                           <Select.Item value="textarea">
                             {localize('com_param_widget_textarea')}
                           </Select.Item>
@@ -645,14 +671,27 @@ export function ParamBuilder({
                         <span className="text-(--cui-color-text-muted)">
                           {localize('com_param_choices')}
                         </span>
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            checked={!row.choicesFrom}
-                            onChange={() => patchRow(index, { choicesFrom: '' })}
+                        <RadioGroup
+                          inline
+                          value={row.choicesFrom ? 'from' : 'static'}
+                          onValueChange={(v) =>
+                            patchRow(index, {
+                              choicesFrom:
+                                v === 'from'
+                                  ? row.choicesFrom || localize('com_param_choices_from_hint')
+                                  : '',
+                            })
+                          }
+                        >
+                          <RadioGroup.Item
+                            value="static"
+                            label={localize('com_param_choices_static')}
                           />
-                          <span>{localize('com_param_choices_static')}</span>
-                        </label>
+                          <RadioGroup.Item
+                            value="from"
+                            label={localize('com_param_choices_from')}
+                          />
+                        </RadioGroup>
                         {!row.choicesFrom && (
                           <div className="flex flex-col gap-1">
                             <div className="flex flex-wrap items-center gap-1">
@@ -702,19 +741,6 @@ export function ParamBuilder({
                             </div>
                           </div>
                         )}
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="radio"
-                            checked={!!row.choicesFrom}
-                            onChange={() =>
-                              patchRow(index, {
-                                choicesFrom:
-                                  row.choicesFrom || localize('com_param_choices_from_hint'),
-                              })
-                            }
-                          />
-                          <span>{localize('com_param_choices_from')}</span>
-                        </label>
                         {row.choicesFrom && (
                           <input
                             className="config-input h-7 px-2"

@@ -105,12 +105,21 @@ export function ServicesPage() {
     onError: (error: Error) => setMutError(error.message),
   });
 
+  /* 类型筛选 chips：全部 / 地图服务 / 数据服务，带实时计数 */
+  const mapCount = services.filter((s) => s.type === 'iserver_map').length;
+  const filterChips = [
+    ['all', localize('com_services_type_all'), services.length],
+    ['iserver_map', localize('com_services_type_map'), mapCount],
+    ['iserver_data', localize('com_services_type_data'), services.length - mapCount],
+  ] as const;
+
   return (
     <div
       role="region"
       aria-label={localize('com_services_title')}
       className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-2"
     >
+      {' '}
       <Tabs
         value={tab}
         onValueChange={(v) => setTab(v as typeof tab)}
@@ -121,7 +130,6 @@ export function ServicesPage() {
           <Tabs.Trigger value="basemaps">{localize('com_services_tab_basemaps')}</Tabs.Trigger>
         </Tabs.TriggersList>
       </Tabs>
-
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pt-4 pb-6">
         {tab === 'basemaps' && <BasemapsManager />}
 
@@ -158,46 +166,36 @@ export function ServicesPage() {
             )}
 
             {/* 类型筛选 chips：全部 / 地图服务 / 数据服务，带计数 */}
-            {services.length > 0 &&
-              (() => {
-                const mapCount = services.filter((s) => s.type === 'iserver_map').length;
-                const dataCount = services.length - mapCount;
-                const chips = [
-                  ['all', localize('com_services_type_all'), services.length],
-                  ['iserver_map', localize('com_services_type_map'), mapCount],
-                  ['iserver_data', localize('com_services_type_data'), dataCount],
-                ] as const;
-                return (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {chips.map(([key, label, count]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        aria-pressed={typeFilter === key}
-                        onClick={() => setTypeFilter(key)}
-                        className={cn(
-                          'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors',
-                          typeFilter === key
-                            ? 'border-(--cui-color-accent-primary) bg-(--cui-color-background-hover) font-medium text-(--cui-color-text-default)'
-                            : 'border-(--cui-color-stroke-default) text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)',
-                        )}
-                      >
-                        {label}
-                        <span
-                          className={cn(
-                            'rounded-full px-1.5 text-[10px]',
-                            typeFilter === key
-                              ? 'bg-(--cui-color-accent-primary) text-white'
-                              : 'bg-(--cui-color-background-hover) text-(--cui-color-text-muted)',
-                          )}
-                        >
-                          {count}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
+            {services.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                {filterChips.map(([key, label, count]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={typeFilter === key}
+                    onClick={() => setTypeFilter(key)}
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors',
+                      typeFilter === key
+                        ? 'border-(--cui-color-accent-primary) bg-(--cui-color-background-hover) font-medium text-(--cui-color-text-default)'
+                        : 'border-(--cui-color-stroke-default) text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)',
+                    )}
+                  >
+                    {label}
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 text-[10px]',
+                        typeFilter === key
+                          ? 'bg-(--cui-color-accent-primary) text-white'
+                          : 'bg-(--cui-color-background-hover) text-(--cui-color-text-muted)',
+                      )}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
 
             {servicesQuery.isLoading && <LoadingState />}
             {servicesQuery.isError && (

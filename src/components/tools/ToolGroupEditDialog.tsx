@@ -42,9 +42,7 @@ export function ToolGroupEditDialog({
     }
   }, [open, group]);
 
-  const chipNames = [
-    ...new Set(['*', ...KNOWN_GROUPS, ...allowedGroups.filter((g) => g !== '*')]),
-  ];
+  const chipNames = [...new Set(['*', ...KNOWN_GROUPS, ...allowedGroups.filter((g) => g !== '*')])];
 
   const toggleGroup = (name: string) =>
     setAllowedGroups((prev) =>

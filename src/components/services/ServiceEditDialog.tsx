@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Switch } from '@clickhouse/click-ui';
 import type { TerraVoxService } from '@/server';
 import { getServiceDatasourcesFn } from '@/server';
 import { useLocalize } from '@/hooks';
@@ -180,9 +181,7 @@ export function ServiceEditDialog({ open, service, saving, error, onSubmit, onCl
 
         {draft.type === 'iserver_map' && (
           <label className="flex flex-col gap-1">
-            <span className={labelClass}>
-              {localize('com_services_field_map_name')}
-            </span>
+            <span className={labelClass}>{localize('com_services_field_map_name')}</span>
             <input
               className="config-input w-full"
               value={draft.mapName}
@@ -195,10 +194,7 @@ export function ServiceEditDialog({ open, service, saving, error, onSubmit, onCl
 
         {/* 数据服务：列出数据源，点选回填 */}
         {draft.type === 'iserver_data' && service?.id && (
-          <DatasourceSection
-            serviceId={service.id}
-            onPick={(ds) => set('datasource', ds)}
-          />
+          <DatasourceSection serviceId={service.id} onPick={(ds) => set('datasource', ds)} />
         )}
 
         {draft.type === 'iserver_data' && (
@@ -261,14 +257,14 @@ export function ServiceEditDialog({ open, service, saving, error, onSubmit, onCl
           <p className={hintClass}>{localize('com_services_groups_hint')}</p>
         </div>
 
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={draft.enabled}
-            onChange={(e) => set('enabled', e.target.checked)}
-          />
+        <div className="flex items-center justify-between gap-2">
           <span className={labelClass}>{localize('com_services_field_enabled')}</span>
-        </label>
+          <Switch
+            checked={draft.enabled}
+            onCheckedChange={(v) => set('enabled', v)}
+            aria-label={localize('com_services_field_enabled')}
+          />
+        </div>
       </div>
     </FormDialog>
   );
@@ -338,9 +334,7 @@ function DatasourceSection({
               {ds}
             </button>
           ))}
-          {names.length === 0 && !query.isLoading && (
-            <span className={hintClass}>—</span>
-          )}
+          {names.length === 0 && !query.isLoading && <span className={hintClass}>—</span>}
         </div>
       )}
     </div>

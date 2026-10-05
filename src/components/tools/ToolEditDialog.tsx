@@ -365,19 +365,16 @@ function BasicTab({
           </code>
         ) : (
           <div className="flex items-center gap-2">
-            <select
-              className="config-input w-40"
+            <SelectField
+              id="tool-prefix"
+              value={draft.prefix}
+              options={[
+                ...groups.map((name) => ({ value: name, label: name })),
+                { value: '__custom__', label: localize('com_tools_custom_group') },
+              ]}
+              onChange={(v) => onSet('prefix', v)}
               aria-label={localize('com_tools_field_group')}
-              value={draft.prefix === '__custom__' ? '__custom__' : draft.prefix}
-              onChange={(e) => onSet('prefix', e.target.value)}
-            >
-              {groups.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-              <option value="__custom__">{localize('com_tools_custom_group')}</option>
-            </select>
+            />
             <span aria-hidden="true" className="text-(--cui-color-text-muted)">
               .
             </span>
@@ -446,25 +443,25 @@ function BasicTab({
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-      <div>
-        <label className={labelClass} htmlFor="tool-display-group">
-          {localize('com_tools_field_display_group')}
-        </label>
-        {/* 配置页同款标准下拉（click-ui Select）：不再用 datalist 自由文本 */}
-        <SelectField
-          id="tool-display-group"
-          value={draft.displayGroup || '__none__'}
-          options={[
-            { value: '__none__', label: localize('com_tools_display_group_none') },
-            ...displayGroupOptions
-              .filter((g) => g !== draft.displayGroup)
-              .map((g) => ({ value: g, label: g })),
-          ]}
-          onChange={(v) => onSet('displayGroup', v === '__none__' ? '' : v)}
-          placeholder={localize('com_tools_display_group_hint')}
-          aria-label={localize('com_tools_field_display_group')}
-        />
-      </div>
+        <div>
+          <label className={labelClass} htmlFor="tool-display-group">
+            {localize('com_tools_field_display_group')}
+          </label>
+          {/* 配置页同款标准下拉（click-ui Select）：不再用 datalist 自由文本 */}
+          <SelectField
+            id="tool-display-group"
+            value={draft.displayGroup || '__none__'}
+            options={[
+              { value: '__none__', label: localize('com_tools_display_group_none') },
+              ...displayGroupOptions
+                .filter((g) => g !== draft.displayGroup)
+                .map((g) => ({ value: g, label: g })),
+            ]}
+            onChange={(v) => onSet('displayGroup', v === '__none__' ? '' : v)}
+            placeholder={localize('com_tools_display_group_hint')}
+            aria-label={localize('com_tools_field_display_group')}
+          />
+        </div>
         <div>
           <label className={labelClass} htmlFor="tool-help-url">
             {localize('com_tools_field_help_url')}
@@ -511,7 +508,6 @@ function BasicTab({
           </div>
         </div>
       </div>
-
     </div>
   );
 }
@@ -558,17 +554,18 @@ function ExecTab({
           <label className={labelClass} htmlFor="exec-kind">
             {localize('com_tools_field_exec_kind')}
           </label>
-          <select
+          <SelectField
             id="exec-kind"
-            className="config-input w-full"
             value={draft.execKind}
-            onChange={(e) => onSet('execKind', e.target.value as Draft['execKind'])}
-          >
-            <option value="server">server</option>
-            <option value="desktop">desktop</option>
-            <option value="plugin">plugin</option>
-            <option value="web">web</option>
-          </select>
+            options={[
+              { value: 'server', label: 'server' },
+              { value: 'desktop', label: 'desktop' },
+              { value: 'plugin', label: 'plugin' },
+              { value: 'web', label: 'web' },
+            ]}
+            onChange={(v) => onSet('execKind', v as Draft['execKind'])}
+            aria-label={localize('com_tools_field_exec_kind')}
+          />
         </div>
         {draft.execKind === 'web' && (
           <div className="col-span-2">
@@ -590,19 +587,16 @@ function ExecTab({
             <label className={labelClass} htmlFor="exec-handler">
               {localize('com_tools_field_handler')}
             </label>
-            <select
+            <SelectField
               id="exec-handler"
-              className="config-input w-full"
-              value={draft.handler}
-              onChange={(e) => onSet('handler', e.target.value)}
-            >
-              <option value="">—</option>
-              {handlers.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
-              ))}
-            </select>
+              value={draft.handler || '__none__'}
+              options={[
+                { value: '__none__', label: '—' },
+                ...handlers.map((name) => ({ value: name, label: name })),
+              ]}
+              onChange={(v) => onSet('handler', v === '__none__' ? '' : v)}
+              aria-label={localize('com_tools_field_handler')}
+            />
           </div>
         ) : (
           <div>
@@ -727,17 +721,18 @@ function ExecTab({
                 <label className={labelClass} htmlFor="exec-dist-runtime">
                   {localize('com_tools_field_dist_runtime')}
                 </label>
-                <select
+                <SelectField
                   id="exec-dist-runtime"
-                  className="config-input w-full"
-                  value={draft.distRuntime}
-                  onChange={(e) => onSet('distRuntime', e.target.value)}
-                >
-                  <option value="">—</option>
-                  <option value="self-contained">self-contained</option>
-                  <option value="standard-python">standard-python</option>
-                  <option value="arcpy3">arcpy3</option>
-                </select>
+                  value={draft.distRuntime || '__none__'}
+                  options={[
+                    { value: '__none__', label: '—' },
+                    { value: 'self-contained', label: 'self-contained' },
+                    { value: 'standard-python', label: 'standard-python' },
+                    { value: 'arcpy3', label: 'arcpy3' },
+                  ]}
+                  onChange={(v) => onSet('distRuntime', v === '__none__' ? '' : v)}
+                  aria-label={localize('com_tools_field_dist_runtime')}
+                />
               </div>
               <div>
                 <label className={labelClass} htmlFor="exec-dist-launcher">

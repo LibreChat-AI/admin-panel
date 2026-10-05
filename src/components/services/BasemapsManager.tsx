@@ -1,15 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { TerraVoxService } from '@/server';
-import {
-  getBasemapsFn,
-  getServicesFn,
-  listServiceMapsFn,
-  replaceBasemapsFn,
-} from '@/server';
+import { getBasemapsFn, getServicesFn, listServiceMapsFn, replaceBasemapsFn } from '@/server';
 import { useLocalize } from '@/hooks';
-import { LoadingState, SearchInput } from '@/components/shared';
+import { CheckIndicator, InlineAction, LoadingState, SearchInput } from '@/components/shared';
 import { cn } from '@/utils';
+import { splitServiceUrl } from './ServiceEditDialog';
 
 /**
  * 底图管理（2.20.0）：从已绑定的地图服务里选地图加入底图组。数组顺序即
@@ -17,23 +13,6 @@ import { cn } from '@/utils';
  * 选择区为双列表（2.21.1，同前端添加图层弹窗）：左列服务（可搜索），右列
  * 该服务下的地图（可搜索、多选勾选），切换服务时清空本服务的选择。
  */
-
-const check =
-  'flex size-4 shrink-0 items-center justify-center rounded border border-(--cui-color-stroke-default)';
-
-function Check({ on }: { on: boolean }) {
-  return (
-    <span
-      className={cn(
-        check,
-        on && 'border-(--cui-color-accent-primary) bg-(--cui-color-accent-primary)',
-      )}
-      aria-hidden="true"
-    >
-      {on && <span className="size-2 rounded-sm bg-white" />}
-    </span>
-  );
-}
 
 const match = (text: string, q: string) => text.toLowerCase().includes(q.trim().toLowerCase());
 
@@ -45,7 +24,10 @@ export function BasemapsManager() {
   const [mapFilter, setMapFilter] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
 
-  const servicesQuery = useQuery({ queryFn: getServicesFn, queryKey: ['terravox', 'admin', 'services'] });
+  const servicesQuery = useQuery({
+    queryFn: getServicesFn,
+    queryKey: ['terravox', 'admin', 'services'],
+  });
   const services = (servicesQuery.data?.services ?? []).filter(
     (s: TerraVoxService) => s.type === 'iserver_map' && s.enabled,
   );
@@ -128,9 +110,7 @@ export function BasemapsManager() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-xs text-(--cui-color-text-muted)">
-        {localize('com_basemaps_hint')}
-      </p>
+      <p className="text-xs text-(--cui-color-text-muted)">{localize('com_basemaps_hint')}</p>
 
       <div className="flex flex-col gap-2 rounded-lg border border-(--cui-color-stroke-default) p-4">
         <div className="flex items-center gap-2">
@@ -160,13 +140,9 @@ export function BasemapsManager() {
               <code className="min-w-0 flex-1 truncate text-xs text-(--cui-color-text-muted)">
                 {b.url}
               </code>
-              <button
-                type="button"
-                className="rounded-md border border-(--cui-color-stroke-default) px-1.5 py-0.5 text-xs text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-danger)"
-                onClick={() => removeAt(i)}
-              >
+              <InlineAction label={localize('com_ui_delete')} danger onClick={() => removeAt(i)}>
                 ✕
-              </button>
+              </InlineAction>
             </div>
           ))}
         </div>
@@ -179,7 +155,7 @@ export function BasemapsManager() {
         <div className="grid grid-cols-2 gap-3">
           {/* ── 左列：服务（可搜索，点击选中） ── */}
           <div className="flex flex-col gap-1">
-            <p className="text-xs font-semibold uppercase text-(--cui-color-text-muted)">
+            <p className="text-xs font-semibold text-(--cui-color-text-muted) uppercase">
               {localize('com_basemaps_pick_service')}
             </p>
             <SearchInput
@@ -213,7 +189,7 @@ export function BasemapsManager() {
           </div>
           {/* ── 右列：所选服务的地图（可搜索，多选勾选） ── */}
           <div className="flex flex-col gap-1">
-            <p className="text-xs font-semibold uppercase text-(--cui-color-text-muted)">
+            <p className="text-xs font-semibold text-(--cui-color-text-muted) uppercase">
               {activeService
                 ? localize('com_basemaps_pick_layer_of', { service: activeService.name })
                 : localize('com_basemaps_pick_layer')}
@@ -248,7 +224,7 @@ export function BasemapsManager() {
                       )
                     }
                   >
-                    <Check on={on} />
+                    <CheckIndicator on={on} />
                     <span className="min-w-0 flex-1 truncate">{m.name}</span>
                   </button>
                 );
@@ -278,14 +254,4 @@ export function BasemapsManager() {
       </div>
     </div>
   );
-}
-
-function splitServiceUrl(url: string): { baseUrl: string; servicePath: string } {
-  const clean = url.trim().replace(/\/+$/, '');
-  const marker = '/iserver/services/';
-  const i = clean.indexOf(marker);
-  if (i < 0) {
-    return { baseUrl: clean, servicePath: '' };
-  }
-  return { baseUrl: clean.slice(0, i), servicePath: clean.slice(i + marker.length) };
 }

@@ -1,6 +1,6 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Icon, Select } from '@clickhouse/click-ui';
+import { Button, Checkbox, Icon, Select } from '@clickhouse/click-ui';
 import type { PendingToolUpdate, TerraVoxTool } from '@/server';
 import {
   createToolFn,
@@ -335,9 +335,7 @@ export function ToolCatalogTab() {
                         : [...(tool.expose ?? []), front];
                       exposeMutation.mutate({ tool, expose });
                     }}
-                    onToggle={(enabled) =>
-                      toggleMutation.mutate({ toolId: tool.tool_id, enabled })
-                    }
+                    onToggle={(enabled) => toggleMutation.mutate({ toolId: tool.tool_id, enabled })}
                     onEdit={() => {
                       setEditing(tool);
                       setEditOpen(true);
@@ -610,8 +608,8 @@ function ToolRow({
         </div>
       </td>
       <td className="px-4 py-3">
-        {/* 展示分组：input+datalist 直改（= display_group），清空即未分组。
-            与编辑对话框同控件风格；失焦/回车提交，避免逐键 PATCH。 */}
+        {/* 展示分组：标准下拉直改（= display_group），清空即未分组；选中即
+            提交，避免逐键 PATCH。 */}
         <GroupCell
           value={current}
           groups={options}
@@ -625,20 +623,15 @@ function ToolRow({
       <td className="px-4 py-3">
         {/* 暴露面直编（2.20.0）：ui / mcp 两个开关直接落在行上 */}
         <div className="flex items-center gap-3">
-          {(['ui', 'mcp'] as const).map((front) => {
-            const on = (tool.expose ?? []).includes(front);
-            return (
-              <label key={front} className="flex items-center gap-1.5 text-xs text-(--cui-color-text-muted)">
-                <input
-                  type="checkbox"
-                  checked={on}
-                  disabled={moving}
-                  onChange={() => onExposeToggle(tool, front)}
-                />
-                {front}
-              </label>
-            );
-          })}
+          {(['ui', 'mcp'] as const).map((front) => (
+            <Checkbox
+              key={front}
+              checked={(tool.expose ?? []).includes(front)}
+              disabled={moving}
+              onCheckedChange={() => onExposeToggle(tool, front)}
+              label={front}
+            />
+          ))}
         </div>
       </td>
       <td className="px-4 py-3">

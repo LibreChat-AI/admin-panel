@@ -157,7 +157,9 @@ const CHECK_RESULT = {
     version: '1.0.1',
     parameters: { type: 'object', properties: { query: { type: 'string' } } },
   },
-  checks: [{ key: 'launcher_missing', level: 'warn', message: 'launcher not defined in tool.json' }],
+  checks: [
+    { key: 'launcher_missing', level: 'warn', message: 'launcher not defined in tool.json' },
+  ],
   installable: true,
 };
 

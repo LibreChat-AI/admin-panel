@@ -1,6 +1,7 @@
 export { AccessDenied } from './AccessDenied';
 export { AddItemButton } from './AddItemButton';
 export { Avatar } from './Avatar';
+export { CheckIndicator } from './CheckIndicator';
 export { DatePickerCell } from './DatePickerCell';
 export { EditButton } from './EditButton';
 export { EmptyState } from './EmptyState';
