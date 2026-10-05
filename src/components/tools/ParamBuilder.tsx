@@ -374,7 +374,7 @@ export function ParamBuilder({
                 disabled={mode !== 'visual' || jsonError !== null}
               />
             </Dropdown.Trigger>
-            <Dropdown.Content>
+            <Dropdown.Content className="param-add-menu">
               {ADD_PRESETS.map((preset) => (
                 <Dropdown.Item
                   key={preset.key}
