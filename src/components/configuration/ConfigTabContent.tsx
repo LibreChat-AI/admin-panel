@@ -17,7 +17,12 @@ import { useLocalize } from '@/hooks';
  *  whose schema describes the value shape (not the entry keys). */
 const RECORD_ENTRY_COUNT_SECTIONS = new Set(['mcpServers']);
 
-/** Enter in a text input must never submit the tab form (and so "click" its default button). */
+/**
+ * Enter in a text input must never submit a form (and so "click" its default
+ * button). This also covers the create dialogs portaled from the tab, whose
+ * keydown bubbles here through the React tree: Enter there commits the
+ * field being typed in, never the half-filled dialog.
+ */
 function preventImplicitSubmit(event: KeyboardEvent<HTMLFormElement>) {
   if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.preventDefault();
 }

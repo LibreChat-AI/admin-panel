@@ -161,7 +161,7 @@ export function KeyValueField({
     onChange(next);
   };
 
-  const keyErrorId = (index: number) => `${id}-key-${index}-error`;
+  const keyErrorId = (index: number) => `${id.replace(/[^\w-]/g, '-')}-key-${index}-error`;
   const hasKeyError = (pair: t.KeyValuePair) =>
     BLOCK_UNSAFE_CONFIG_KEYS && isUnsafeConfigKey(pair.key);
   const deleteLabel = (pair: t.KeyValuePair, index: number) =>

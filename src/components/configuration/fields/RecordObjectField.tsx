@@ -1,5 +1,5 @@
 import { Button } from '@clickhouse/click-ui';
-import { useState, useCallback, useEffect, memo } from 'react';
+import { useId, useState, useCallback, useEffect, memo } from 'react';
 import type * as t from '@/types';
 import { BLOCK_UNSAFE_CONFIG_KEYS } from '@/constants';
 import { AddItemButton } from '@/components/shared';
@@ -136,6 +136,7 @@ const AddKeyInput = memo(function AddKeyInput({
   const localize = useLocalize();
   const [newKey, setNewKey] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const errorId = useId();
 
   const handleAdd = () => {
     const trimmed = newKey.trim();
@@ -158,7 +159,7 @@ const AddKeyInput = memo(function AddKeyInput({
           value={newKey}
           aria-label={localize('com_ui_key')}
           aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'record-add-key-error' : undefined}
+          aria-describedby={error ? errorId : undefined}
           onChange={(e) => {
             setNewKey(e.target.value);
             setError(null);
@@ -192,7 +193,7 @@ const AddKeyInput = memo(function AddKeyInput({
       </div>
       {error && (
         <p
-          id="record-add-key-error"
+          id={errorId}
           role="alert"
           className="m-0 text-xs text-(--cui-color-text-danger)"
         >
