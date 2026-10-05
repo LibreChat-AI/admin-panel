@@ -96,7 +96,15 @@ export function ServiceEditDialog({ open, service, saving, error, onSubmit, onCl
       return;
     }
     setClientError(null);
-    onSubmit({ ...draft, baseUrl, servicePath });
+    /* 用当前表单整体覆盖旧记录：按类型剥离无关字段，避免旧数据源/地图名
+     * 残留导致类型切换后保存被网关 400 拒绝 */
+    onSubmit({
+      ...draft,
+      baseUrl,
+      servicePath,
+      datasource: draft.type === 'iserver_data' ? draft.datasource.trim() : '',
+      mapName: draft.type === 'iserver_map' ? (draft.mapName ?? '').trim() : '',
+    });
   };
 
   const groupChips = [
@@ -125,7 +133,15 @@ export function ServiceEditDialog({ open, service, saving, error, onSubmit, onCl
                 key={type}
                 type="button"
                 aria-pressed={draft.type === type}
-                onClick={() => set('type', type)}
+                onClick={() =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    type,
+                    /* 覆盖清空另一类型的字段：地图服务不带数据源、数据服务不带地图名 */
+                    datasource: type === 'iserver_map' ? '' : prev.datasource,
+                    mapName: type === 'iserver_data' ? '' : prev.mapName,
+                  }))
+                }
                 className={cn(
                   'rounded-lg border px-3 py-1.5 transition-colors',
                   draft.type === type
@@ -262,7 +278,7 @@ function toDraft(service: TerraVoxService | null): Draft {
   if (!service) {
     return {
       name: '',
-      type: 'iserver_data',
+      type: 'iserver_map',
       serviceUrl: '',
       datasource: '',
       mapName: '',
