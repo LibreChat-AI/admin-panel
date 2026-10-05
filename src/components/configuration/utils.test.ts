@@ -669,8 +669,25 @@ describe('normalizeForSave', () => {
   const allowedDomains = findSchemaField(schemaTree, 'actions.allowedDomains');
   const entry = findSchemaField(schemaTree, 'endpoints.custom.0');
 
-  it('drops blank list items and trims the rest', () => {
-    expect(normalizeForSave([' example.com ', '', '   '], allowedDomains)).toEqual(['example.com']);
+  it('drops empty list items and keeps the rest verbatim', () => {
+    expect(normalizeForSave(['example.com', '', ''], allowedDomains)).toEqual(['example.com']);
+  });
+
+  it('preserves whitespace-significant strings such as stop sequences', () => {
+    const stop = findSchemaField(schemaTree, 'modelSpecs.list.0.preset.stop');
+    expect(normalizeForSave(['\n\nHuman:', ' ###', '\n'], stop)).toEqual([
+      '\n\nHuman:',
+      ' ###',
+      '\n',
+    ]);
+    expect(
+      normalizeForSave(
+        { stop: ['\n\n'] },
+        findSchemaField(schemaTree, 'endpoints.custom.0.addParams'),
+      ),
+    ).toEqual({
+      stop: ['\n\n'],
+    });
   });
 
   it('turns a list with only blank items into no value', () => {
@@ -718,8 +735,9 @@ describe('normalizeForSave', () => {
     expect(normalizeForSave(null, null)).toBeNull();
   });
 
-  it('treats a blank string as no value', () => {
-    expect(normalizeForSave('  ', null)).toBeUndefined();
+  it('treats an empty string as no value but keeps whitespace-only strings', () => {
+    expect(normalizeForSave('', null)).toBeUndefined();
+    expect(normalizeForSave('\n', null)).toBe('\n');
     expect(normalizeForSave('value', null)).toBe('value');
   });
 });
@@ -973,8 +991,8 @@ describe('collectImportEntries', () => {
     const { entries, skipped } = collectImportEntries(
       {
         actions: { allowedDomains: [''] },
-        registration: { allowedDomains: [' a.com ', ''] },
-        endpoints: { openAI: { titleModel: '   ' } },
+        registration: { allowedDomains: ['a.com', ''] },
+        endpoints: { openAI: { titleModel: '' } },
         balance: { startBalance: null },
       },
       schemaTree,

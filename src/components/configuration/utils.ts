@@ -64,7 +64,7 @@ export function findSchemaField(tree: t.SchemaField[], path: string): t.SchemaFi
 
 function normalizeArray(value: t.ConfigValue[], field: t.SchemaField | null): t.ConfigValue {
   if (value.every((item) => typeof item === 'string')) {
-    const items = (value as string[]).map((item) => item.trim()).filter((item) => item !== '');
+    const items = (value as string[]).filter((item) => item !== '');
     return items.length > 0 ? items : undefined;
   }
   const items: t.ConfigValue[] = [];
@@ -106,15 +106,16 @@ function childOf(field: t.SchemaField, key: string): t.SchemaField | null {
 }
 
 /**
- * Reduces a pending value to what should actually be stored: blank strings and
- * blank list items are dropped, and a list or record left with no items becomes
+ * Reduces a pending value to what should actually be stored: empty strings and
+ * empty list items are dropped (whitespace is preserved verbatim, since values
+ * like stop sequences are whitespace-significant), and a list or record left with no items becomes
  * `undefined` ("no value") instead of an empty override that LibreChat would
  * read as "allow nothing" / "match everything". Plain objects are kept even
  * when empty, since `{}` can be meaningful (e.g. a feature enabled with defaults).
  */
 export function normalizeForSave(value: t.ConfigValue, field: t.SchemaField | null): t.ConfigValue {
   if (value === undefined || value === null) return value;
-  if (typeof value === 'string') return value.trim() === '' ? undefined : value;
+  if (typeof value === 'string') return value === '' ? undefined : value;
   if (Array.isArray(value)) {
     if (value.length === 0) return undefined;
     const serialized = deepSerializeKVPairs(value);
