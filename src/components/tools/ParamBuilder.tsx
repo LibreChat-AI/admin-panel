@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { createPortal } from 'react-dom';
-import { Button, Select } from '@clickhouse/click-ui';
+import { Button, Dropdown, Select } from '@clickhouse/click-ui';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -211,9 +210,6 @@ export function ParamBuilder({
   const [rows, setRows] = useState<ParamRow[]>([]);
   const [mode, setMode] = useState<'visual' | 'json'>('visual');
   const [jsonError, setJsonError] = useState<string | null>(null);
-  const [addOpen, setAddOpen] = useState(false);
-  const [addPos, setAddPos] = useState({ top: 0, right: 0, maxHeight: 420 });
-  const [addColors, setAddColors] = useState({ bg: '', text: '' });
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   /* 外部 JSON → 行（仅在與上次输出不同时 parse：打开对话框 / JSON 模式手改） */
@@ -369,74 +365,27 @@ export function ParamBuilder({
             </button>
           ))}
         </div>
-        <div className="relative">
-          <span id="param-add-anchor" className="inline-block">
-          <Button
-            variant="secondary"
-            size="sm"
-            label={localize('com_param_add')}
-            disabled={mode !== 'visual' || jsonError !== null}
-            onClick={() => {
-              /* portal 进所属弹窗根（body 无主题变量且被遮罩挡住）；坐标按
-               * 弹窗包含块计算，菜单 maxHeight 内部滚动不越弹窗（实测）。 */
-              const el = document.getElementById('param-add-anchor');
-              if (el) {
-                const a = el.getBoundingClientRect();
-                const dlg = el.closest('[role="dialog"]');
-                if (dlg) {
-                  const d = dlg.getBoundingClientRect();
-                  const cs = getComputedStyle(dlg);
-                  setAddColors({ bg: cs.backgroundColor, text: cs.color });
-                  const top = a.bottom - d.top + 4;
-                  setAddPos({
-                    top,
-                    right: d.right - a.right,
-                    maxHeight: Math.max(120, d.height - top - 8),
-                  });
-                } else {
-                  setAddPos({ top: a.bottom + 4, right: window.innerWidth - a.right, maxHeight: 420 });
-                }
-              }
-              setAddOpen((o) => !o);
-            }}
-          />
-          </span>
-          {addOpen &&
-            createPortal(
-              <div
-                className="fixed rounded-lg py-1 shadow-lg"
-                role="menu"
-                style={{
-                  top: addPos.top,
-                  right: addPos.right,
-                  maxHeight: addPos.maxHeight,
-                  overflowY: 'auto',
-                  backgroundColor: addColors.bg || '#1f1f1c',
-                  color: addColors.text || '#ececec',
-                  border: '1px solid rgba(128, 128, 128, 0.4)',
-                }}
-              >
-                {ADD_PRESETS.map((preset) => (
-                  <button
-                    key={preset.key}
-                    type="button"
-                    role="menuitem"
-                    className="w-full px-3 py-1.5 text-start text-sm"
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'rgba(128, 128, 128, 0.25)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
-                    onClick={() => addParam(preset)}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </div>,
-              document.getElementById('param-add-anchor')?.closest('[role="dialog"]') ??
-              document.body,
-            )}
+        <div>
+          <Dropdown>
+            <Dropdown.Trigger asChild>
+              <Button
+                variant="secondary"
+                size="sm"
+                label={localize('com_param_add')}
+                disabled={mode !== 'visual' || jsonError !== null}
+              />
+            </Dropdown.Trigger>
+            <Dropdown.Content>
+              {ADD_PRESETS.map((preset) => (
+                <Dropdown.Item
+                  key={preset.key}
+                  onSelect={() => addParam(preset)}
+                >
+                  {preset.label}
+                </Dropdown.Item>
+              ))}
+            </Dropdown.Content>
+          </Dropdown>
         </div>
       </div>
 
