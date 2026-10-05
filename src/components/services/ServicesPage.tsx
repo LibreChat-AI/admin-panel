@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Icon } from '@clickhouse/click-ui';
+import { Icon, Tabs } from '@clickhouse/click-ui';
 import type { TerraVoxService } from '@/server';
 import {
   createServiceFn,
@@ -107,28 +107,12 @@ export function ServicesPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div role="tablist" className="flex gap-1 border-b border-(--cui-color-stroke-default)">
-        {([
-          ['bindings', localize('com_services_tab_bindings')],
-          ['basemaps', localize('com_services_tab_basemaps')],
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => setTab(key)}
-            className={cn(
-              '-mb-px rounded-t-lg border border-b-0 px-3 py-1.5 text-sm transition-colors',
-              tab === key
-                ? 'border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) font-medium text-(--cui-color-text-default)'
-                : 'border-transparent text-(--cui-color-text-muted) hover:text-(--cui-color-text-default)',
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} ariaLabel={localize('com_services_title')}>
+        <Tabs.TriggersList>
+          <Tabs.Trigger value="bindings">{localize('com_services_tab_bindings')}</Tabs.Trigger>
+          <Tabs.Trigger value="basemaps">{localize('com_services_tab_basemaps')}</Tabs.Trigger>
+        </Tabs.TriggersList>
+      </Tabs>
 
       {tab === 'basemaps' && <BasemapsManager />}
 

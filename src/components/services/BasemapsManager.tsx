@@ -8,6 +8,7 @@ import {
   replaceBasemapsFn,
 } from '@/server';
 import { useLocalize } from '@/hooks';
+import { SearchInput } from '@/components/shared';
 import { cn } from '@/utils';
 import { LoadingState } from '@/components/shared';
 
@@ -182,13 +183,12 @@ export function BasemapsManager() {
             <p className="text-xs font-semibold uppercase text-(--cui-color-text-muted)">
               {localize('com_basemaps_pick_service')}
             </p>
-            <input
-              type="search"
-              className="config-input w-full rounded-md border border-(--cui-color-stroke-default) bg-transparent px-2 py-1 text-xs text-(--cui-color-text-default)"
-              placeholder={localize('com_basemaps_search')}
-              aria-label={localize('com_basemaps_search')}
+            <SearchInput
               value={svcFilter}
-              onChange={(e) => setSvcFilter(e.target.value)}
+              onChange={setSvcFilter}
+              placeholder={localize('com_basemaps_search')}
+              ariaLabel={localize('com_basemaps_search')}
+              className="w-full"
             />
             <div className="flex max-h-80 min-h-40 flex-col gap-0.5 overflow-y-auto rounded-md border border-(--cui-color-stroke-default) p-1">
               {shownServices.map((s) => (
@@ -219,13 +219,12 @@ export function BasemapsManager() {
                 ? localize('com_basemaps_pick_layer_of', { service: activeService.name })
                 : localize('com_basemaps_pick_layer')}
             </p>
-            <input
-              type="search"
-              className="config-input w-full rounded-md border border-(--cui-color-stroke-default) bg-transparent px-2 py-1 text-xs text-(--cui-color-text-default)"
-              placeholder={localize('com_basemaps_search')}
-              aria-label={localize('com_basemaps_search')}
+            <SearchInput
               value={mapFilter}
-              onChange={(e) => setMapFilter(e.target.value)}
+              onChange={setMapFilter}
+              placeholder={localize('com_basemaps_search')}
+              ariaLabel={localize('com_basemaps_search')}
+              className="w-full"
             />
             <div className="flex max-h-80 min-h-40 flex-col gap-0.5 overflow-y-auto rounded-md border border-(--cui-color-stroke-default) p-1">
               {mapsQuery.isLoading && <LoadingState />}
