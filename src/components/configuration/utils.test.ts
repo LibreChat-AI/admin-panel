@@ -12,14 +12,13 @@ import {
   withLangfuseConfiguredPath,
   normalizeForSave,
   findSchemaField,
-  getValueAtPath,
   hasPathOverlap,
   resolveFieldValue,
   isConfigValueEqual,
   collectImportEntries,
   getUnknownConfigEntries,
 } from './utils';
-import { flattenObject, unflattenObject } from '@/utils';
+import { flattenObject, getValueAtPath, unflattenObject } from '@/utils';
 import { createField } from '@/test/fixtures';
 
 describe('getControlType', () => {
@@ -761,7 +760,7 @@ describe('buildSavePayload with a save context', () => {
     expect(payload.resets).toEqual(['actions.allowedDomains']);
   });
 
-  it('never writes an empty value over a librechat.yaml value it does not own', () => {
+  it('never writes an empty value over a librechat.yaml value it does not own, and says why', () => {
     const payload = buildSavePayload(
       new Set(['actions.allowedDomains']),
       { 'actions.allowedDomains': [] },
@@ -770,6 +769,18 @@ describe('buildSavePayload with a save context', () => {
     );
     expect(payload.saves).toEqual([]);
     expect(payload.resets).toEqual([]);
+    expect(payload.skipped).toEqual([{ fieldPath: 'actions.allowedDomains', reason: 'yamlValue' }]);
+  });
+
+  it('skips the dedicated Langfuse section on the generic config API', () => {
+    const payload = buildSavePayload(
+      new Set(['langfuse.baseUrl']),
+      { 'langfuse.baseUrl': 'https://lf.example.com' },
+      schemaPaths,
+      contextFor({}),
+    );
+    expect(payload.saves).toEqual([]);
+    expect(payload.skipped).toEqual([{ fieldPath: 'langfuse.baseUrl', reason: 'dedicated' }]);
   });
 
   it('resets a record whose last key/value pair was deleted', () => {
@@ -914,13 +925,14 @@ describe('isConfigValueEqual', () => {
 
 describe('collectImportEntries', () => {
   it('writes one entry per leaf of the pasted YAML, without the version key', () => {
-    const entries = collectImportEntries(
+    const { entries, skipped } = collectImportEntries(
       {
         version: '1.3.3',
         balance: { startBalance: 777 },
         interface: { webSearch: false },
         registration: { allowedDomains: ['a.com'] },
       },
+      schemaTree,
       new Set(),
     );
     expect(entries).toEqual([
@@ -928,12 +940,52 @@ describe('collectImportEntries', () => {
       { fieldPath: 'interface.webSearch', value: false },
       { fieldPath: 'registration.allowedDomains', value: ['a.com'] },
     ]);
+    expect(skipped).toEqual([]);
   });
 
   it('maps AppService aliases and drops empty objects', () => {
     expect(
-      collectImportEntries({ interfaceConfig: { customWelcome: 'hi' }, speech: {} }, new Set()),
+      collectImportEntries(
+        { interfaceConfig: { customWelcome: 'hi' }, speech: {} },
+        schemaTree,
+        new Set(),
+      ).entries,
     ).toEqual([{ fieldPath: 'interface.customWelcome', value: 'hi' }]);
+  });
+
+  it('merges an alias section with its canonical one leaf by leaf, the canonical key winning', () => {
+    const { entries } = collectImportEntries(
+      {
+        interfaceConfig: { customWelcome: 'alias', webSearch: false },
+        interface: { customWelcome: 'canonical', fileSearch: true },
+      },
+      schemaTree,
+      new Set(),
+    );
+    expect(entries).toEqual([
+      { fieldPath: 'interface.customWelcome', value: 'canonical' },
+      { fieldPath: 'interface.webSearch', value: false },
+      { fieldPath: 'interface.fileSearch', value: true },
+    ]);
+  });
+
+  it('normalizes values like an edit: blank items are dropped and emptied leaves are skipped', () => {
+    const { entries, skipped } = collectImportEntries(
+      {
+        actions: { allowedDomains: [''] },
+        registration: { allowedDomains: [' a.com ', ''] },
+        endpoints: { openAI: { titleModel: '   ' } },
+        balance: { startBalance: null },
+      },
+      schemaTree,
+      new Set(),
+    );
+    expect(entries).toEqual([{ fieldPath: 'registration.allowedDomains', value: ['a.com'] }]);
+    expect(skipped).toEqual([
+      { fieldPath: 'actions.allowedDomains', reason: 'empty' },
+      { fieldPath: 'endpoints.openAI.titleModel', reason: 'empty' },
+      { fieldPath: 'balance.startBalance', reason: 'empty' },
+    ]);
   });
 });
 

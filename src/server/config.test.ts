@@ -15,6 +15,7 @@ import {
   applyLangfuseSchemaVisibility,
   parseConfigYaml,
   checkConfigChanges,
+  findDroppedEntries,
   findUnknownConfigPaths,
 } from './config';
 import {
@@ -1372,6 +1373,12 @@ describe('parseConfigYaml (import)', () => {
     expect(parseConfigYaml('balance:\n  enabled: true\n').success).toBe(true);
   });
 
+  it('accepts a numeric version, which import ignores', () => {
+    const result = parseConfigYaml('version: 1.2\nbalance:\n  enabled: true\n');
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({ version: 1.2, balance: { enabled: true } });
+  });
+
   it('keeps keys the bundled schema does not know and reports them', () => {
     const result = parseConfigYaml(
       'version: 1.3.3\ninterface:\n  replyNotifications:\n    sound: false\n',
@@ -1465,6 +1472,54 @@ describe('checkConfigChanges (save pre-flight)', () => {
     expect(check.errors[0].error).toMatch(/us\.anthropic\.claude/);
   });
 
+  it('skips YAML-managed fields on every write path but allows removing their stale override', () => {
+    const check = checkConfigChanges(
+      [
+        {
+          fieldPath: 'endpoints.azureOpenAI.groups',
+          value: [{ group: 'evil', apiKey: 'sk-evil', instanceName: 'evil', models: {} }],
+        },
+        { fieldPath: 'endpoints.anthropic.vertex.region', value: 'us-east5' },
+        { fieldPath: 'endpoints.azureOpenAI.groups.0', value: { group: 'evil' } },
+      ],
+      ['endpoints.azureOpenAI.groups', 'endpoints.anthropic.vertex'],
+    );
+    expect(check.errors).toEqual([]);
+    expect(check.skipped).toEqual([
+      { fieldPath: 'endpoints.azureOpenAI.groups', reason: 'yamlOnly' },
+      { fieldPath: 'endpoints.anthropic.vertex.region', reason: 'yamlOnly' },
+      { fieldPath: 'endpoints.azureOpenAI.groups.0', reason: 'yamlOnly' },
+    ]);
+  });
+
+  it('rejects a save at an ancestor path that carries a YAML-managed field', () => {
+    const check = checkConfigChanges(
+      [{ fieldPath: 'endpoints.azureOpenAI', value: { titleModel: 'x', groups: [] } }],
+      [],
+    );
+    expect(check.errors).toHaveLength(1);
+    expect(check.errors[0].error).toMatch(
+      /^endpoints\.azureOpenAI\.groups: managed in librechat\.yaml/,
+    );
+  });
+
+  it('skips dedicated (Langfuse) and newer base-only (mcpAppSandbox) sections', () => {
+    const check = checkConfigChanges(
+      [
+        { fieldPath: 'balance.startBalance', value: 999 },
+        { fieldPath: 'mcpAppSandbox.enabled', value: true },
+        { fieldPath: 'langfuse.baseUrl', value: 'https://lf.example.com' },
+      ],
+      ['langfuse.baseUrl'],
+    );
+    expect(check.errors).toEqual([]);
+    expect(check.skipped).toEqual([
+      { fieldPath: 'mcpAppSandbox.enabled', reason: 'baseOnly' },
+      { fieldPath: 'langfuse.baseUrl', reason: 'dedicated' },
+      { fieldPath: 'langfuse.baseUrl', reason: 'dedicated' },
+    ]);
+  });
+
   it('skips base-only, YAML-only and permission paths instead of sending them', () => {
     const check = checkConfigChanges(
       [
@@ -1481,5 +1536,31 @@ describe('checkConfigChanges (save pre-flight)', () => {
       { fieldPath: 'interface.prompts', reason: 'permission' },
       { fieldPath: 'filters.messages', reason: 'baseOnly' },
     ]);
+  });
+});
+
+describe('findDroppedEntries (PATCH reply)', () => {
+  const batch: t.SaveEntry[] = [
+    { fieldPath: 'balance.startBalance', value: 999 },
+    { fieldPath: 'futureSection.enabled', value: true },
+  ];
+
+  it('treats a "No actionable" reply as the whole batch dropped', () => {
+    expect(findDroppedEntries(batch, { message: 'No actionable field entries provided' })).toEqual([
+      'balance.startBalance',
+      'futureSection.enabled',
+    ]);
+  });
+
+  it('reports entries whose section is missing from the stored overrides', () => {
+    const body = { config: { overrides: { balance: { startBalance: 999 } } } };
+    expect(findDroppedEntries(batch, body)).toEqual(['futureSection.enabled']);
+  });
+
+  it('reports nothing when every section was stored or the reply has no config', () => {
+    const body = { config: { overrides: { balance: {}, futureSection: { enabled: true } } } };
+    expect(findDroppedEntries(batch, body)).toEqual([]);
+    expect(findDroppedEntries(batch, { config: null })).toEqual([]);
+    expect(findDroppedEntries(batch, {})).toEqual([]);
   });
 });

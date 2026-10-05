@@ -192,11 +192,7 @@ const AddKeyInput = memo(function AddKeyInput({
         />
       </div>
       {error && (
-        <p
-          id={errorId}
-          role="alert"
-          className="m-0 text-xs text-(--cui-color-text-danger)"
-        >
+        <p id={errorId} role="alert" className="m-0 text-xs text-(--cui-color-text-danger)">
           {error}
         </p>
       )}

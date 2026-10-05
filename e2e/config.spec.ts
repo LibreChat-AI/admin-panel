@@ -65,6 +65,23 @@ test.describe('Configuration: Enter never edits another field', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await page.getByRole('button', { name: 'Discard' }).click();
   });
+
+  test('Enter in a create dialog still submits that dialog', async ({ page }) => {
+    await openTab(page, 'custom');
+    await page
+      .getByRole('button', { name: /Create endpoint/ })
+      .first()
+      .click();
+    const dialog = page.getByRole('dialog');
+    await dialog.locator('#create-endpoint-name').fill('Enter Endpoint');
+    await dialog.locator('#create-endpoint-apiKey').fill('key');
+    const baseURL = dialog.locator('#create-endpoint-baseURL');
+    await baseURL.fill('https://enter.example.com/v1');
+    await baseURL.press('Enter');
+    await expect(dialog).toHaveCount(0);
+    await expect(unsavedBar(page)).toHaveCount(1);
+    await page.getByRole('button', { name: 'Discard' }).click();
+  });
 });
 
 test.describe('Configuration: delete buttons', () => {

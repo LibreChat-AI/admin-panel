@@ -11,6 +11,7 @@ export function ConfirmSaveDialog({
   title,
   editedValues,
   originalValues,
+  revertValues = {},
   skipped = [],
   unsafeKeys = [],
   saving,
@@ -23,6 +24,7 @@ export function ConfirmSaveDialog({
   const count = entries.length;
   const blocked = unsafeKeys.length > 0;
   const countLabel = (() => {
+    if (count === 0 && skipped.length > 0) return localize('com_config_review_nothing_stored');
     if (count === 0) return localize('com_config_nothing_to_save_detail');
     if (count === 1) return localize('com_config_field_change_count', { count });
     return localize('com_config_field_change_count_plural', { count });
@@ -48,6 +50,8 @@ export function ConfirmSaveDialog({
                   path={path}
                   oldValue={maskSecretValues(originalValues?.[path], leafKey)}
                   newValue={maskSecretValues(newValue, leafKey)}
+                  isReset={path in revertValues}
+                  revertValue={maskSecretValues(revertValues[path], leafKey)}
                 />
               );
             })}
@@ -60,7 +64,7 @@ export function ConfirmSaveDialog({
               </p>
               <ul className="m-0 list-none p-0">
                 {skipped.map((item) => (
-                  <li key={item.fieldPath}>
+                  <li key={item.fieldPath} className="wrap-anywhere">
                     <code>{item.fieldPath}</code>: {localize(SKIP_REASON_KEYS[item.reason])}
                   </li>
                 ))}
@@ -111,7 +115,6 @@ export function ConfirmSaveDialog({
   );
 }
 
-
 function resolvePathLabel(path: string, newValue: t.ConfigValue, oldValue: t.ConfigValue): string {
   const match = /^(.+)\.(\d+)$/.exec(path);
   if (!match) return path;
@@ -123,19 +126,38 @@ function resolvePathLabel(path: string, newValue: t.ConfigValue, oldValue: t.Con
   return name ? `${match[1]}[${match[2]}] (${name})` : `${match[1]}[${match[2]}]`;
 }
 
+function ChangeRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2 px-3 py-2">
+      <span className="w-16 shrink-0 text-[10px] font-medium tracking-wide text-(--cui-color-text-muted) uppercase">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1 overflow-x-auto">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * One reviewed change. A reset (`isReset`) removes the target's own override:
+ * BEFORE is that override and REVERTS TO is the value that applies afterwards.
+ */
 function ChangeCard({
   path,
   oldValue,
   newValue,
+  isReset,
+  revertValue,
 }: {
   path: string;
   oldValue: t.ConfigValue;
   newValue: t.ConfigValue;
+  isReset: boolean;
+  revertValue: t.ConfigValue;
 }) {
   const localize = useLocalize();
   const notSet = localize('com_config_field_not_set');
   const isRemoval = newValue === undefined || newValue === null;
-  const isAddition = oldValue === undefined || oldValue === null;
+  const isAddition = !isReset && (oldValue === undefined || oldValue === null);
   const displayPath = resolvePathLabel(path, newValue, oldValue);
 
   return (
@@ -148,30 +170,31 @@ function ChangeCard({
           <Badge text={localize('com_config_field_added')} state="success" size="sm" />
         )}
         {isRemoval && (
-          <Badge text={localize('com_config_field_removed')} state="danger" size="sm" />
+          <Badge
+            text={localize(
+              isReset ? 'com_config_field_override_removed' : 'com_config_field_removed',
+            )}
+            state="danger"
+            size="sm"
+          />
         )}
       </div>
 
       <div className="flex flex-col gap-0 divide-y divide-(--cui-color-stroke-default)">
         {!isAddition && (
-          <div className="flex items-baseline gap-2 px-3 py-2">
-            <span className="w-12 shrink-0 text-[10px] font-medium tracking-wide text-(--cui-color-text-muted) uppercase">
-              {localize('com_config_field_before')}
-            </span>
-            <div className="min-w-0 flex-1 overflow-x-auto">
-              <ValueDisplay value={oldValue} notSet={notSet} variant="old" />
-            </div>
-          </div>
+          <ChangeRow label={localize('com_config_field_before')}>
+            <ValueDisplay value={oldValue} notSet={notSet} variant="old" />
+          </ChangeRow>
+        )}
+        {isReset && (
+          <ChangeRow label={localize('com_config_field_reverts_to')}>
+            <ValueDisplay value={revertValue} notSet={notSet} variant="new" />
+          </ChangeRow>
         )}
         {!isRemoval && (
-          <div className="flex items-baseline gap-2 px-3 py-2">
-            <span className="w-12 shrink-0 text-[10px] font-medium tracking-wide text-(--cui-color-text-muted) uppercase">
-              {localize('com_config_field_after')}
-            </span>
-            <div className="min-w-0 flex-1 overflow-x-auto">
-              <ValueDisplay value={newValue} notSet={notSet} variant="new" />
-            </div>
-          </div>
+          <ChangeRow label={localize('com_config_field_after')}>
+            <ValueDisplay value={newValue} notSet={notSet} variant="new" />
+          </ChangeRow>
         )}
       </div>
     </div>

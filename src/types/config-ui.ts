@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
 import type {
   ConfigValue,
+  ConfigRecord,
   FlatConfigMap,
   SchemaField,
   ReadOnlyReason,
+  SkipReason,
   UnsafeConfigKey,
   FieldValidationError,
 } from './config';
@@ -156,6 +158,8 @@ export interface ConfirmSaveDialogProps {
   title: string;
   editedValues: FlatConfigMap;
   originalValues: FlatConfigMap;
+  /** For each reset: the value the field falls back to once the override is removed. */
+  revertValues?: FlatConfigMap;
   /** Pending edits that will not be sent, with the reason. */
   skipped?: SkippedChange[];
   /** Keys the admin API would drop; while any exist the save is blocked. */
@@ -291,8 +295,8 @@ export interface FieldRendererProps {
   editSessionId?: number;
 }
 
-/** Where an import is written: base (all users) or one profile. */
-export type ImportTarget = { type: 'base' } | { type: 'scope'; scope: ConfigScope };
+/** Where a save or import is written: base (all users) or one profile. */
+export type WriteTarget = { type: 'base' } | { type: 'scope'; scope: ConfigScope };
 
 export interface ImportYamlDialogProps {
   open: boolean;
@@ -300,7 +304,7 @@ export interface ImportYamlDialogProps {
   /** The profile open on the page, offered (and preselected) as the import target. */
   currentScope?: ConfigScope;
   /** Writes the imported values to `target`; rejects with the reason when nothing was written. */
-  onImport: (appConfig: Record<string, ConfigValue>, target: ImportTarget) => Promise<void>;
+  onImport: (appConfig: ConfigRecord, target: WriteTarget) => Promise<void>;
 }
 
 export type ImportTab = 'upload' | 'paste';
@@ -317,7 +321,7 @@ export interface ImportParseResult {
   error?: string;
   validationErrors?: ImportValidationError[];
   /** The parsed YAML exactly as written: no schema defaults, unknown keys kept. */
-  appConfig: Record<string, ConfigValue> | null;
+  appConfig: ConfigRecord | null;
   /** Leaf paths the panel's bundled schema does not describe (kept on import). */
   unknownPaths: string[];
 }
@@ -412,10 +416,16 @@ export interface SaveEntry {
   value: ConfigValue;
 }
 
-/** A pending edit the panel will not send, and why. */
+/** A pending edit the panel will not send (or the backend did not store), and why. */
 export interface SkippedChange {
   fieldPath: string;
-  reason: ReadOnlyReason | 'permission';
+  reason: SkipReason;
+}
+
+/** Save entries collected from an imported YAML, and the leaves left out. */
+export interface ImportEntries {
+  entries: SaveEntry[];
+  skipped: SkippedChange[];
 }
 
 export interface SavePayload {
@@ -439,6 +449,13 @@ export interface SaveContext {
 export interface ConfigCheckResult {
   errors: FieldValidationError[];
   skipped: SkippedChange[];
+}
+
+/** Body of an admin API field PATCH reply: an error, a "nothing applied" message, or the stored config. */
+export interface PatchFieldsResponse {
+  error?: string;
+  message?: string;
+  config?: { overrides?: ConfigRecord } | null;
 }
 
 /** Outcome of a save call: how many entries the backend applied and which were dropped. */

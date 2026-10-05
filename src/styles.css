@@ -660,6 +660,18 @@ input[type='number'].config-input::-webkit-outer-spin-button {
   opacity: 0.5;
 }
 
+/* ── Toasts naming config paths: wrap long dotted paths, one per line ── */
+
+.toast-wrap,
+.toast-wrap * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-wrap [class*='description-content'] {
+  white-space: pre-line;
+}
+
 /* ── Config section collapse (grid-rows trick for auto height) ── */
 
 .config-section-grid {

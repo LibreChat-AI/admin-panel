@@ -110,3 +110,23 @@ export function unflattenObject(flat: t.FlatConfigMap): Record<string, t.ConfigV
   }
   return result;
 }
+
+/** Whether a config value is a plain object (a section, entry or record). */
+export function isConfigRecord(value: t.ConfigValue): value is t.ConfigRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Value at a dot-path, stepping into arrays by index. */
+export function getValueAtPath(root: t.ConfigValue, path: string): t.ConfigValue {
+  let current: t.ConfigValue = root;
+  for (const segment of path.split('.')) {
+    if (Array.isArray(current)) {
+      current = current[Number(segment)];
+    } else if (isConfigRecord(current)) {
+      current = current[segment];
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+}

@@ -1,20 +1,15 @@
 import type * as t from '@/types';
 import {
-  isInterfacePermissionPath,
   secretPathForPreviewPath,
   stripSecretPreviewValues,
   deepSerializeKVPairs,
+  getWriteSkipReason,
+  isConfigRecord,
   flattenObject,
 } from '@/utils';
-import { getReadOnlyReason, isYamlManagedPath } from '@/constants';
+import { APP_SERVICE_KEY_ALIASES } from '@/constants';
 
 const INDEXED_ARRAY_PATH_RE = /^(.+)\.(\d+)$/;
-
-type ConfigRecord = Record<string, t.ConfigValue>;
-
-function isConfigRecord(value: t.ConfigValue): value is ConfigRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /** The schema node for one element of an array field or one value of a record field. */
 function elementField(container: t.SchemaField, segment: string): t.SchemaField {
@@ -92,9 +87,9 @@ function normalizeRecordValue(
   return child;
 }
 
-function normalizeRecord(value: ConfigRecord, field: t.SchemaField | null): t.ConfigValue {
+function normalizeRecord(value: t.ConfigRecord, field: t.SchemaField | null): t.ConfigValue {
   const isRecord = field?.type === 'record';
-  const result: ConfigRecord = {};
+  const result: t.ConfigRecord = {};
   for (const [key, child] of Object.entries(value)) {
     const normalized =
       field && isRecord
@@ -123,7 +118,7 @@ export function normalizeForSave(value: t.ConfigValue, field: t.SchemaField | nu
   if (Array.isArray(value)) {
     if (value.length === 0) return undefined;
     const serialized = deepSerializeKVPairs(value);
-    if (!Array.isArray(serialized)) return normalizeRecord(serialized as ConfigRecord, field);
+    if (!Array.isArray(serialized)) return normalizeRecord(serialized as t.ConfigRecord, field);
     return normalizeArray(value, field);
   }
   if (isConfigRecord(value)) return normalizeRecord(value, field);
@@ -143,21 +138,6 @@ export function isConfigValueEqual(a: t.ConfigValue, b: t.ConfigValue): boolean 
   return keys.every((key) => Object.hasOwn(b, key) && isConfigValueEqual(a[key], b[key]));
 }
 
-/** Value at a dot-path, stepping into arrays by index. */
-export function getValueAtPath(root: t.ConfigValue, path: string): t.ConfigValue {
-  let current: t.ConfigValue = root;
-  for (const segment of path.split('.')) {
-    if (Array.isArray(current)) {
-      current = current[Number(segment)];
-    } else if (isConfigRecord(current)) {
-      current = current[segment];
-    } else {
-      return undefined;
-    }
-  }
-  return current;
-}
-
 /** Whether `paths` holds `path`, a descendant of it, or an ancestor of it. */
 export function hasPathOverlap(path: string, paths: ReadonlySet<string>): boolean {
   if (paths.has(path)) return true;
@@ -168,14 +148,6 @@ export function hasPathOverlap(path: string, paths: ReadonlySet<string>): boolea
   return false;
 }
 
-function skipReason(path: string, isReset: boolean): t.SkippedChange['reason'] | null {
-  if (isInterfacePermissionPath(path)) return 'permission';
-  const sectionReason = getReadOnlyReason(path);
-  if (sectionReason) return sectionReason;
-  if (!isReset && isYamlManagedPath(path)) return 'yamlOnly';
-  return null;
-}
-
 /**
  * Builds the save payload from touched edits. Only admin-touched paths are
  * submitted, secret display companion paths are dropped, and display
@@ -184,10 +156,11 @@ function skipReason(path: string, isReset: boolean): t.SkippedChange['reason'] |
  *
  * With a `context`, each value is normalized (`normalizeForSave`) and compared
  * with the normalized saved value: unchanged edits are dropped, and an edit
- * that empties a field becomes a reset when the target has its own override
- * (otherwise it is dropped, since there is nothing of the admin's to remove).
- * Paths the panel must not write (read-only sections, permission fields) are
- * reported in `skipped` instead of being sent.
+ * that empties a field becomes a reset when the target has its own override.
+ * Emptying a value the target does not own (one only librechat.yaml sets) is
+ * reported as `yamlValue`: there is no override to remove, and LibreChat has
+ * no way to store "unset". Paths the panel must not write (read-only sections,
+ * permission fields) are reported in `skipped` instead of being sent.
  */
 export function buildSavePayload(
   touchedPaths: ReadonlySet<string>,
@@ -201,7 +174,7 @@ export function buildSavePayload(
   const skipped: t.SkippedChange[] = [];
   for (const path of touched) {
     const edited = editedValues[path];
-    const reason = skipReason(path, edited === undefined);
+    const reason = getWriteSkipReason(path, edited === undefined);
     if (reason) {
       skipped.push({ fieldPath: path, reason });
       continue;
@@ -227,6 +200,8 @@ export function buildSavePayload(
       saves.push({ fieldPath: path, value: normalized });
     } else if (context.hasOverride(path)) {
       resets.push(path);
+    } else {
+      skipped.push({ fieldPath: path, reason: 'yamlValue' });
     }
   }
   return { touched, saves, resets, skipped };
@@ -649,37 +624,49 @@ export function mergeIndexedArrayEdits(
 /** Top-level YAML keys that describe the file itself rather than a setting. */
 const IMPORT_METADATA_KEYS = new Set(['version']);
 
-/** AppService output names accepted on import for their canonical config keys. */
-const IMPORT_KEY_ALIASES: Record<string, string> = {
-  interfaceConfig: 'interface',
-  turnstileConfig: 'turnstile',
-  mcpConfig: 'mcpServers',
-};
+/**
+ * Leaves of an imported YAML keyed by canonical dot-path. AppService alias
+ * sections (`interfaceConfig`) are merged with their canonical section
+ * (`interface`) leaf by leaf, the canonical spelling winning on conflicts.
+ */
+function flattenImport(appConfig: t.ConfigRecord): t.FlatConfigMap {
+  const aliased: t.ConfigRecord = {};
+  const canonical: t.ConfigRecord = {};
+  for (const [key, value] of Object.entries(appConfig)) {
+    if (IMPORT_METADATA_KEYS.has(key)) continue;
+    const alias = APP_SERVICE_KEY_ALIASES[key];
+    if (alias) aliased[alias] = value;
+    else canonical[key] = value;
+  }
+  return { ...flattenObject(aliased), ...flattenObject(canonical) };
+}
 
 /**
  * One save entry per leaf of the imported YAML, minus metadata, empty objects
- * and redacted secret companions. Fields the panel must not write (role
- * permissions, librechat.yaml-only sections) are kept here so the save
- * pre-flight reports them as skipped instead of dropping them silently.
+ * and redacted secret companions. Each value is normalized like a pending
+ * edit (`normalizeForSave`), so blank list items are dropped; a leaf left with
+ * no value (`allowedDomains: [""]`, `titleModel: ""`) is reported as skipped
+ * instead of being stored as an empty override that LibreChat would read as
+ * "allow nothing". Fields the panel must not write (role permissions,
+ * librechat.yaml-only sections) are kept here so the save pre-flight reports
+ * them as skipped instead of dropping them silently.
  */
 export function collectImportEntries(
-  appConfig: Record<string, t.ConfigValue>,
+  appConfig: t.ConfigRecord,
+  fields: t.SchemaField[],
   schemaPathSet: ReadonlySet<string>,
-): t.SaveEntry[] {
-  const settings: Record<string, t.ConfigValue> = {};
-  for (const [key, value] of Object.entries(appConfig)) {
-    if (IMPORT_METADATA_KEYS.has(key)) continue;
-    settings[IMPORT_KEY_ALIASES[key] ?? key] = value;
+): t.ImportEntries {
+  const entries: t.SaveEntry[] = [];
+  const skipped: t.SkippedChange[] = [];
+  for (const [fieldPath, raw] of Object.entries(flattenImport(appConfig))) {
+    if (isConfigRecord(raw) && Object.keys(raw).length === 0) continue;
+    if (secretPathForPreviewPath(fieldPath, schemaPathSet) != null) continue;
+    const value = normalizeForSave(
+      stripSecretPreviewValues(raw, fieldPath, schemaPathSet),
+      findSchemaField(fields, fieldPath),
+    );
+    if (value == null) skipped.push({ fieldPath, reason: 'empty' });
+    else entries.push({ fieldPath, value });
   }
-  return Object.entries(flattenObject(settings))
-    .filter(
-      ([fieldPath, value]) =>
-        value != null &&
-        !(isConfigRecord(value) && Object.keys(value).length === 0) &&
-        secretPathForPreviewPath(fieldPath, schemaPathSet) == null,
-    )
-    .map(([fieldPath, value]) => ({
-      fieldPath,
-      value: stripSecretPreviewValues(value, fieldPath, schemaPathSet),
-    }));
+  return { entries, skipped };
 }

@@ -5,3 +5,4 @@ export * from './interfacePermissions';
 export * from './keys';
 export * from './secrets';
 export * from './toast';
+export * from './writes';

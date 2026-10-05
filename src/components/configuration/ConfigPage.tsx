@@ -22,6 +22,7 @@ import {
 } from '@/server';
 import {
   flattenObject,
+  getValueAtPath,
   unflattenObject,
   findUnsafeKeys,
   hasConfigCapability,
@@ -37,7 +38,6 @@ import {
   hasPathOverlap,
   applyConfigEdit,
   collectImportEntries,
-  getValueAtPath,
   buildSavePayload,
   mergeIndexedArrayEdits,
   partitionScopeResetPaths,
@@ -115,7 +115,6 @@ function resolvedConfigOptions(scope: t.ScopeSelection) {
 
 /** Keys AppService adds to the resolved config that are runtime state, not settings. */
 const APP_SERVICE_INTERNAL_KEYS = new Set(['paths', 'config', 'availableTools']);
-
 
 export function ConfigPage({ initialTab, highlightField, initialScope }: t.ConfigPageProps) {
   const localize = useLocalize();
@@ -529,23 +528,27 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     setSaveError(null);
   }, []);
 
-  /** Toast for a finished write: a warning names anything the backend or panel did not store. */
+  /**
+   * Toast for a finished write. When anything was not stored, a warning lists
+   * each path with the reason, and only claims a save if something was written.
+   */
   const announceWrite = useCallback(
-    (skipped: t.SkippedChange[], successMessage: string) => {
+    (skipped: t.SkippedChange[], written: number, successMessage: string) => {
       if (skipped.length === 0) {
         notifySuccess(successMessage);
         return;
       }
-      const paths = skipped
-        .map((s) => `${s.fieldPath} (${localize(SKIP_REASON_KEYS[s.reason])})`)
-        .join(', ');
-      notifyWarning(localize('com_config_saved_with_skipped', { count: skipped.length, paths }));
+      const details = skipped
+        .map((s) => `${s.fieldPath}: ${localize(SKIP_REASON_KEYS[s.reason])}`)
+        .join('\n');
+      const titleKey = written > 0 ? 'com_config_saved_with_skipped' : 'com_config_nothing_stored';
+      notifyWarning(localize(titleKey, { count: skipped.length }), details);
     },
     [localize],
   );
 
   const invalidateTarget = useCallback(
-    (target: t.ImportTarget) => {
+    (target: t.WriteTarget) => {
       if (target.type === 'base') {
         return queryClient.invalidateQueries({ queryKey: ['baseConfig'] });
       }
@@ -566,7 +569,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
    */
   const writeChanges = useCallback(
     async (
-      target: t.ImportTarget,
+      target: t.WriteTarget,
       saves: t.SaveEntry[],
       resets: string[],
       inheritedMcpKeys: Set<string> = new Set(),
@@ -694,7 +697,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     [savePlan],
   );
 
-  const editTarget = useMemo<t.ImportTarget>(
+  const editTarget = useMemo<t.WriteTarget>(
     () =>
       isEditingScope && editingScope ? { type: 'scope', scope: editingScope } : { type: 'base' },
     [isEditingScope, editingScope],
@@ -706,7 +709,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     if (saves.length === 0 && resets.length === 0) {
       clearEdits();
       if (skipped.length > 0) {
-        announceWrite(skipped, localize('com_config_saved'));
+        announceWrite(skipped, 0, localize('com_config_saved'));
       } else {
         notifyInfo(localize('com_config_nothing_to_save'));
       }
@@ -761,8 +764,9 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
 
     try {
       const writeSkipped = await writeChanges(editTarget, saves, resets, inheritedMcpKeys);
+      const written = Math.max(0, saves.length + resets.length - writeSkipped.length);
       clearEdits();
-      announceWrite([...skipped, ...writeSkipped], localize('com_config_saved'));
+      announceWrite([...skipped, ...writeSkipped], written, localize('com_config_saved'));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setSaving(false);
@@ -792,17 +796,39 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     return result;
   }, [savePlan]);
 
-  /** BEFORE values come from the target being edited (the open profile's own values in scope mode). */
+  /**
+   * BEFORE values come from the target being edited (the open profile's own
+   * values in scope mode). A reset removes the target's own override, so its
+   * BEFORE is that stored override, not the merged value (which for a
+   * YAML-managed field such as Azure groups is the librechat.yaml one).
+   */
   const originalValuesForDialog = useMemo(() => {
     const result: t.FlatConfigMap = {};
+    const ownValues = isEditingScope ? baseActiveConfigValues : dbOverrides;
     for (const path of Object.keys(reviewValues)) {
-      const before = getValueAtPath(baseActiveConfigValues, path);
+      const before =
+        (reviewValues[path] === undefined ? getValueAtPath(ownValues, path) : undefined) ??
+        getValueAtPath(baseActiveConfigValues, path);
       if (before !== undefined) {
         result[path] = stripSecretPreviewValues(before, path, schemaPathSet);
       }
     }
     return result;
-  }, [reviewValues, baseActiveConfigValues, schemaPathSet]);
+  }, [reviewValues, isEditingScope, baseActiveConfigValues, dbOverrides, schemaPathSet]);
+
+  /**
+   * What each reset falls back to: the librechat.yaml value for base (or the
+   * schema default when the YAML does not set it), the base value for a profile.
+   */
+  const revertValuesForDialog = useMemo(() => {
+    const result: t.FlatConfigMap = {};
+    const fallback = isEditingScope ? configValues : baseConfigData?.yamlConfig;
+    for (const path of savePlan.resets) {
+      const value = getValueAtPath(fallback, path) ?? schemaDefaults[path];
+      result[path] = stripSecretPreviewValues(value, path, schemaPathSet);
+    }
+    return result;
+  }, [savePlan, isEditingScope, configValues, baseConfigData, schemaDefaults, schemaPathSet]);
 
   const [importSuccessMessage, setImportSuccessMessage] = useState<string | null>(null);
 
@@ -813,17 +839,27 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     dismissTimer.current = setTimeout(() => setImportSuccess(false), 4000);
   }, []);
 
-  /** Imports merge into the chosen target through the same validated write path as Save: only the keys present in the YAML are written, and nothing else is replaced. */
+  /**
+   * Imports merge into the chosen target through the same validated write
+   * path as Save: only the keys present in the YAML are written (normalized
+   * like an edit, so blank values are left out), and nothing else is replaced.
+   */
   const handleImport = useCallback(
-    async (appConfig: Record<string, t.ConfigValue>, target: t.ImportTarget) => {
-      const entries = collectImportEntries(appConfig, schemaPathSet);
-      if (entries.length === 0) throw new Error(localize('com_config_import_nothing'));
-      const skipped = await writeChanges(target, entries, []);
+    async (appConfig: t.ConfigRecord, target: t.WriteTarget) => {
+      const { entries, skipped: blank } = collectImportEntries(
+        appConfig,
+        schemaTree,
+        schemaPathSet,
+      );
+      if (entries.length === 0 && blank.length === 0) {
+        throw new Error(localize('com_config_import_nothing'));
+      }
+      const writeSkipped = entries.length > 0 ? await writeChanges(target, entries, []) : [];
       if (target.type === 'scope') {
         queryClient.invalidateQueries({ queryKey: ['roles'] });
         queryClient.invalidateQueries({ queryKey: ['groups'] });
       }
-      const written = entries.length - skipped.length;
+      const written = Math.max(0, entries.length - writeSkipped.length);
       const message =
         target.type === 'scope'
           ? localize('com_config_import_profile_success', {
@@ -831,10 +867,19 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               name: target.scope.name,
             })
           : localize('com_config_import_base_success', { count: written });
-      showImportSuccess(message);
-      if (skipped.length > 0) announceWrite(skipped, message);
+      if (written > 0) showImportSuccess(message);
+      const skipped = [...blank, ...writeSkipped];
+      if (skipped.length > 0) announceWrite(skipped, written, message);
     },
-    [schemaPathSet, localize, writeChanges, queryClient, showImportSuccess, announceWrite],
+    [
+      schemaTree,
+      schemaPathSet,
+      localize,
+      writeChanges,
+      queryClient,
+      showImportSuccess,
+      announceWrite,
+    ],
   );
 
   const highlightRef = useHighlightRef(highlightField);
@@ -1139,6 +1184,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
         }
         editedValues={reviewValues}
         originalValues={originalValuesForDialog}
+        revertValues={revertValuesForDialog}
         skipped={savePlan.skipped}
         unsafeKeys={unsafeKeys}
         saving={saving}

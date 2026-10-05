@@ -11,6 +11,9 @@ export type ConfigValue =
 /** Flattened config: dot-path keys to leaf values. Produced by `flattenObject()`. */
 export type FlatConfigMap = Record<string, ConfigValue>;
 
+/** An object-shaped config value (a section, entry or record), keyed by setting name. */
+export type ConfigRecord = { [key: string]: ConfigValue };
+
 export type ControlType =
   | 'toggle'
   | 'select'
@@ -83,6 +86,23 @@ export interface KeyValuePair {
 
 /** Why a config section or field cannot be edited in the panel. */
 export type ReadOnlyReason = 'baseOnly' | 'yamlOnly';
+
+/**
+ * Why a pending change is not stored:
+ * - `ReadOnlyReason`: the section (or YAML-managed field) is read only from librechat.yaml
+ * - `permission`: a role permission, managed on the roles page
+ * - `dedicated`: a section with its own settings API (e.g. the Langfuse connection)
+ * - `yamlValue`: clearing a value that only librechat.yaml sets (there is no override to remove)
+ * - `empty`: an imported value that is blank or empty
+ * - `notStored`: sent, but LibreChat's admin API did not store it
+ */
+export type SkipReason =
+  | ReadOnlyReason
+  | 'permission'
+  | 'dedicated'
+  | 'yamlValue'
+  | 'empty'
+  | 'notStored';
 
 /** A record key the admin API cannot store, and the dot-path of the object holding it. */
 export interface UnsafeConfigKey {

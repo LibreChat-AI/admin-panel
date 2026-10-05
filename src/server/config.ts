@@ -11,20 +11,25 @@ import {
 import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import {
-  filterInterfacePermissionChildren,
+  flattenObject,
+  findUnsafeKeys,
+  isConfigRecord,
+  getWriteSkipReason,
+  findYamlManagedValues,
+  stripSecretPreviewValues,
   isInterfacePermissionPath,
+  filterSecretPreviewFields,
   stripInterfacePermissionFields,
-} from '@/utils/interfacePermissions';
+  filterInterfacePermissionChildren,
+} from '@/utils';
 import {
   requireCapability,
   requireAnyCapability,
   requireAllSectionCapabilities,
 } from './capabilities';
-import { filterSecretPreviewFields, findUnsafeKeys, stripSecretPreviewValues } from '@/utils';
-import { BLOCK_UNSAFE_CONFIG_KEYS, getReadOnlyReason } from '@/constants';
+import { BLOCK_UNSAFE_CONFIG_KEYS, APP_SERVICE_KEY_ALIASES, getConfigSection } from '@/constants';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
 import { safeFieldPath } from './utils/validation';
-import { flattenObject } from '@/utils/format';
 import { apiFetch } from './utils/api';
 
 /** Hide the Langfuse section when LibreChat reports fanout is disabled. When the
@@ -715,7 +720,8 @@ export function findUnknownConfigPaths(raw: Record<string, t.ConfigValue>): stri
 
 /**
  * Parses and validates pasted/uploaded YAML for import. Validation runs on a
- * copy with `version` filled in (a snippet need not carry it), but the result
+ * copy with `version` replaced (a snippet need not carry it, and import never
+ * writes it, so `version: 1.2` read as a number must not fail), but the result
  * is the raw parsed object: no Zod defaults are injected and keys the bundled
  * schema does not know are kept (and reported in `unknownPaths`).
  */
@@ -744,8 +750,8 @@ export function parseConfigYaml(yamlContent: string): t.ImportParseResult {
     return failure('YAML did not produce a valid configuration object');
   }
 
-  const appConfig = rawConfig as Record<string, t.ConfigValue>;
-  const result = configSchema.safeParse({ version: '1.0.0', ...appConfig });
+  const appConfig = rawConfig as t.ConfigRecord;
+  const result = configSchema.safeParse({ ...appConfig, version: '1.0.0' });
   if (!result.success) {
     return failure(
       'Config validation failed',
@@ -845,15 +851,6 @@ function computeConfiguredPaths(
   return configured;
 }
 
-/** Maps AppService output keys back to canonical config schema keys.
- *  `interfaceConfig` → `interface` still flows through; permission fields
- *  within `interface` are stripped in `normalizeAppServiceKeys` below. */
-const APP_SERVICE_KEY_MAP: Record<string, string> = {
-  interfaceConfig: 'interface',
-  turnstileConfig: 'turnstile',
-  mcpConfig: 'mcpServers',
-};
-
 const AZURE_OPENAI_DERIVED_KEYS = new Set([
   'assistantGroups',
   'errors',
@@ -897,7 +894,7 @@ export function normalizeAppServiceKeys(
 ): Record<string, t.ConfigValue> {
   const result: Record<string, t.ConfigValue> = {};
   for (const [key, value] of Object.entries(raw)) {
-    result[APP_SERVICE_KEY_MAP[key] ?? key] = value;
+    result[APP_SERVICE_KEY_ALIASES[key] ?? key] = value;
   }
   if (
     result.interface &&
@@ -957,11 +954,14 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
 
   let yamlMcpKeys: string[] | undefined;
   let yamlMcpServers: Record<string, t.ConfigValue> | undefined;
+  /** librechat.yaml alone (no admin overrides): what a base field reverts to when its override is reset. */
+  let yamlConfig: t.ConfigRecord | undefined;
   if (baseOnlyResponse.ok) {
     const { config: baseOnlyRaw } = (await baseOnlyResponse.json()) as {
       config: Record<string, t.ConfigValue>;
     };
     const baseOnly = normalizeAppServiceKeys(baseOnlyRaw);
+    yamlConfig = baseOnly;
     const mcp = baseOnly.mcpServers;
     if (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) {
       /** Trust the baseOnly response when it has a valid mcpServers shape. The previous byte-equality fallback against `config.mcpServers` was a defensive heuristic for hypothetical legacy backends that ignore `?baseOnly`, but it false-negatived whenever an admin override happened to be a no-op (e.g. an admin set `title` to a value that already matched YAML), causing the YAML lock affordances to disappear for entries that should stay locked. The deployed LibreChat supports `?baseOnly` directly, so the heuristic is no longer earning its keep. */
@@ -977,6 +977,7 @@ export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async (
     schemaDefaults: flatDefaults,
     yamlMcpKeys,
     yamlMcpServers,
+    yamlConfig,
   };
 });
 
@@ -1006,12 +1007,12 @@ export function getSchemaPathSet(): Set<string> {
 }
 
 export function mergeIndexedArrayEntriesIntoBase(
-  entries: Array<{ fieldPath: string; value: unknown }>,
-  baseConfig: Record<string, t.ConfigValue>,
+  entries: t.SaveEntry[],
+  baseConfig: t.ConfigRecord,
   mergedPaths?: Set<string>,
-): Array<{ fieldPath: string; value: unknown }> {
-  const indexed = new Map<string, Map<number, unknown>>();
-  const rest: Array<{ fieldPath: string; value: unknown }> = [];
+): t.SaveEntry[] {
+  const indexed = new Map<string, Map<number, t.ConfigValue>>();
+  const rest: t.SaveEntry[] = [];
 
   for (const entry of entries) {
     const parsed = parseIndexedArrayPath(entry.fieldPath);
@@ -1053,7 +1054,7 @@ export function mergeIndexedArrayEntriesIntoBase(
   return rest;
 }
 
-function hasIndexedArrayEntry(entries: Array<{ fieldPath: string; value: unknown }>): boolean {
+function hasIndexedArrayEntry(entries: t.SaveEntry[]): boolean {
   for (const entry of entries) {
     if (parseIndexedArrayPath(entry.fieldPath)) return true;
   }
@@ -1061,9 +1062,9 @@ function hasIndexedArrayEntry(entries: Array<{ fieldPath: string; value: unknown
 }
 
 async function mergeIndexedArrayEntries(
-  entries: Array<{ fieldPath: string; value: unknown }>,
+  entries: t.SaveEntry[],
   mergedPaths?: Set<string>,
-): Promise<Array<{ fieldPath: string; value: unknown }>> {
+): Promise<t.SaveEntry[]> {
   if (!hasIndexedArrayEntry(entries)) return entries;
   const baseResponse = await apiFetch('/api/admin/config/base');
   if (!baseResponse.ok) throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
@@ -1073,39 +1074,42 @@ async function mergeIndexedArrayEntries(
   return mergeIndexedArrayEntriesIntoBase(entries, baseConfig, mergedPaths);
 }
 
-function isProcessMCPServerFieldPath(fieldPath: string, value: unknown): boolean {
+function isProcessMCPServerFieldPath(fieldPath: string, value: t.ConfigValue): boolean {
   const [section, serverName, field] = fieldPath.split('.');
   if (section !== 'mcpServers') return false;
   if (serverName == null) {
-    return (
-      value != null &&
-      typeof value === 'object' &&
-      Object.values(value as Record<string, unknown>).some(isProcessMCPServerConfig)
-    );
+    return isConfigRecord(value) && Object.values(value).some(isProcessMCPServerConfig);
   }
   if (field == null) return isProcessMCPServerConfig(value);
   return isProcessMCPServerField(field) || (field === 'type' && value === 'stdio');
 }
 
-function skipReasonForPath(fieldPath: string): t.SkippedChange['reason'] | null {
-  if (isInterfacePermissionPath(fieldPath)) return 'permission';
-  return getReadOnlyReason(fieldPath) ?? null;
-}
+const YAML_MANAGED_MESSAGE =
+  'managed in librechat.yaml; LibreChat ignores admin overrides for it until it re-processes them';
 
 /**
  * Pre-flight for a batch of saves and resets, run before anything is written:
  * per-entry schema validation (an indexed array entry such as
  * `endpoints.custom.3` is validated against the element schema), the
  * process-backed MCP field rule, and keys the admin API would silently drop.
- * Paths the panel must not write are reported in `skipped`.
+ * Paths the panel must not write (`getWriteSkipReason`: read-only and
+ * dedicated sections, role permissions, YAML-managed fields) are reported in
+ * `skipped`; this covers every write path, imports and profile saves included.
  */
 export function checkConfigChanges(saves: t.SaveEntry[], resets: string[]): t.ConfigCheckResult {
   const errors: t.FieldValidationError[] = [];
   const skipped: t.SkippedChange[] = [];
   for (const { fieldPath, value } of saves) {
-    const reason = skipReasonForPath(fieldPath);
+    const reason = getWriteSkipReason(fieldPath, false);
     if (reason) {
       skipped.push({ fieldPath, reason });
+      continue;
+    }
+    const managed = findYamlManagedValues(fieldPath, value);
+    if (managed.length > 0) {
+      errors.push(
+        ...managed.map((path) => ({ fieldPath, error: `${path}: ${YAML_MANAGED_MESSAGE}` })),
+      );
       continue;
     }
     if (isProcessMCPServerFieldPath(fieldPath, value)) {
@@ -1124,7 +1128,7 @@ export function checkConfigChanges(saves: t.SaveEntry[], resets: string[]): t.Co
     if (!result.success) errors.push({ fieldPath, error: result.error });
   }
   for (const fieldPath of resets) {
-    const reason = skipReasonForPath(fieldPath);
+    const reason = getWriteSkipReason(fieldPath, true);
     if (reason) skipped.push({ fieldPath, reason });
   }
   return { errors, skipped };
@@ -1135,7 +1139,7 @@ function formatCheckErrors(errors: t.FieldValidationError[]): string {
 }
 
 function topLevelSections(paths: string[]): string[] {
-  return [...new Set(paths.map((p) => p.split('.')[0]))];
+  return [...new Set(paths.map(getConfigSection))];
 }
 
 const saveEntrySchema = z.object({ fieldPath: safeFieldPath, value: z.unknown() });
@@ -1171,34 +1175,54 @@ export const validateConfigChangesFn = createServerFn({ method: 'POST' })
 const MAX_PATCH_ENTRIES = 100;
 
 /**
- * PATCHes field entries in batches the admin API accepts. A 200 "No actionable
- * field entries" reply means the backend stripped every entry in that batch;
- * those paths are returned as `dropped` so the caller never reports them saved.
+ * Entries of a PATCH batch that LibreChat did not store. A 200 "No actionable
+ * field entries" reply means it stripped the whole batch. Otherwise the reply
+ * carries the stored overrides, and an entry whose top-level section is absent
+ * from them was stripped (LibreChat strips by section: base-only, dedicated
+ * and newer sections this panel does not know about yet).
+ */
+export function findDroppedEntries(batch: t.SaveEntry[], body: t.PatchFieldsResponse): string[] {
+  if (body.message?.startsWith('No actionable')) return batch.map((e) => e.fieldPath);
+  const overrides = body.config?.overrides;
+  if (!isConfigRecord(overrides)) return [];
+  return batch
+    .filter((e) => !Object.hasOwn(overrides, getConfigSection(e.fieldPath)))
+    .map((e) => e.fieldPath);
+}
+
+/**
+ * PATCHes field entries in batches the admin API accepts. Entries LibreChat
+ * did not store are returned as `skipped` (`notStored`) so the caller never
+ * reports them saved. A batch rejected after earlier batches were written
+ * fails with an error that says how many entries were already saved.
  */
 export async function patchConfigFields(
   url: string,
-  entries: Array<{ fieldPath: string; value: unknown }>,
-  extraBody: Record<string, unknown> = {},
-): Promise<{ applied: number; dropped: string[] }> {
+  entries: t.SaveEntry[],
+  extraBody: { priority?: number } = {},
+): Promise<{ applied: number; skipped: t.SkippedChange[] }> {
   let applied = 0;
-  const dropped: string[] = [];
+  const skipped: t.SkippedChange[] = [];
   for (let i = 0; i < entries.length; i += MAX_PATCH_ENTRIES) {
     const batch = entries.slice(i, i + MAX_PATCH_ENTRIES);
     const response = await apiFetch(url, {
       method: 'PATCH',
       body: JSON.stringify({ entries: batch, ...extraBody }),
     });
-    const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+    const body = (await response.json().catch(() => ({}))) as t.PatchFieldsResponse;
     if (!response.ok) {
-      throw new Error(body.error ?? `Failed to save config: ${response.status}`);
+      const message = body.error ?? `Failed to save config: ${response.status}`;
+      throw new Error(
+        applied > 0
+          ? `${message} (${applied} of ${entries.length} entries were already saved)`
+          : message,
+      );
     }
-    if (body.message?.startsWith('No actionable')) {
-      dropped.push(...batch.map((e) => e.fieldPath));
-    } else {
-      applied += batch.length;
-    }
+    const dropped = findDroppedEntries(batch, body);
+    applied += batch.length - dropped.length;
+    skipped.push(...dropped.map((fieldPath) => ({ fieldPath, reason: 'notStored' as const })));
   }
-  return { applied, dropped };
+  return { applied, skipped };
 }
 
 /**
@@ -1233,19 +1257,12 @@ export const saveBaseConfigFn = createServerFn({ method: 'POST' })
 
     await requireAllSectionCapabilities(topLevelSections(merged.map((e) => e.fieldPath)));
 
-    const { applied, dropped } = await patchConfigFields(
+    const result = await patchConfigFields(
       `/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}/fields`,
       merged,
       { priority: 0 },
     );
-    return {
-      success: true,
-      applied,
-      skipped: [
-        ...skipped,
-        ...dropped.map((fieldPath) => ({ fieldPath, reason: 'baseOnly' as const })),
-      ],
-    };
+    return { success: true, applied: result.applied, skipped: [...skipped, ...result.skipped] };
   });
 
 export const resetBaseConfigFieldFn = createServerFn({ method: 'POST' })
