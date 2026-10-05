@@ -1,6 +1,6 @@
-import { PrincipalType } from 'librechat-data-provider';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { PrincipalType, ResourceType } from 'librechat-data-provider';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Badge, Button, DatePicker, Icon, Select, TextField } from '@clickhouse/click-ui';
 import type { AuditAction } from '@librechat/data-schemas';
@@ -9,9 +9,9 @@ import type * as t from '@/types';
 import {
   ACTION_BADGE_STATE,
   ACTION_LABEL_KEY,
-  auditCapability,
+  auditSubject,
+  auditTargetConfig,
   buildEntryPermalink,
-  capabilityLabel,
   dateToIsoDate,
   formatTimestamp,
   isoDateToDate,
@@ -31,15 +31,15 @@ import {
   SearchInput,
 } from '@/components/shared';
 import { useAnnouncement, useDebouncedFilter, useLocalize } from '@/hooks';
-import { getScopeTypeConfig, isAuditEntryId } from '@/constants';
 import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
+import { AUDIT_ACTIONS, isAuditEntryId } from '@/constants';
 import { cn } from '@/utils';
 
-const AUDIT_ACTIONS: readonly AuditAction[] = ['grant.assigned', 'grant.removed'] as const;
-const TARGET_TYPE_OPTIONS: readonly PrincipalType[] = [
+const TARGET_TYPE_OPTIONS: readonly t.AuditTargetType[] = [
   PrincipalType.USER,
   PrincipalType.GROUP,
   PrincipalType.ROLE,
+  ResourceType.AGENT,
 ] as const;
 /** Radix `Select.Item` cannot use `value=""` (Radix reserves empty string for
  * "no selection"). Use a non-empty sentinel and translate to `''` in state. */
@@ -109,7 +109,7 @@ export function AuditLogTab() {
   const [dateTo, setDateTo] = useState('');
   /** Bumped each clear so DatePicker remounts and drops its internal selection state. */
   const [dateResetNonce, setDateResetNonce] = useState(0);
-  const [targetTypeFilter, setTargetTypeFilter] = useState<PrincipalType | ''>('');
+  const [targetTypeFilter, setTargetTypeFilter] = useState<t.AuditTargetType | ''>('');
 
   const [currentPage, setCurrentPage] = useState(1);
   const { message: announcement, announce } = useAnnouncement();
@@ -502,7 +502,7 @@ export function AuditLogTab() {
             label={localize('com_audit_filter_target_type')}
             value={targetTypeFilter === '' ? TARGET_TYPE_ALL : targetTypeFilter}
             onSelect={(v) => {
-              setTargetTypeFilter(v === TARGET_TYPE_ALL ? '' : (v as PrincipalType));
+              setTargetTypeFilter(v === TARGET_TYPE_ALL ? '' : (v as t.AuditTargetType));
               resetToFirstPage();
             }}
             placeholder={localize('com_ui_all')}
@@ -663,8 +663,8 @@ function AuditLogTableRow({
   onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => void;
   localize: ReturnType<typeof useLocalize>;
 }) {
-  const targetConfig = getScopeTypeConfig(entry.target.type as PrincipalType);
-  const capability = auditCapability(entry);
+  const targetConfig = auditTargetConfig(entry.target.type);
+  const subject = auditSubject(entry, localize);
   return (
     <tr
       role="button"
@@ -704,10 +704,10 @@ function AuditLogTableRow({
       <td className="px-4 py-3">
         <div className="flex flex-col">
           <span className="text-(--cui-color-text-default)">
-            {capabilityLabel(capability, localize)}
+            {subject.label}
           </span>
           <span aria-hidden="true" className="text-[10px] text-(--cui-color-text-muted)">
-            {capability}
+            {subject.value}
           </span>
         </div>
       </td>

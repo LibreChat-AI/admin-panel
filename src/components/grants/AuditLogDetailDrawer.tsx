@@ -1,5 +1,4 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { PrincipalType } from 'librechat-data-provider';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge, Button, Icon, IconButton } from '@clickhouse/click-ui';
 import type { ReactElement } from 'react';
@@ -7,12 +6,14 @@ import type * as t from '@/types';
 import {
   ACTION_BADGE_STATE,
   ACTION_LABEL_KEY,
-  auditCapability,
+  ACTION_SUMMARY_KEY,
+  auditGrantee,
+  auditSubject,
+  auditTargetConfig,
   capabilityLabel,
   formatTimestamp,
 } from './auditLogUtils';
 import { LoadingState } from '@/components/shared';
-import { getScopeTypeConfig } from '@/constants';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -360,13 +361,10 @@ export function AuditLogDetailDrawer({
 
   if (!latestEntry) return null;
 
-  const targetConfig = getScopeTypeConfig(latestEntry.target.type as PrincipalType);
-  const capability = auditCapability(latestEntry);
+  const targetConfig = auditTargetConfig(latestEntry.target.type);
+  const subject = auditSubject(latestEntry, localize);
+  const grantee = auditGrantee(latestEntry);
   const targetLabel = latestEntry.target.name ?? latestEntry.target.id ?? '';
-  const summaryKey =
-    latestEntry.action === 'grant.assigned'
-      ? 'com_audit_detail_summary_assigned'
-      : 'com_audit_detail_summary_removed';
 
   const before = latestEntry.before ?? [];
   const after = latestEntry.after ?? [];
@@ -420,10 +418,11 @@ export function AuditLogDetailDrawer({
           <div className="flex-1 overflow-y-auto">
             <div className="flex flex-col gap-5 px-4 py-4">
               <p className="text-sm text-(--cui-color-text-default)">
-                {localize(summaryKey, {
+                {localize(ACTION_SUMMARY_KEY[latestEntry.action], {
                   actor: latestEntry.actor.name,
-                  capability: capabilityLabel(capability, localize),
+                  capability: subject.label,
                   target: targetLabel,
+                  grantee: grantee ? `${grantee.type} ${grantee.id}` : '',
                 })}
               </p>
 
@@ -479,13 +478,26 @@ export function AuditLogDetailDrawer({
                   </div>
                 </DetailRow>
 
+                {grantee && (
+                  <DetailRow label={localize('com_audit_detail_grantee')}>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm text-(--cui-color-text-default)">
+                        {grantee.type}
+                      </span>
+                      <CopyableMono
+                        value={grantee.id}
+                        ariaLabel={`Copy ${localize('com_audit_detail_grantee')} ID`}
+                        onCopyFailed={onCopyFailed}
+                      />
+                    </div>
+                  </DetailRow>
+                )}
+
                 <DetailRow label={localize('com_audit_detail_capability')}>
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-sm text-(--cui-color-text-default)">
-                      {capabilityLabel(capability, localize)}
-                    </span>
+                    <span className="text-sm text-(--cui-color-text-default)">{subject.label}</span>
                     <CopyableMono
-                      value={capability}
+                      value={subject.value}
                       ariaLabel={`Copy ${localize('com_audit_detail_capability')}`}
                       onCopyFailed={onCopyFailed}
                     />

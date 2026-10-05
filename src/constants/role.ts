@@ -55,6 +55,7 @@ export const PERMISSION_TYPE_SCHEMA: Record<PermissionTypes, Permissions[]> = {
     Permissions.SHARE_PUBLIC,
   ],
   [PermissionTypes.SHARED_LINKS]: [Permissions.CREATE, Permissions.SHARE, Permissions.SHARE_PUBLIC],
+  [PermissionTypes.SCHEDULES]: [Permissions.USE, Permissions.CREATE],
 };
 
 export function defaultPermissions(): t.RolePermissions {

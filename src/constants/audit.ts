@@ -22,6 +22,8 @@ import type {
 export const AUDIT_ACTIONS = [
   'grant.assigned',
   'grant.removed',
+  'permission.insights_assigned',
+  'permission.insights_removed',
 ] as const satisfies readonly AuditAction[];
 
 export const AUDIT_CATEGORIES = [
