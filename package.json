@@ -78,7 +78,7 @@
     "jsdom": "^27.4.0",
     "lint-staged": "^16.4.0",
     "patch-package": "^8.0.1",
-    "prettier": "^3.8.4",
+    "prettier": "^3.9.6",
     "prettier-plugin-tailwindcss": "^0.7.4",
     "typescript": "^5.9.3",
     "vite": "^8.0.16",
