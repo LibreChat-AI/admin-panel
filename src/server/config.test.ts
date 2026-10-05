@@ -13,6 +13,10 @@ import {
   mergeConfigArraySources,
   mergeIndexedArrayEntriesIntoBase,
   applyLangfuseSchemaVisibility,
+  parseConfigYaml,
+  checkConfigChanges,
+  findDroppedEntries,
+  findUnknownConfigPaths,
 } from './config';
 import {
   coerceEnumValue,
@@ -1349,5 +1353,214 @@ describe('validateFieldValue for endpoints', () => {
   it('gracefully handles unknown deep paths', () => {
     const result = validateFieldValue('endpoints.custom.0.nonexistent.deep', 'value');
     expect(result).toEqual({ success: true });
+  });
+});
+
+describe('parseConfigYaml (import)', () => {
+  it('returns the raw YAML without injected schema defaults (3 keys in, 3 leaves out)', () => {
+    const result = parseConfigYaml(
+      'balance:\n  startBalance: 777\ninterface:\n  customWelcome: hi\nregistration:\n  allowedDomains:\n    - a.com\n',
+    );
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({
+      balance: { startBalance: 777 },
+      interface: { customWelcome: 'hi' },
+      registration: { allowedDomains: ['a.com'] },
+    });
+  });
+
+  it('does not require a version key', () => {
+    expect(parseConfigYaml('balance:\n  enabled: true\n').success).toBe(true);
+  });
+
+  it('accepts a numeric version, which import ignores', () => {
+    const result = parseConfigYaml('version: 1.2\nbalance:\n  enabled: true\n');
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({ version: 1.2, balance: { enabled: true } });
+  });
+
+  it('keeps keys the bundled schema does not know and reports them', () => {
+    const result = parseConfigYaml(
+      'version: 1.3.3\ninterface:\n  replyNotifications:\n    sound: false\n',
+    );
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({
+      version: '1.3.3',
+      interface: { replyNotifications: { sound: false } },
+    });
+    expect(result.unknownPaths).toEqual(['interface.replyNotifications.sound']);
+  });
+
+  it('rejects keys the admin API would drop', () => {
+    const result = parseConfigYaml(
+      'endpoints:\n  bedrock:\n    inferenceProfiles:\n      us.anthropic.claude: arn:aws:x\n',
+    );
+    expect(result.success).toBe(false);
+    expect(result.validationErrors?.[0]).toMatchObject({
+      path: 'endpoints.bedrock.inferenceProfiles',
+    });
+  });
+
+  it('reports the line of a YAML syntax error', () => {
+    const result = parseConfigYaml('balance:\n  startBalance: [1\n');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/line \d+/);
+  });
+
+  it('reports schema validation errors', () => {
+    const result = parseConfigYaml('balance:\n  startBalance: lots\n');
+    expect(result.success).toBe(false);
+    expect(result.validationErrors?.[0].path).toBe('balance.startBalance');
+  });
+});
+
+describe('findUnknownConfigPaths', () => {
+  it('lists leaf paths the schema cannot resolve', () => {
+    expect(
+      findUnknownConfigPaths({ balance: { startBalance: 1 }, brandNew: { flag: true } }),
+    ).toEqual(['brandNew.flag']);
+  });
+});
+
+describe('checkConfigChanges (save pre-flight)', () => {
+  it('passes valid entries, including an indexed array entry', () => {
+    const check = checkConfigChanges(
+      [
+        { fieldPath: 'balance.startBalance', value: 100 },
+        {
+          fieldPath: 'endpoints.custom.2',
+          value: { name: 'Proxy', apiKey: 'k', baseURL: 'https://p', models: { default: ['m'] } },
+        },
+      ],
+      ['balance.refillAmount'],
+    );
+    expect(check).toEqual({ errors: [], skipped: [] });
+  });
+
+  it('validates an indexed array entry against the element schema', () => {
+    const check = checkConfigChanges(
+      [{ fieldPath: 'endpoints.custom.0', value: { name: 'Proxy', iconURL: 42 } }],
+      [],
+    );
+    expect(check.errors).toHaveLength(1);
+    expect(check.errors[0].fieldPath).toBe('endpoints.custom.0');
+  });
+
+  it('rejects an invalid MCP title before anything is written', () => {
+    const check = checkConfigChanges(
+      [{ fieldPath: 'mcpServers.final-server.title', value: 'Bad_Title!' }],
+      ['mcpServers.renamer'],
+    );
+    expect(check.errors.map((e) => e.fieldPath)).toEqual(['mcpServers.final-server.title']);
+  });
+
+  it('rejects process-backed MCP fields with the field named', () => {
+    const check = checkConfigChanges([{ fieldPath: 'mcpServers.local.command', value: 'npx' }], []);
+    expect(check.errors[0].error).toMatch(/mcpServers\.local\.command/);
+  });
+
+  it('rejects keys the admin API would silently drop', () => {
+    const check = checkConfigChanges(
+      [
+        {
+          fieldPath: 'endpoints.bedrock.inferenceProfiles',
+          value: { 'us.anthropic.claude': 'arn:aws:x' },
+        },
+      ],
+      [],
+    );
+    expect(check.errors[0].error).toMatch(/us\.anthropic\.claude/);
+  });
+
+  it('skips YAML-managed fields on every write path but allows removing their stale override', () => {
+    const check = checkConfigChanges(
+      [
+        {
+          fieldPath: 'endpoints.azureOpenAI.groups',
+          value: [{ group: 'evil', apiKey: 'sk-evil', instanceName: 'evil', models: {} }],
+        },
+        { fieldPath: 'endpoints.anthropic.vertex.region', value: 'us-east5' },
+        { fieldPath: 'endpoints.azureOpenAI.groups.0', value: { group: 'evil' } },
+      ],
+      ['endpoints.azureOpenAI.groups', 'endpoints.anthropic.vertex'],
+    );
+    expect(check.errors).toEqual([]);
+    expect(check.skipped).toEqual([
+      { fieldPath: 'endpoints.azureOpenAI.groups', reason: 'yamlOnly' },
+      { fieldPath: 'endpoints.anthropic.vertex.region', reason: 'yamlOnly' },
+      { fieldPath: 'endpoints.azureOpenAI.groups.0', reason: 'yamlOnly' },
+    ]);
+  });
+
+  it('rejects a save at an ancestor path that carries a YAML-managed field', () => {
+    const check = checkConfigChanges(
+      [{ fieldPath: 'endpoints.azureOpenAI', value: { titleModel: 'x', groups: [] } }],
+      [],
+    );
+    expect(check.errors).toHaveLength(1);
+    expect(check.errors[0].error).toMatch(
+      /^endpoints\.azureOpenAI\.groups: managed in librechat\.yaml/,
+    );
+  });
+
+  it('skips dedicated (Langfuse) and newer base-only (mcpAppSandbox) sections', () => {
+    const check = checkConfigChanges(
+      [
+        { fieldPath: 'balance.startBalance', value: 999 },
+        { fieldPath: 'mcpAppSandbox.enabled', value: true },
+        { fieldPath: 'langfuse.baseUrl', value: 'https://lf.example.com' },
+      ],
+      ['langfuse.baseUrl'],
+    );
+    expect(check.errors).toEqual([]);
+    expect(check.skipped).toEqual([
+      { fieldPath: 'mcpAppSandbox.enabled', reason: 'baseOnly' },
+      { fieldPath: 'langfuse.baseUrl', reason: 'dedicated' },
+      { fieldPath: 'langfuse.baseUrl', reason: 'dedicated' },
+    ]);
+  });
+
+  it('skips base-only, YAML-only and permission paths instead of sending them', () => {
+    const check = checkConfigChanges(
+      [
+        { fieldPath: 'filters.messages.pii.action', value: 'block' },
+        { fieldPath: 'cloudfront.urlExpiry', value: 3601 },
+        { fieldPath: 'interface.prompts', value: false },
+      ],
+      ['filters.messages'],
+    );
+    expect(check.errors).toEqual([]);
+    expect(check.skipped).toEqual([
+      { fieldPath: 'filters.messages.pii.action', reason: 'baseOnly' },
+      { fieldPath: 'cloudfront.urlExpiry', reason: 'yamlOnly' },
+      { fieldPath: 'interface.prompts', reason: 'permission' },
+      { fieldPath: 'filters.messages', reason: 'baseOnly' },
+    ]);
+  });
+});
+
+describe('findDroppedEntries (PATCH reply)', () => {
+  const batch: t.SaveEntry[] = [
+    { fieldPath: 'balance.startBalance', value: 999 },
+    { fieldPath: 'futureSection.enabled', value: true },
+  ];
+
+  it('treats a "No actionable" reply as the whole batch dropped', () => {
+    expect(findDroppedEntries(batch, { message: 'No actionable field entries provided' })).toEqual([
+      'balance.startBalance',
+      'futureSection.enabled',
+    ]);
+  });
+
+  it('reports entries whose section is missing from the stored overrides', () => {
+    const body = { config: { overrides: { balance: { startBalance: 999 } } } };
+    expect(findDroppedEntries(batch, body)).toEqual(['futureSection.enabled']);
+  });
+
+  it('reports nothing when every section was stored or the reply has no config', () => {
+    const body = { config: { overrides: { balance: {}, futureSection: { enabled: true } } } };
+    expect(findDroppedEntries(batch, body)).toEqual([]);
+    expect(findDroppedEntries(batch, { config: null })).toEqual([]);
+    expect(findDroppedEntries(batch, {})).toEqual([]);
   });
 });

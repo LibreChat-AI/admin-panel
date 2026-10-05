@@ -80,9 +80,7 @@ export function stripInterfacePermissionFields(
 /** Filters a schema tree's interface children, removing boolean permission fields
  *  entirely and stripping permission sub-key children from composite fields.
  *  Returns only fields/sub-fields that are editable in config overrides. */
-export function filterInterfacePermissionChildren(
-  children: t.SchemaField[],
-): t.SchemaField[] {
+export function filterInterfacePermissionChildren(children: t.SchemaField[]): t.SchemaField[] {
   return children.reduce<t.SchemaField[]>((acc, child) => {
     if (!INTERFACE_PERMISSION_FIELDS.has(child.key)) {
       acc.push(child);
@@ -94,34 +92,4 @@ export function filterInterfacePermissionChildren(
     }
     return acc;
   }, []);
-}
-
-/** Keys added by AppService that should be replaced with their canonical names.
- *  After normalization, these legacy keys must be deleted to avoid persisting
- *  redundant paths to the DB. */
-const LEGACY_APP_SERVICE_KEYS = ['interfaceConfig', 'turnstileConfig', 'mcpConfig'] as const;
-
-/** Normalizes an AppService/fallback config object to use canonical schema keys
- *  and strips interface permission fields. Removes legacy AppService key aliases
- *  so they aren't persisted alongside the canonical keys. */
-export function normalizeImportConfig<T extends Record<string, unknown>>(appConfig: T): T {
-  const normalized = {
-    ...appConfig,
-    interface: appConfig.interfaceConfig ?? appConfig.interface,
-    turnstile: appConfig.turnstileConfig ?? appConfig.turnstile,
-    mcpServers: appConfig.mcpConfig ?? appConfig.mcpServers,
-  };
-  for (const key of LEGACY_APP_SERVICE_KEYS) {
-    delete normalized[key];
-  }
-  if (
-    normalized.interface &&
-    typeof normalized.interface === 'object' &&
-    !Array.isArray(normalized.interface)
-  ) {
-    normalized.interface = stripInterfacePermissionFields(
-      normalized.interface as Partial<TInterfaceConfig>,
-    );
-  }
-  return normalized as T;
 }

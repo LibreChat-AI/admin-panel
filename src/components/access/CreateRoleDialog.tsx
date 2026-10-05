@@ -187,12 +187,14 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={resetAndClose}
               disabled={mutation.isPending}
             />
             <Button
+              htmlType="submit"
               type="primary"
               label={localize('com_access_create_role')}
               disabled={!name.trim() || mutation.isPending}

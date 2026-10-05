@@ -49,12 +49,14 @@ export function FormDialog({
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={onClose}
               disabled={saving}
             />
             <Button
+              htmlType="submit"
               type="primary"
               label={submitLabel}
               disabled={submitDisabled || saving}

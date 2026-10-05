@@ -80,6 +80,7 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
           placeholder={localize('com_access_search_roles')}
         />
         <Button
+          htmlType="button"
           type="secondary"
           iconLeft="plus"
           label={localize('com_access_create_role')}

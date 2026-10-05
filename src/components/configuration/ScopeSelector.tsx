@@ -400,6 +400,7 @@ export function ScopeSelector({
         />
         {canAssign && (
           <Button
+            htmlType="button"
             type="secondary"
             iconLeft="plus"
             label={localize('com_scope_create')}

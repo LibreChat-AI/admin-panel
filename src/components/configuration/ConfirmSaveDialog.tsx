@@ -2,12 +2,18 @@ import yaml from 'js-yaml';
 import { Badge, Button, Dialog } from '@clickhouse/click-ui';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
+import { SKIP_REASON_KEYS } from '@/constants';
+import { maskSecretValues } from '@/utils';
 import { useLocalize } from '@/hooks';
 
 export function ConfirmSaveDialog({
   open,
+  title,
   editedValues,
   originalValues,
+  revertValues = {},
+  skipped = [],
+  unsafeKeys = [],
   saving,
   error,
   onConfirm,
@@ -16,10 +22,13 @@ export function ConfirmSaveDialog({
   const localize = useLocalize();
   const entries = Object.entries(editedValues).sort(([a], [b]) => a.localeCompare(b));
   const count = entries.length;
-  const countLabel =
-    count === 1
-      ? localize('com_config_field_change_count', { count })
-      : localize('com_config_field_change_count_plural', { count });
+  const blocked = unsafeKeys.length > 0;
+  const countLabel = (() => {
+    if (count === 0 && skipped.length > 0) return localize('com_config_review_nothing_stored');
+    if (count === 0) return localize('com_config_nothing_to_save_detail');
+    if (count === 1) return localize('com_config_field_change_count', { count });
+    return localize('com_config_field_change_count_plural', { count });
+  })();
 
   return (
     <Dialog
@@ -28,36 +37,76 @@ export function ConfirmSaveDialog({
         if (!isOpen) onCancel();
       }}
     >
-      <Dialog.Content
-        title={localize('com_config_confirm_save_title')}
-        showClose
-        onClose={onCancel}
-        className="modal-frost"
-      >
+      <Dialog.Content title={title} showClose onClose={onCancel} className="modal-frost">
         <div className="flex flex-col gap-4">
           <p className="text-sm text-(--cui-color-text-muted)">{countLabel}</p>
 
           <div className="flex max-h-80 flex-col gap-3 overflow-y-auto pr-1">
             {entries.map(([path, newValue]) => {
-              const oldValue = originalValues?.[path];
-              return <ChangeCard key={path} path={path} oldValue={oldValue} newValue={newValue} />;
+              const leafKey = path.slice(path.lastIndexOf('.') + 1);
+              return (
+                <ChangeCard
+                  key={path}
+                  path={path}
+                  oldValue={maskSecretValues(originalValues?.[path], leafKey)}
+                  newValue={maskSecretValues(newValue, leafKey)}
+                  isReset={path in revertValues}
+                  revertValue={maskSecretValues(revertValues[path], leafKey)}
+                />
+              );
             })}
           </div>
 
-          {error && <p className="text-sm text-(--cui-color-text-danger)">{error}</p>}
+          {skipped.length > 0 && (
+            <div className="rounded-lg border border-(--cui-color-stroke-default) px-3 py-2 text-xs text-(--cui-color-text-muted)">
+              <p className="m-0 mb-1 font-medium text-(--cui-color-text-default)">
+                {localize('com_config_review_skipped', { count: skipped.length })}
+              </p>
+              <ul className="m-0 list-none p-0">
+                {skipped.map((item) => (
+                  <li key={item.fieldPath} className="wrap-anywhere">
+                    <code>{item.fieldPath}</code>: {localize(SKIP_REASON_KEYS[item.reason])}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {blocked && (
+            <div role="alert" className="rounded-lg bg-[rgba(220,38,38,0.1)] px-3 py-2 text-xs">
+              <p className="m-0 mb-1 text-sm font-medium text-(--cui-color-text-danger)">
+                {localize('com_config_unsafe_keys_blocked')}
+              </p>
+              <ul className="m-0 list-none p-0 text-(--cui-color-text-danger)">
+                {unsafeKeys.map(({ path, key }) => (
+                  <li key={`${path}:${key}`}>
+                    <code>{path}</code> → <code>{key}</code>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {error && (
+            <p role="alert" className="text-sm text-(--cui-color-text-danger)">
+              {error}
+            </p>
+          )}
 
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={onCancel}
               disabled={saving}
             />
             <Button
+              htmlType="button"
               type="primary"
               label={saving ? localize('com_ui_loading') : localize('com_config_save')}
               onClick={onConfirm}
-              disabled={saving}
+              disabled={saving || blocked}
             />
           </div>
         </div>
@@ -70,25 +119,45 @@ function resolvePathLabel(path: string, newValue: t.ConfigValue, oldValue: t.Con
   const match = /^(.+)\.(\d+)$/.exec(path);
   if (!match) return path;
   const val = (newValue ?? oldValue) as Record<string, t.ConfigValue> | undefined;
-  const name = val && typeof val === 'object' && !Array.isArray(val)
-    ? (val as Record<string, string>).name
-    : undefined;
+  const name =
+    val && typeof val === 'object' && !Array.isArray(val)
+      ? (val as Record<string, string>).name
+      : undefined;
   return name ? `${match[1]}[${match[2]}] (${name})` : `${match[1]}[${match[2]}]`;
 }
 
+function ChangeRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2 px-3 py-2">
+      <span className="w-16 shrink-0 text-[10px] font-medium tracking-wide text-(--cui-color-text-muted) uppercase">
+        {label}
+      </span>
+      <div className="min-w-0 flex-1 overflow-x-auto">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * One reviewed change. A reset (`isReset`) removes the target's own override:
+ * BEFORE is that override and REVERTS TO is the value that applies afterwards.
+ */
 function ChangeCard({
   path,
   oldValue,
   newValue,
+  isReset,
+  revertValue,
 }: {
   path: string;
   oldValue: t.ConfigValue;
   newValue: t.ConfigValue;
+  isReset: boolean;
+  revertValue: t.ConfigValue;
 }) {
   const localize = useLocalize();
   const notSet = localize('com_config_field_not_set');
   const isRemoval = newValue === undefined || newValue === null;
-  const isAddition = oldValue === undefined || oldValue === null;
+  const isAddition = !isReset && (oldValue === undefined || oldValue === null);
   const displayPath = resolvePathLabel(path, newValue, oldValue);
 
   return (
@@ -101,30 +170,31 @@ function ChangeCard({
           <Badge text={localize('com_config_field_added')} state="success" size="sm" />
         )}
         {isRemoval && (
-          <Badge text={localize('com_config_field_removed')} state="danger" size="sm" />
+          <Badge
+            text={localize(
+              isReset ? 'com_config_field_override_removed' : 'com_config_field_removed',
+            )}
+            state="danger"
+            size="sm"
+          />
         )}
       </div>
 
       <div className="flex flex-col gap-0 divide-y divide-(--cui-color-stroke-default)">
         {!isAddition && (
-          <div className="flex items-baseline gap-2 px-3 py-2">
-            <span className="w-12 shrink-0 text-[10px] font-medium tracking-wide text-(--cui-color-text-muted) uppercase">
-              {localize('com_config_field_before')}
-            </span>
-            <div className="min-w-0 flex-1 overflow-x-auto">
-              <ValueDisplay value={oldValue} notSet={notSet} variant="old" />
-            </div>
-          </div>
+          <ChangeRow label={localize('com_config_field_before')}>
+            <ValueDisplay value={oldValue} notSet={notSet} variant="old" />
+          </ChangeRow>
+        )}
+        {isReset && (
+          <ChangeRow label={localize('com_config_field_reverts_to')}>
+            <ValueDisplay value={revertValue} notSet={notSet} variant="new" />
+          </ChangeRow>
         )}
         {!isRemoval && (
-          <div className="flex items-baseline gap-2 px-3 py-2">
-            <span className="w-12 shrink-0 text-[10px] font-medium tracking-wide text-(--cui-color-text-muted) uppercase">
-              {localize('com_config_field_after')}
-            </span>
-            <div className="min-w-0 flex-1 overflow-x-auto">
-              <ValueDisplay value={newValue} notSet={notSet} variant="new" />
-            </div>
-          </div>
+          <ChangeRow label={localize('com_config_field_after')}>
+            <ValueDisplay value={newValue} notSet={notSet} variant="new" />
+          </ChangeRow>
         )}
       </div>
     </div>

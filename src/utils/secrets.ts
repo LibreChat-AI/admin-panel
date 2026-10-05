@@ -1,4 +1,5 @@
 import type * as t from '@/types';
+import { SECRET_CONFIG_KEYS } from '@/constants';
 
 const PREVIEW_KEY_RE = /^(.+)Preview$/;
 const ARRAY_INDEX_SEGMENT_RE = /\.\d+(?=\.|$)/g;
@@ -104,4 +105,25 @@ export function filterSecretPreviewFields(fields: t.SchemaField[]): t.SchemaFiel
     const realKey = secretKeyForPreviewKey(field.key);
     return realKey == null || !keys.has(realKey);
   });
+}
+
+/** Shown instead of a secret value in read-only views, so it never reaches the DOM. */
+export const MASKED_SECRET = '••••••••';
+
+/**
+ * Copy of `value` with every non-empty string stored under a secret key
+ * (`apiKey`, …) replaced by `MASKED_SECRET`. `key` is the key `value` itself
+ * is stored under, so a secret leaf passed on its own is masked too.
+ */
+export function maskSecretValues(value: t.ConfigValue, key?: string): t.ConfigValue {
+  if (typeof value === 'string') {
+    return key != null && value !== '' && SECRET_CONFIG_KEYS.has(key) ? MASKED_SECRET : value;
+  }
+  if (Array.isArray(value)) return value.map((item) => maskSecretValues(item));
+  if (!value || typeof value !== 'object') return value;
+  const result: Record<string, t.ConfigValue> = {};
+  for (const [childKey, child] of Object.entries(value)) {
+    result[childKey] = maskSecretValues(child, childKey);
+  }
+  return result;
 }

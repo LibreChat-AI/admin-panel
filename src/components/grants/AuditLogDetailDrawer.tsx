@@ -239,6 +239,7 @@ export function AuditLogDetailDrawer({
                 {localize('com_audit_detail_title')}
               </span>
               <IconButton
+                htmlType="button"
                 icon="cross"
                 type="ghost"
                 size="sm"
@@ -286,6 +287,7 @@ export function AuditLogDetailDrawer({
                 {localize('com_audit_detail_title')}
               </span>
               <IconButton
+                htmlType="button"
                 icon="cross"
                 type="ghost"
                 size="sm"
@@ -299,7 +301,12 @@ export function AuditLogDetailDrawer({
               </p>
             </div>
             <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
-              <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
+              <Button
+                htmlType="button"
+                type="primary"
+                label={localize('com_audit_detail_close')}
+                onClick={onClose}
+              />
             </footer>
           </Dialog.Content>
         </Dialog.Portal>
@@ -338,6 +345,7 @@ export function AuditLogDetailDrawer({
                 {localize('com_audit_detail_title')}
               </span>
               <IconButton
+                htmlType="button"
                 icon="cross"
                 type="ghost"
                 size="sm"
@@ -351,7 +359,12 @@ export function AuditLogDetailDrawer({
               </p>
             </div>
             <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
-              <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
+              <Button
+                htmlType="button"
+                type="primary"
+                label={localize('com_audit_detail_close')}
+                onClick={onClose}
+              />
             </footer>
           </Dialog.Content>
         </Dialog.Portal>
@@ -407,6 +420,7 @@ export function AuditLogDetailDrawer({
               </span>
             </div>
             <IconButton
+              htmlType="button"
               icon="cross"
               type="ghost"
               size="sm"
@@ -536,6 +550,7 @@ export function AuditLogDetailDrawer({
 
           <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
             <Button
+              htmlType="button"
               type="secondary"
               iconLeft={copied ? 'check' : 'share'}
               label={
@@ -545,7 +560,12 @@ export function AuditLogDetailDrawer({
               }
               onClick={() => void handleCopyPermalinkClick()}
             />
-            <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
+            <Button
+              htmlType="button"
+              type="primary"
+              label={localize('com_audit_detail_close')}
+              onClick={onClose}
+            />
           </footer>
         </Dialog.Content>
       </Dialog.Portal>

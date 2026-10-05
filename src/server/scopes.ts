@@ -16,18 +16,19 @@ import type {
   AdminConfig,
 } from '@librechat/data-schemas';
 import type * as t from '@/types';
-import { isInterfacePermissionPath } from '@/utils/interfacePermissions';
-import { stripSecretPreviewValues } from '@/utils';
-import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
-import { requireAnyCapability } from './capabilities';
-import { safeFieldPath } from './utils/validation';
-import { apiFetch } from './utils/api';
 import {
   normalizeAppServiceKeys,
   parseIndexedArrayPath,
   mergeConfigArraySources,
+  prepareConfigWrite,
+  patchConfigFields,
   getSchemaPathSet,
 } from './config';
+import { isInterfacePermissionPath, stripSecretPreviewValues } from '@/utils';
+import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
+import { requireAnyCapability } from './capabilities';
+import { safeFieldPath } from './utils/validation';
+import { apiFetch } from './utils/api';
 
 // ── Dot-path helpers ─────────────────────────────────────────────────
 
@@ -64,10 +65,10 @@ async function getBaseConfig(): Promise<Record<string, unknown>> {
 export async function mergeIndexedArrayEntriesForScope(
   apiType: PrincipalType,
   principalId: string,
-  entries: Array<{ fieldPath: string; value: unknown }>,
-): Promise<Array<{ fieldPath: string; value: unknown }>> {
-  const indexed = new Map<string, Map<number, unknown>>();
-  const rest: Array<{ fieldPath: string; value: unknown }> = [];
+  entries: t.SaveEntry[],
+): Promise<t.SaveEntry[]> {
+  const indexed = new Map<string, Map<number, t.ConfigValue>>();
+  const rest: t.SaveEntry[] = [];
   const restByPath = new Map<string, number>();
 
   for (const entry of entries) {
@@ -289,23 +290,20 @@ export const saveFieldProfileValueFn = createServerFn({ method: 'POST' })
       SystemCapabilities.MANAGE_CONFIGS,
     ]);
     if (isInterfacePermissionPath(data.fieldPath)) return { success: true };
-    const apiType = data.principalType;
-    const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, [
-      { fieldPath: data.fieldPath, value: data.value },
+    const { writable } = prepareConfigWrite([
+      { fieldPath: data.fieldPath, value: data.value as t.ConfigValue },
     ]);
-    const response = await apiFetch(
+    if (writable.length === 0) {
+      throw new Error(`${data.fieldPath} can't be set per profile; it is read from librechat.yaml`);
+    }
+    const apiType = data.principalType;
+    const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, writable);
+    const { skipped } = await patchConfigFields(
       `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify({ entries }),
-      },
+      entries,
     );
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(
-        (err as { error?: string }).error ?? `Failed to save field: ${response.status}`,
-      );
+    if (skipped.length > 0) {
+      throw new Error(`LibreChat did not store ${skipped.map((s) => s.fieldPath).join(', ')}`);
     }
     return { success: true };
   });
@@ -337,30 +335,20 @@ export const bulkSaveProfileValuesFn = createServerFn({ method: 'POST' })
         principalId: string;
         entries: Array<{ fieldPath: string; value: unknown }>;
       };
-    }) => {
+    }): Promise<t.ConfigWriteResult> => {
       await requireAnyCapability([
         SystemCapabilities.ASSIGN_CONFIGS,
         SystemCapabilities.MANAGE_CONFIGS,
       ]);
-      const filtered = data.entries.filter((e) => !isInterfacePermissionPath(e.fieldPath));
-      if (filtered.length === 0) return { success: true, count: 0 };
+      const { writable, skipped } = prepareConfigWrite(data.entries as t.SaveEntry[]);
+      if (writable.length === 0) return { success: true, applied: 0, skipped };
       const apiType = data.principalType;
-      const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, filtered);
-      const response = await apiFetch(
+      const entries = await mergeIndexedArrayEntriesForScope(apiType, data.principalId, writable);
+      const result = await patchConfigFields(
         `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}/fields`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({ entries }),
-        },
+        entries,
       );
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(
-          (err as { error?: string }).error ?? `Failed to save fields: ${response.status}`,
-        );
-      }
-      return { success: true, count: entries.length };
+      return { success: true, applied: result.applied, skipped: [...skipped, ...result.skipped] };
     },
   );
 

@@ -317,6 +317,7 @@ export function AuthCard({
             />
 
             <Button
+              htmlType="button"
               label={isSubmitting ? localize('com_auth_signing_in') : localize('com_auth_sign_in')}
               type="primary"
               onClick={handleLogin}
@@ -327,6 +328,7 @@ export function AuthCard({
               <>
                 <Separator size="sm" />
                 <Button
+                  htmlType="button"
                   label={
                     ssoLoading
                       ? localize('com_auth_sso_redirecting')

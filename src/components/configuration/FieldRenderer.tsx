@@ -1,5 +1,5 @@
 import { Icon } from '@clickhouse/click-ui';
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { Fragment, useState, useRef, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
 import {
@@ -10,10 +10,13 @@ import {
   getControlType,
   getEnumOptions,
   hasDescendant,
+  hasPathOverlap,
   toKVPair,
   isStringLikeItemType,
   splitUnionTypes,
 } from './utils';
+import { SECRET_CONFIG_KEYS, isYamlManagedPath } from '@/constants';
+import { cn, getSecretPreviewValue, MASKED_SECRET } from '@/utils';
 import { useCollapsibleSection } from './useCollapsibleSection';
 import { SwitchObjectField } from './fields/SwitchObjectField';
 import { RecordObjectField } from './fields/RecordObjectField';
@@ -23,16 +26,17 @@ import { ListRecordField } from './fields/ListRecordField';
 import { renderCollapsible } from './renderCollapsible';
 import { TextareaField } from './fields/TextareaField';
 import { KeyValueField } from './fields/KeyValueField';
+import { UnknownSettings } from './UnknownSettings';
 import { NumberField } from './fields/NumberField';
 import { SecretField } from './fields/SecretField';
 import { ToggleField } from './fields/ToggleField';
 import { SelectField } from './fields/SelectField';
+import { ManagedNotice } from './ManagedNotice';
 import { TextField } from './fields/TextField';
 import { ListField } from './fields/ListField';
 import { CodeField } from './fields/CodeField';
 import { ConfigRow } from './ConfigRow';
 import { useLocalize } from '@/hooks';
-import { cn, getSecretPreviewValue } from '@/utils';
 
 function formatDefault(value: t.ConfigValue): string | null {
   if (value === undefined || value === null) return null;
@@ -751,6 +755,7 @@ export function renderCollectionEntryFields(
   onChange: (path: string, value: t.ConfigValue) => void,
   addFieldTriggerRef?: React.MutableRefObject<(() => void) | null>,
   editSessionId?: number,
+  disabled?: boolean,
 ): ReactNode {
   return (
     <InlineFieldRenderer
@@ -758,6 +763,7 @@ export function renderCollectionEntryFields(
       parentValue={parentValue}
       parentPath={parentPath}
       onChange={onChange}
+      disabled={disabled}
       addFieldTriggerRef={addFieldTriggerRef}
       editSessionId={editSessionId}
     />
@@ -1108,6 +1114,13 @@ export function renderInlineField(
     // top-level SingleFieldRenderer fix.
     const hasPendingEdit = typeof fieldValue === 'string';
     const stringValue = hasPendingEdit ? fieldValue : '';
+    if (disabled && stringValue !== '' && SECRET_CONFIG_KEYS.has(field.key)) {
+      return (
+        <InlineRow key={field.key} label={fieldLabel} fieldId={fieldId} required={required}>
+          <TextField id={fieldId} value={MASKED_SECRET} onChange={() => undefined} disabled />
+        </InlineRow>
+      );
+    }
     const secretPreviewValue = getSecretPreviewValue(values, field.key);
     const maskedSecret =
       secretPreviewValue != null && stringValue === '' ? secretPreviewValue : null;
@@ -1280,6 +1293,8 @@ const FIELD_ORDER: Record<string, string[]> = {
   custom: ['name', 'apiKey', 'baseURL', 'iconURL', 'models', 'modelDisplayLabel'],
 };
 
+const NO_PATHS: ReadonlySet<string> = new Set();
+
 export function FieldRenderer({
   fields,
   parentValue,
@@ -1341,9 +1356,19 @@ export function FieldRenderer({
     }
   }
 
+  const managedNotice = (path: string): ReactNode => (
+    <ManagedNotice
+      hasOverride={hasPathOverlap(path, dbOverridePaths ?? NO_PATHS)}
+      pendingRemoval={pendingResets?.has(path) ?? false}
+      onRemoveOverride={disabled || !onResetField ? undefined : () => onResetField(path)}
+    />
+  );
+
   return (
     <>
       {groups.map((group) => {
+        const managed = isYamlManagedPath(group.path);
+        const groupDisabled = disabled || managed;
         if (group.type === 'nested') {
           const nestedValue =
             typeof group.value === 'object' && group.value !== null ? group.value : {};
@@ -1357,8 +1382,9 @@ export function FieldRenderer({
               configuredCount={nestedCounts.configured}
               totalCount={nestedCounts.total}
               depth={group.field.depth}
-              disabled={disabled}
+              disabled={groupDisabled}
             >
+              {managed && managedNotice(group.path)}
               <FieldRenderer
                 fields={group.field.children!}
                 parentValue={nestedValue}
@@ -1368,7 +1394,7 @@ export function FieldRenderer({
                 onResetField={onResetField}
                 onDiscardField={onDiscardField}
                 editedValues={editedValues}
-                disabled={disabled}
+                disabled={groupDisabled}
                 profileMap={profileMap}
                 previewMode={previewMode}
                 previewScope={previewScope}
@@ -1385,38 +1411,45 @@ export function FieldRenderer({
                 showConfiguredOnly={showConfiguredOnly}
                 editSessionId={editSessionId}
               />
+              <UnknownSettings
+                fields={group.field.children!}
+                value={nestedValue}
+                path={group.path}
+              />
             </NestedGroup>
           );
         }
 
         return (
-          <SingleFieldRenderer
-            key={group.field.path}
-            field={group.field}
-            value={group.value}
-            path={group.path}
-            getValue={getValue}
-            onChange={onChange}
-            onResetField={onResetField}
-            onDiscardField={onDiscardField}
-            editedValues={editedValues}
-            disabled={disabled}
-            permissions={permissions}
-            onProfileChange={onProfileChange}
-            previewMode={previewMode}
-            previewScope={previewScope}
-            previewChangedPaths={previewChangedPaths}
-            resolvedValues={resolvedValues}
-            configuredPaths={configuredPaths}
-            dbOverridePaths={dbOverridePaths}
-            touchedPaths={touchedPaths}
-            pendingResets={pendingResets}
-            schemaDefaults={schemaDefaults}
-            showConfiguredOnly={showConfiguredOnly}
-            isSoleField={false}
-            secretPreviewValue={getSecretPreviewValue(values, group.field.key)}
-            editSessionId={editSessionId}
-          />
+          <Fragment key={group.field.path}>
+            {managed && managedNotice(group.path)}
+            <SingleFieldRenderer
+              field={group.field}
+              value={group.value}
+              path={group.path}
+              getValue={getValue}
+              onChange={onChange}
+              onResetField={onResetField}
+              onDiscardField={onDiscardField}
+              editedValues={editedValues}
+              disabled={groupDisabled}
+              permissions={permissions}
+              onProfileChange={onProfileChange}
+              previewMode={previewMode}
+              previewScope={previewScope}
+              previewChangedPaths={previewChangedPaths}
+              resolvedValues={resolvedValues}
+              configuredPaths={configuredPaths}
+              dbOverridePaths={dbOverridePaths}
+              touchedPaths={touchedPaths}
+              pendingResets={pendingResets}
+              schemaDefaults={schemaDefaults}
+              showConfiguredOnly={showConfiguredOnly}
+              isSoleField={false}
+              secretPreviewValue={getSecretPreviewValue(values, group.field.key)}
+              editSessionId={editSessionId}
+            />
+          </Fragment>
         );
       })}
     </>

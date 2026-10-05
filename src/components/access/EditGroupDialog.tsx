@@ -260,12 +260,14 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={onClose}
               disabled={mutation.isPending}
             />
             <Button
+              htmlType="submit"
               type="primary"
               label={localize('com_ui_save')}
               disabled={

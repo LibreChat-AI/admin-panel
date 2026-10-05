@@ -6,6 +6,8 @@ import {
   mapSecretPreviewPaths,
   stripSecretPreviewValues,
   filterSecretPreviewFields,
+  maskSecretValues,
+  MASKED_SECRET,
 } from './secrets';
 import { createField } from '@/test/fixtures';
 
@@ -142,5 +144,19 @@ describe('filterSecretPreviewFields', () => {
       createField({ key: 'apiKeyPreview', type: 'object', isObject: true }),
     ];
     expect(filterSecretPreviewFields(fields)).toHaveLength(2);
+  });
+});
+
+describe('maskSecretValues', () => {
+  it('masks secret keys at any depth and leaves other values alone', () => {
+    expect(
+      maskSecretValues([{ group: 'eastus', apiKey: '${EASTUS_API_KEY}', models: { m: true } }]),
+    ).toEqual([{ group: 'eastus', apiKey: MASKED_SECRET, models: { m: true } }]);
+  });
+
+  it('masks a secret leaf passed on its own, but not an empty one', () => {
+    expect(maskSecretValues('sk-live', 'apiKey')).toBe(MASKED_SECRET);
+    expect(maskSecretValues('', 'apiKey')).toBe('');
+    expect(maskSecretValues('https://x', 'baseURL')).toBe('https://x');
   });
 });

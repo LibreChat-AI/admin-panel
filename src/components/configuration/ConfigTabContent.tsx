@@ -1,19 +1,33 @@
 import { useMemo } from 'react';
 import { MultiAccordion } from '@clickhouse/click-ui';
+import type { KeyboardEvent } from 'react';
 import type * as t from '@/types';
 import { SECTION_RENDERERS, SELF_CONTAINED_SECTION_RENDERERS } from './sections';
 import { FieldRenderer, SingleFieldRenderer } from './FieldRenderer';
+import { hasDescendant, resolveFieldValue } from './utils';
+import { UnknownSettings } from './UnknownSettings';
 import { ConfigSection } from './ConfigSection';
 import { CodeField } from './fields/CodeField';
 import { isSectionDisabled } from '@/utils';
 import { InfoBanner } from './InfoBanner';
-import { hasDescendant } from './utils';
 import { useLocalize } from '@/hooks';
 
 /** Sections where the configured count should reflect record entries rather
  *  than leaf schema paths. Add section IDs here for any record-type section
  *  whose schema describes the value shape (not the entry keys). */
 const RECORD_ENTRY_COUNT_SECTIONS = new Set(['mcpServers']);
+
+/**
+ * Enter in an input of the tab form must never submit it (and so "click" its
+ * default button). Dialogs portaled from the tab (Create MCP server, Create
+ * endpoint) are left alone: their keydown bubbles here through the React
+ * tree, but they live outside the form's DOM and keep Enter-to-submit.
+ */
+function preventImplicitSubmit(event: KeyboardEvent<HTMLFormElement>) {
+  const { target } = event;
+  if (event.key !== 'Enter' || !(target instanceof HTMLInputElement)) return;
+  if (event.currentTarget.contains(target)) event.preventDefault();
+}
 
 function isSimpleScalar(f: t.SchemaField): boolean {
   return !f.children?.length && !f.isArray && f.type !== 'record' && f.type !== 'object';
@@ -59,20 +73,13 @@ export function ConfigTabContent({
   baseRecordKeys,
   onValidationError,
   editSessionId,
+  unknownSettings,
 }: t.ConfigTabContentProps) {
   const localize = useLocalize();
   const fieldsDisabled = readOnly;
 
-  const getValue = (path: string, fallback: t.ConfigValue): t.ConfigValue => {
-    if (path in editedValues) {
-      if (editedValues[path] === undefined) return schemaDefaults?.[path] ?? fallback;
-      return editedValues[path];
-    }
-    if (resolvedValues && path in resolvedValues) {
-      return resolvedValues[path];
-    }
-    return fallback;
-  };
+  const getValue = (path: string, fallback: t.ConfigValue): t.ConfigValue =>
+    resolveFieldValue(path, fallback, editedValues, resolvedValues, schemaDefaults);
 
   const filtering = showChangedOnly;
 
@@ -159,7 +166,9 @@ export function ConfigTabContent({
   const renderSectionContent = (section: t.ConfigSectionConfig) => {
     const dataKey = section.schemaKey ?? section.id;
     const sectionValue = configValues?.[dataKey];
-    const sectionDisabled = isSectionDisabled(!!fieldsDisabled, sectionPermissions, dataKey);
+    const sectionDisabled =
+      section.readOnlyReason != null ||
+      isSectionDisabled(!!fieldsDisabled, sectionPermissions, dataKey);
     const CustomSectionRenderer =
       section.fields.length > 0 ? SECTION_RENDERERS[section.id] : undefined;
     const fieldRendererProps: t.FieldRendererProps = {
@@ -195,7 +204,7 @@ export function ConfigTabContent({
       <>
         {section.bannerText && (
           <div className="mb-4">
-            <InfoBanner text={section.bannerText} />
+            <InfoBanner text={section.bannerText} dismissible={!section.readOnlyReason} />
           </div>
         )}
         {section.fields.length > 0 &&
@@ -204,6 +213,9 @@ export function ConfigTabContent({
           ) : (
             <FieldRenderer {...fieldRendererProps} />
           ))}
+        {section.fields.length > 0 && !CustomSectionRenderer && !section.isRecord && (
+          <UnknownSettings fields={section.fields} value={sectionValue} path={dataKey} />
+        )}
         {section.fields.length === 0 && section.sectionField && (
           <SingleFieldRenderer
             field={section.sectionField}
@@ -273,8 +285,10 @@ export function ConfigTabContent({
     <form
       aria-label={localize('com_nav_configuration')}
       onSubmit={(e) => e.preventDefault()}
+      onKeyDown={preventImplicitSubmit}
       className="flex flex-col gap-6 py-4"
     >
+      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
       {groups.map((group) => {
         if (group.kind === 'flat') {
           return (
@@ -290,7 +304,7 @@ export function ConfigTabContent({
             <ConfigSection
               key={section.id}
               sectionId={section.id}
-              title={localize(section.titleKey)}
+              title={section.title ?? localize(section.titleKey)}
               description={section.descriptionKey ? localize(section.descriptionKey) : undefined}
               learnMoreUrl={section.learnMoreUrl}
               configuredCount={counts?.configured ?? 0}
@@ -318,7 +332,7 @@ export function ConfigTabContent({
                 id={`section-${section.id}`}
                 data-section-id={`section-${section.id}`}
                 value={section.id}
-                title={localize(section.titleKey)}
+                title={section.title ?? localize(section.titleKey)}
               >
                 {renderSectionContent(section)}
               </MultiAccordion.Item>
@@ -326,6 +340,9 @@ export function ConfigTabContent({
           </MultiAccordion>
         );
       })}
+      {unknownSettings && (
+        <UnknownSettings fields={unknownSettings.fields} value={unknownSettings.value} path="" />
+      )}
     </form>
   );
 }

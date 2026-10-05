@@ -1,30 +1,255 @@
 import type * as t from '@/types';
-import { deepSerializeKVPairs, secretPathForPreviewPath, stripSecretPreviewValues } from '@/utils';
+import {
+  secretPathForPreviewPath,
+  stripSecretPreviewValues,
+  deepSerializeKVPairs,
+  getWriteSkipReason,
+  isConfigRecord,
+  flattenObject,
+} from '@/utils';
+import { APP_SERVICE_KEY_ALIASES } from '@/constants';
 
 const INDEXED_ARRAY_PATH_RE = /^(.+)\.(\d+)$/;
+
+/** The schema node for one element of an array field or one value of a record field. */
+function elementField(container: t.SchemaField, segment: string): t.SchemaField {
+  const base = {
+    ...container,
+    path: `${container.path}.${segment}`,
+    key: segment,
+    isArray: false,
+    recordValueType: undefined,
+    recordValueKVTypes: undefined,
+    recordValueAllowsPrimitive: undefined,
+  };
+  if (container.children?.length) {
+    return { ...base, type: 'object', isObject: true, children: container.children };
+  }
+  if (container.isArray) {
+    const itemType = getArrayItemType(container.type);
+    return { ...base, type: itemType, isArray: itemType.startsWith('array'), isObject: false };
+  }
+  const kvTypes = container.recordValueKVTypes;
+  return {
+    ...base,
+    type: kvTypes?.length === 1 ? kvTypes[0] : 'unknown',
+    isObject: false,
+    children: undefined,
+  };
+}
+
+function isCollectionField(field: t.SchemaField): boolean {
+  return field.isArray || field.type === 'record';
+}
+
+/**
+ * Finds the schema node for a dot-path, stepping into array elements and record
+ * values by index or key (`endpoints.custom.3.headers` → the custom endpoint
+ * `headers` record). Returns null when the path leaves the schema.
+ */
+export function findSchemaField(tree: t.SchemaField[], path: string): t.SchemaField | null {
+  let fields: t.SchemaField[] | undefined = tree;
+  let current: t.SchemaField | null = null;
+  for (const segment of path.split('.')) {
+    if (current && isCollectionField(current)) {
+      current = elementField(current, segment);
+    } else {
+      current = fields?.find((f) => f.key === segment) ?? null;
+    }
+    if (!current) return null;
+    fields = current.children;
+  }
+  return current;
+}
+
+function normalizeArray(value: t.ConfigValue[], field: t.SchemaField | null): t.ConfigValue {
+  if (value.every((item) => typeof item === 'string')) {
+    const items = (value as string[]).filter((item) => item !== '');
+    return items.length > 0 ? items : undefined;
+  }
+  const items: t.ConfigValue[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = normalizeForSave(value[i], field ? elementField(field, String(i)) : null);
+    if (item !== undefined) items.push(item);
+  }
+  return items.length > 0 ? items : undefined;
+}
+
+/** Primitive values of a key/value record are stored as entered; nested ones are normalized. */
+function normalizeRecordValue(
+  child: t.ConfigValue,
+  field: t.SchemaField,
+  key: string,
+): t.ConfigValue {
+  if (isConfigRecord(child) || Array.isArray(child)) {
+    return normalizeForSave(child, elementField(field, key));
+  }
+  return child;
+}
+
+function normalizeRecord(value: t.ConfigRecord, field: t.SchemaField | null): t.ConfigValue {
+  const isRecord = field?.type === 'record';
+  const result: t.ConfigRecord = {};
+  for (const [key, child] of Object.entries(value)) {
+    const normalized =
+      field && isRecord
+        ? normalizeRecordValue(child, field, key)
+        : normalizeForSave(child, field ? childOf(field, key) : null);
+    if (normalized !== undefined) result[key] = normalized;
+  }
+  if (isRecord && Object.keys(result).length === 0) return undefined;
+  return result;
+}
+
+function childOf(field: t.SchemaField, key: string): t.SchemaField | null {
+  return field.children?.find((f) => f.key === key) ?? null;
+}
+
+/**
+ * Reduces a pending value to what should actually be stored: empty strings and
+ * empty list items are dropped (whitespace is preserved verbatim, since values
+ * like stop sequences are whitespace-significant), and a list or record left with no items becomes
+ * `undefined` ("no value") instead of an empty override that LibreChat would
+ * read as "allow nothing" / "match everything". Plain objects are kept even
+ * when empty, since `{}` can be meaningful (e.g. a feature enabled with defaults).
+ */
+export function normalizeForSave(value: t.ConfigValue, field: t.SchemaField | null): t.ConfigValue {
+  if (value === undefined || value === null) return value;
+  if (typeof value === 'string') return value === '' ? undefined : value;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return undefined;
+    const serialized = deepSerializeKVPairs(value);
+    if (!Array.isArray(serialized)) return normalizeRecord(serialized as t.ConfigRecord, field);
+    return normalizeArray(value, field);
+  }
+  if (isConfigRecord(value)) return normalizeRecord(value, field);
+  return value;
+}
+
+/** Deep equality for config values that ignores object key order. */
+export function isConfigValueEqual(a: t.ConfigValue, b: t.ConfigValue): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, i) => isConfigValueEqual(item, b[i]));
+  }
+  if (!isConfigRecord(a) || !isConfigRecord(b)) return false;
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => Object.hasOwn(b, key) && isConfigValueEqual(a[key], b[key]));
+}
+
+/** Whether `paths` holds `path`, a descendant of it, or an ancestor of it. */
+export function hasPathOverlap(path: string, paths: ReadonlySet<string>): boolean {
+  if (paths.has(path)) return true;
+  const prefix = `${path}.`;
+  for (const p of paths) {
+    if (p.startsWith(prefix) || path.startsWith(`${p}.`)) return true;
+  }
+  return false;
+}
 
 /**
  * Builds the save payload from touched edits. Only admin-touched paths are
  * submitted, secret display companion paths are dropped, and display
  * companion strings nested inside object values are stripped — a masked
  * display value (`sk-mist...4321`) must never reach the backend as a value.
+ *
+ * With a `context`, each value is normalized (`normalizeForSave`) and compared
+ * with the normalized saved value: unchanged edits are dropped, and an edit
+ * that empties a field becomes a reset when the target has its own override.
+ * Emptying a value the target does not own (one only librechat.yaml sets) is
+ * reported as `yamlValue`: there is no override to remove, and LibreChat has
+ * no way to store "unset". Paths the panel must not write (read-only sections,
+ * permission fields) are reported in `skipped` instead of being sent.
  */
 export function buildSavePayload(
   touchedPaths: ReadonlySet<string>,
   editedValues: t.FlatConfigMap,
   schemaPaths: ReadonlySet<string>,
+  context?: t.SaveContext,
 ): t.SavePayload {
   const touched = [...touchedPaths].filter((p) => p in editedValues);
-  const saves = touched
-    .filter(
-      (p) => editedValues[p] !== undefined && secretPathForPreviewPath(p, schemaPaths) == null,
-    )
-    .map((p) => ({
-      fieldPath: p,
-      value: stripSecretPreviewValues(deepSerializeKVPairs(editedValues[p]), p, schemaPaths),
-    }));
-  const resets = touched.filter((p) => editedValues[p] === undefined);
-  return { touched, saves, resets };
+  const saves: t.SaveEntry[] = [];
+  const resets: string[] = [];
+  const skipped: t.SkippedChange[] = [];
+  for (const path of touched) {
+    const edited = editedValues[path];
+    const reason = getWriteSkipReason(path, edited === undefined);
+    if (reason) {
+      skipped.push({ fieldPath: path, reason });
+      continue;
+    }
+    if (edited === undefined) {
+      resets.push(path);
+      continue;
+    }
+    if (secretPathForPreviewPath(path, schemaPaths) != null) continue;
+    const value = stripSecretPreviewValues(deepSerializeKVPairs(edited), path, schemaPaths);
+    if (!context) {
+      saves.push({ fieldPath: path, value });
+      continue;
+    }
+    const field = findSchemaField(context.fields, path);
+    const normalized = normalizeForSave(value, field);
+    const baseline = normalizeForSave(
+      stripSecretPreviewValues(deepSerializeKVPairs(context.baselineAt(path)), path, schemaPaths),
+      field,
+    );
+    if (isConfigValueEqual(normalized, baseline)) continue;
+    if (normalized !== undefined) {
+      saves.push({ fieldPath: path, value: normalized });
+    } else if (context.hasOverride(path)) {
+      resets.push(path);
+    } else {
+      skipped.push({ fieldPath: path, reason: 'yamlValue' });
+    }
+  }
+  return { touched, saves, resets, skipped };
+}
+
+/**
+ * Entries of an object value whose keys the schema does not describe (settings
+ * from a newer LibreChat than the panel's bundled schema). Secret preview
+ * companions of known fields are not settings and are left out.
+ */
+export function getUnknownConfigEntries(
+  fields: t.SchemaField[],
+  value: t.ConfigValue,
+): Array<[string, t.ConfigValue]> {
+  if (!isConfigRecord(value)) return [];
+  const known = new Set(fields.map((f) => f.key));
+  return Object.entries(value).filter(
+    ([key, child]) =>
+      child !== undefined &&
+      !known.has(key) &&
+      !(key.endsWith('Preview') && known.has(key.slice(0, -'Preview'.length))),
+  );
+}
+
+/**
+ * Value a field control shows: a pending edit first, then the merged tree
+ * (`fallback`). The scope's saved leaves (`resolvedValues`) are only used when
+ * nothing under the path is pending — they are the stale saved array for a
+ * collection whose entries are being edited.
+ */
+export function resolveFieldValue(
+  path: string,
+  fallback: t.ConfigValue,
+  editedValues: t.FlatConfigMap,
+  resolvedValues: t.FlatConfigMap | null | undefined,
+  schemaDefaults: t.FlatConfigMap | undefined,
+): t.ConfigValue {
+  if (path in editedValues) {
+    if (editedValues[path] === undefined) return schemaDefaults?.[path] ?? fallback;
+    return editedValues[path];
+  }
+  if (!resolvedValues || !(path in resolvedValues)) return fallback;
+  const prefix = `${path}.`;
+  for (const editPath of Object.keys(editedValues)) {
+    if (editPath.startsWith(prefix)) return fallback;
+  }
+  return resolvedValues[path];
 }
 
 export function inferKVType(v: t.ConfigValue): t.KVValueType {
@@ -395,4 +620,54 @@ export function mergeIndexedArrayEdits(
     parent[lastSeg] = arr;
   }
   return merged;
+}
+
+/** Top-level YAML keys that describe the file itself rather than a setting. */
+const IMPORT_METADATA_KEYS = new Set(['version']);
+
+/**
+ * Leaves of an imported YAML keyed by canonical dot-path. AppService alias
+ * sections (`interfaceConfig`) are merged with their canonical section
+ * (`interface`) leaf by leaf, the canonical spelling winning on conflicts.
+ */
+function flattenImport(appConfig: t.ConfigRecord): t.FlatConfigMap {
+  const aliased: t.ConfigRecord = {};
+  const canonical: t.ConfigRecord = {};
+  for (const [key, value] of Object.entries(appConfig)) {
+    if (IMPORT_METADATA_KEYS.has(key)) continue;
+    const alias = APP_SERVICE_KEY_ALIASES[key];
+    if (alias) aliased[alias] = value;
+    else canonical[key] = value;
+  }
+  return { ...flattenObject(aliased), ...flattenObject(canonical) };
+}
+
+/**
+ * One save entry per leaf of the imported YAML, minus metadata, empty objects
+ * and redacted secret companions. Each value is normalized like a pending
+ * edit (`normalizeForSave`), so blank list items are dropped; a leaf left with
+ * no value (`allowedDomains: [""]`, `titleModel: ""`) is reported as skipped
+ * instead of being stored as an empty override that LibreChat would read as
+ * "allow nothing". Fields the panel must not write (role permissions,
+ * librechat.yaml-only sections) are kept here so the save pre-flight reports
+ * them as skipped instead of dropping them silently.
+ */
+export function collectImportEntries(
+  appConfig: t.ConfigRecord,
+  fields: t.SchemaField[],
+  schemaPathSet: ReadonlySet<string>,
+): t.ImportEntries {
+  const entries: t.SaveEntry[] = [];
+  const skipped: t.SkippedChange[] = [];
+  for (const [fieldPath, raw] of Object.entries(flattenImport(appConfig))) {
+    if (isConfigRecord(raw) && Object.keys(raw).length === 0) continue;
+    if (secretPathForPreviewPath(fieldPath, schemaPathSet) != null) continue;
+    const value = normalizeForSave(
+      stripSecretPreviewValues(raw, fieldPath, schemaPathSet),
+      findSchemaField(fields, fieldPath),
+    );
+    if (value == null) skipped.push({ fieldPath, reason: 'empty' });
+    else entries.push({ fieldPath, value });
+  }
+  return { entries, skipped };
 }

@@ -159,6 +159,8 @@ export type CollectionRenderFields = (
   addFieldTriggerRef?: React.MutableRefObject<(() => void) | null>,
   /** See `SingleFieldRendererProps.editSessionId`. */
   editSessionId?: number,
+  /** Render the entry's fields read-only. */
+  disabled?: boolean,
 ) => React.ReactNode;
 
 export interface ObjectEntryCardProps {

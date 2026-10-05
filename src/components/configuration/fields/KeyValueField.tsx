@@ -3,6 +3,8 @@ import TextareaAutosize from 'react-textarea-autosize';
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import type * as t from '@/types';
 import { AddItemButton, TrashButton } from '@/components/shared';
+import { BLOCK_UNSAFE_CONFIG_KEYS } from '@/constants';
+import { isUnsafeConfigKey } from '@/utils';
 import { useLocalize } from '@/hooks';
 
 const DEFAULT_TYPES: t.KVValueType[] = ['string', 'number', 'boolean'];
@@ -21,6 +23,8 @@ function LocalInput({
   disabled,
   className,
   'aria-label': ariaLabel,
+  'aria-invalid': ariaInvalid,
+  'aria-describedby': ariaDescribedBy,
 }: {
   value: string;
   onCommit: (value: string) => void;
@@ -29,6 +33,8 @@ function LocalInput({
   disabled?: boolean;
   className?: string;
   'aria-label'?: string;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
 }) {
   const [local, setLocal] = useState(value);
   const externalRef = useRef(value);
@@ -53,10 +59,14 @@ function LocalInput({
       value={local}
       onChange={(e) => setLocal(e.target.value)}
       onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') commit(); }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') commit();
+      }}
       placeholder={placeholder}
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-invalid={ariaInvalid || undefined}
+      aria-describedby={ariaDescribedBy}
       className={className}
     />
   );
@@ -151,62 +161,77 @@ export function KeyValueField({
     onChange(next);
   };
 
+  const keyErrorId = (index: number) => `${id.replace(/[^\w-]/g, '-')}-key-${index}-error`;
+  const hasKeyError = (pair: t.KeyValuePair) =>
+    BLOCK_UNSAFE_CONFIG_KEYS && isUnsafeConfigKey(pair.key);
+  const deleteLabel = (pair: t.KeyValuePair, index: number) =>
+    `${localize('com_ui_delete')} ${pair.key || `${localize('com_ui_entry')} ${index + 1}`}`;
+  const keyError = (pair: t.KeyValuePair, index: number) =>
+    hasKeyError(pair) ? (
+      <p id={keyErrorId(index)} role="alert" className="m-0 text-xs text-(--cui-color-text-danger)">
+        {localize('com_config_unsafe_key_error')}
+      </p>
+    ) : null;
+
   const renderPrimitiveRow = (vType: t.KVValueType, pair: t.KeyValuePair, index: number) => {
     const valueLabel = `${localize('com_ui_value')} ${index + 1}`;
+    const invalid = hasKeyError(pair);
     return (
-      <div className="flex items-center gap-2" role="listitem">
-        <LocalInput
-          value={pair.key}
-          onCommit={(v) => handleChange(index, 'key', v)}
-          placeholder={keyPlaceholder ?? localize('com_ui_key')}
-          disabled={disabled}
-          aria-label={`${localize('com_ui_key')} ${index + 1}`}
-          className="config-input max-w-37.5 flex-1"
-        />
-        {vType === 'boolean' ? (
-          <div className="select-field-a11y flex-2">
-            <Select
-              value={pair.value === 'true' ? 'true' : 'false'}
-              onSelect={(v) => handleChange(index, 'value', v)}
+      <div className="flex flex-col gap-1" role="listitem">
+        <div className="flex items-center gap-2">
+          <LocalInput
+            value={pair.key}
+            onCommit={(v) => handleChange(index, 'key', v)}
+            placeholder={keyPlaceholder ?? localize('com_ui_key')}
+            disabled={disabled}
+            aria-label={`${localize('com_ui_key')} ${index + 1}`}
+            aria-invalid={invalid}
+            aria-describedby={invalid ? keyErrorId(index) : undefined}
+            className="config-input max-w-37.5 flex-1"
+          />
+          {vType === 'boolean' ? (
+            <div className="select-field-a11y flex-2">
+              <Select
+                value={pair.value === 'true' ? 'true' : 'false'}
+                onSelect={(v) => handleChange(index, 'value', v)}
+                disabled={disabled}
+                aria-label={valueLabel}
+              >
+                <Select.Item value="true">{localize('com_ui_true')}</Select.Item>
+                <Select.Item value="false">{localize('com_ui_false')}</Select.Item>
+              </Select>
+            </div>
+          ) : (
+            <LocalInput
+              type={vType === 'number' ? 'number' : 'text'}
+              value={pair.value}
+              onCommit={(v) => handleChange(index, 'value', v)}
+              placeholder={valuePlaceholder ?? localize('com_ui_value')}
               disabled={disabled}
               aria-label={valueLabel}
-            >
-              <Select.Item value="true">{localize('com_ui_true')}</Select.Item>
-              <Select.Item value="false">{localize('com_ui_false')}</Select.Item>
-            </Select>
-          </div>
-        ) : (
-          <LocalInput
-            type={vType === 'number' ? 'number' : 'text'}
-            value={pair.value}
-            onCommit={(v) => handleChange(index, 'value', v)}
-            placeholder={valuePlaceholder ?? localize('com_ui_value')}
-            disabled={disabled}
-            aria-label={valueLabel}
-            className="config-input flex-2"
-          />
-        )}
-        {!disabled && availableTypes.length > 1 && (
-          <div className="select-field-a11y w-20 shrink-0">
-            <Select
-              value={vType}
-              onSelect={(v) => handleTypeChange(index, v as t.KVValueType)}
-              aria-label={`${localize('com_config_field_type')} ${index + 1}`}
-            >
-              {availableTypes.map((vt) => (
-                <Select.Item key={vt} value={vt}>
-                  {localize(TYPE_LABEL_KEYS[vt])}
-                </Select.Item>
-              ))}
-            </Select>
-          </div>
-        )}
-        {!disabled && (
-          <TrashButton
-            onClick={() => handleRemove(index)}
-            ariaLabel={`${localize('com_ui_delete')} ${localize('com_ui_entry')} ${index + 1}`}
-          />
-        )}
+              className="config-input flex-2"
+            />
+          )}
+          {!disabled && availableTypes.length > 1 && (
+            <div className="select-field-a11y w-20 shrink-0">
+              <Select
+                value={vType}
+                onSelect={(v) => handleTypeChange(index, v as t.KVValueType)}
+                aria-label={`${localize('com_config_field_type')} ${index + 1}`}
+              >
+                {availableTypes.map((vt) => (
+                  <Select.Item key={vt} value={vt}>
+                    {localize(TYPE_LABEL_KEYS[vt])}
+                  </Select.Item>
+                ))}
+              </Select>
+            </div>
+          )}
+          {!disabled && (
+            <TrashButton onClick={() => handleRemove(index)} ariaLabel={deleteLabel(pair, index)} />
+          )}
+        </div>
+        {keyError(pair, index)}
       </div>
     );
   };
@@ -220,6 +245,8 @@ export function KeyValueField({
           placeholder={keyPlaceholder ?? localize('com_ui_key')}
           disabled={disabled}
           aria-label={`${localize('com_ui_key')} ${index + 1}`}
+          aria-invalid={hasKeyError(pair)}
+          aria-describedby={hasKeyError(pair) ? keyErrorId(index) : undefined}
           className="config-input min-w-0 flex-1"
         />
         {!disabled && availableTypes.length > 1 && (
@@ -238,12 +265,10 @@ export function KeyValueField({
           </div>
         )}
         {!disabled && (
-          <TrashButton
-            onClick={() => handleRemove(index)}
-            ariaLabel={`${localize('com_ui_delete')} ${localize('com_ui_entry')} ${index + 1}`}
-          />
+          <TrashButton onClick={() => handleRemove(index)} ariaLabel={deleteLabel(pair, index)} />
         )}
       </div>
+      {keyError(pair, index)}
       <LocalTextarea
         value={pair.value}
         onCommit={(v) => handleChange(index, 'value', v)}

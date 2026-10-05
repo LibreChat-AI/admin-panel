@@ -125,6 +125,7 @@ export function ReorderableList<T extends { id: string }>({
               )}
             >
               <button
+                type="button"
                 data-movable-handle
                 tabIndex={-1}
                 aria-hidden="true"

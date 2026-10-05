@@ -11,8 +11,8 @@ import { cn } from '@/utils';
 export function ImportYamlDialog({
   open,
   onClose,
+  currentScope,
   onImport,
-  onImportAsProfile,
 }: t.ImportYamlDialogProps) {
   const localize = useLocalize();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -27,7 +27,9 @@ export function ImportYamlDialog({
 
   const [step, setStep] = useState<t.ImportStep>('input');
   const [parsedConfig, setParsedConfig] = useState<Record<string, t.ConfigValue> | null>(null);
-  const [targetMode, setTargetMode] = useState<t.TargetMode>('base');
+  const [unknownPaths, setUnknownPaths] = useState<string[]>([]);
+  const defaultTargetMode: t.TargetMode = currentScope ? 'current' : 'base';
+  const [targetMode, setTargetMode] = useState<t.TargetMode>(defaultTargetMode);
   const [selectedScope, setSelectedScope] = useState<t.ConfigScope | null>(null);
 
   const [newScopeType, setNewScopeType] = useState<PrincipalType>(PrincipalType.ROLE);
@@ -54,12 +56,18 @@ export function ImportYamlDialog({
     setValidationErrors(undefined);
     setStep('input');
     setParsedConfig(null);
-    setTargetMode('base');
+    setUnknownPaths([]);
+    setTargetMode(defaultTargetMode);
     setSelectedScope(null);
     setNewScopeType(PrincipalType.ROLE);
     setNewScopeName('');
     if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
+  }, [defaultTargetMode]);
+
+  /** A profile opened (or closed) since the last import changes which target is preselected. */
+  useEffect(() => {
+    if (open && step === 'input') setTargetMode(defaultTargetMode);
+  }, [open, step, defaultTargetMode]);
 
   const handleClose = useCallback(() => {
     reset();
@@ -117,6 +125,7 @@ export function ImportYamlDialog({
 
       if (result.appConfig && typeof result.appConfig === 'object') {
         setParsedConfig(result.appConfig as Record<string, t.ConfigValue>);
+        setUnknownPaths(result.unknownPaths ?? []);
         setStep('target');
       }
     } catch (err) {
@@ -129,16 +138,21 @@ export function ImportYamlDialog({
   const handleApply = async () => {
     if (!parsedConfig) return;
 
-    if (targetMode === 'base') {
-      onImport(parsedConfig);
-      handleClose();
-      return;
-    }
-
     setLoading(true);
     setError(undefined);
 
     try {
+      if (targetMode === 'base' || (targetMode === 'current' && currentScope)) {
+        await onImport(
+          parsedConfig,
+          targetMode === 'base' || !currentScope
+            ? { type: 'base' }
+            : { type: 'scope', scope: currentScope },
+        );
+        handleClose();
+        return;
+      }
+
       let scope: t.ConfigScope;
 
       if (targetMode === 'create') {
@@ -170,7 +184,7 @@ export function ImportYamlDialog({
         scope = selectedScope;
       }
 
-      await onImportAsProfile(parsedConfig, scope);
+      await onImport(parsedConfig, { type: 'scope', scope });
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : localize('com_config_import_error'));
@@ -182,6 +196,7 @@ export function ImportYamlDialog({
   const canApply = (() => {
     if (loading) return false;
     if (targetMode === 'base') return true;
+    if (targetMode === 'current') return currentScope != null;
     if (targetMode === 'existing') return selectedScope !== null;
     if (targetMode === 'create') return newScopeName.trim().length > 0;
     return false;
@@ -286,6 +301,20 @@ export function ImportYamlDialog({
                 aria-label={localize('com_config_import_target')}
                 className="flex flex-col gap-2"
               >
+                {currentScope && (
+                  <TargetOption
+                    selected={targetMode === 'current'}
+                    onClick={() => {
+                      setTargetMode('current');
+                      setSelectedScope(null);
+                    }}
+                    icon={getScopeTypeConfig(currentScope.principalType).icon}
+                    iconColor={getScopeTypeConfig(currentScope.principalType).color}
+                    label={localize('com_config_import_as_current', { name: currentScope.name })}
+                    description={localize('com_config_import_as_current_desc')}
+                  />
+                )}
+
                 <TargetOption
                   selected={targetMode === 'base'}
                   onClick={() => {
@@ -392,6 +421,14 @@ export function ImportYamlDialog({
                   </div>
                 )}
               </div>
+              {unknownPaths.length > 0 && (
+                <div className="mt-3 rounded-lg border border-(--cui-color-stroke-default) px-3 py-2 text-xs text-(--cui-color-text-muted)">
+                  <p className="m-0 mb-1 font-medium text-(--cui-color-text-default)">
+                    {localize('com_config_import_unknown_keys', { count: unknownPaths.length })}
+                  </p>
+                  <p className="m-0 font-mono break-all">{unknownPaths.slice(0, 10).join(', ')}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -423,6 +460,7 @@ export function ImportYamlDialog({
           <div className="flex items-center justify-end gap-2">
             {step === 'target' && (
               <Button
+                htmlType="button"
                 type="secondary"
                 label={localize('com_config_import_back')}
                 onClick={() => {
@@ -432,10 +470,16 @@ export function ImportYamlDialog({
               />
             )}
             {step === 'input' && (
-              <Button type="secondary" label={localize('com_ui_cancel')} onClick={handleClose} />
+              <Button
+                htmlType="button"
+                type="secondary"
+                label={localize('com_ui_cancel')}
+                onClick={handleClose}
+              />
             )}
             {step === 'input' ? (
               <Button
+                htmlType="button"
                 type="primary"
                 label={
                   loading ? localize('com_ui_loading') : localize('com_config_import_validate')
@@ -446,6 +490,7 @@ export function ImportYamlDialog({
               />
             ) : (
               <Button
+                htmlType="button"
                 type="primary"
                 label={
                   loading
