@@ -3,7 +3,7 @@ import { Button, Dialog, Switch, Tabs } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import type { TerraVoxTool } from '@/server';
 import { useLocalize } from '@/hooks';
-import { SelectField } from '../configuration/fields/SelectField';
+import { SelectField } from '@/components/configuration';
 import { ParamBuilder } from './ParamBuilder';
 
 /** Editable draft of a manifest: scalars as strings, JSON blocks as text. */

@@ -40,7 +40,10 @@ interface ParamRow {
   widget: ParamWidget;
   enumValues: string[];
   choices: string[];
+  /** choices_from.tool（UI 文本框只暴露 tool 名）；可选字段随 parse 保全。 */
   choicesFrom: string;
+  choicesFromOpts: { value_field?: string; label_field?: string };
+  /** 逗号分隔文本（UI）；序列化为契约要求的带点扩展名数组。 */
   accept: string;
   /** properties 上未被构建器覆盖的原始键（round-trip 保真）。 */
   raw: Record<string, unknown>;
@@ -65,7 +68,31 @@ function inferWidget(hint: Record<string, unknown>): ParamWidget {
   return typeof hint.widget === 'string' ? (hint.widget as ParamWidget) : '';
 }
 
-function parseManifest(pJson: string, fJson: string): { rows: ParamRow[]; error: string | null } {
+/** choices_from 解析：契约形态是 {tool,...} 对象（value_field/label_field 随行
+ * 保全）；旧版构建器曾产出纯字符串——一律救援为 tool 名，round-trip 后升格为
+ * 合法对象。opts 由调用方传入并被就地填充。 */
+function choicesFromOf(
+  hint: Record<string, unknown>,
+  opts: { value_field?: string; label_field?: string },
+): string {
+  const cf = hint.choices_from;
+  if (typeof cf === 'string') {
+    return cf;
+  }
+  if (cf && typeof cf === 'object') {
+    const rec = cf as Record<string, unknown>;
+    if (typeof rec.value_field === 'string') {
+      opts.value_field = rec.value_field;
+    }
+    if (typeof rec.label_field === 'string') {
+      opts.label_field = rec.label_field;
+    }
+    return typeof rec.tool === 'string' ? rec.tool : '';
+  }
+  return '';
+}
+
+export function parseManifest(pJson: string, fJson: string): { rows: ParamRow[]; error: string | null } {
   try {
     const p = JSON.parse(pJson || '{}') as Manifest['parameters'];
     const f = (JSON.parse(fJson || '{}') || {}) as Partial<Manifest['form']>;
@@ -79,6 +106,7 @@ function parseManifest(pJson: string, fJson: string): { rows: ParamRow[]; error:
       .map((name) => {
         const prop = { ...((props[name] as Record<string, unknown> | undefined) ?? {}) };
         const hint = { ...((hints[name] as Record<string, unknown> | undefined) ?? {}) };
+        const choicesFromOpts: { value_field?: string; label_field?: string } = {};
         const type = (
           typeof prop.type === 'string' && prop.type !== 'object' ? prop.type : 'string'
         ) as ParamType;
@@ -93,8 +121,11 @@ function parseManifest(pJson: string, fJson: string): { rows: ParamRow[]; error:
           widget: inferWidget(hint),
           enumValues: Array.isArray(prop.enum) ? (prop.enum as string[]).map(String) : [],
           choices: Array.isArray(hint.choices) ? (hint.choices as string[]).map(String) : [],
-          choicesFrom: typeof hint.choices_from === 'string' ? hint.choices_from : '',
-          accept: typeof hint.accept === 'string' ? hint.accept : '',
+          choicesFrom: choicesFromOf(hint, choicesFromOpts),
+          accept: Array.isArray(hint.accept)
+            ? (hint.accept as unknown[]).map(String).join(', ')
+            : '',
+          choicesFromOpts,
           raw: prop,
           rawHint: hint,
         };
@@ -105,7 +136,7 @@ function parseManifest(pJson: string, fJson: string): { rows: ParamRow[]; error:
   }
 }
 
-function serialize(rows: ParamRow[]): { parametersJson: string; formJson: string } {
+export function serialize(rows: ParamRow[]): { parametersJson: string; formJson: string } {
   const properties: Record<string, Record<string, unknown>> = {};
   const fields: Record<string, Record<string, unknown>> = {};
   const order: string[] = [];
@@ -145,8 +176,24 @@ function serialize(rows: ParamRow[]): { parametersJson: string; formJson: string
     setText('label', r.label);
     setText('help', r.help);
     setText('placeholder', r.placeholder);
-    setText('accept', r.accept);
-    setText('choices_from', r.choicesFrom);
+    /* accept：契约要求数组且每项带前导点（tool-manifest.schema.json ^\.[A-Za-z0-9_-]+$） */
+    const exts = r.accept
+      .split(/[,，]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => (s.startsWith('.') ? s : `.${s}`));
+    if (exts.length > 0) {
+      hint.accept = exts;
+    } else {
+      delete hint.accept;
+    }
+    /* choices_from：契约要求对象（additionalProperties=false，缺省字段不写） */
+    const tool = r.choicesFrom.trim();
+    if (tool) {
+      hint.choices_from = { tool, ...r.choicesFromOpts };
+    } else {
+      delete hint.choices_from;
+    }
     if (r.choices.length > 0) {
       hint.choices = r.choices;
     } else {
@@ -172,13 +219,13 @@ function coerceDefault(raw: string, type: ParamType): unknown {
   return raw;
 }
 
-/** 卡片折叠态类型徽章文案。 */
+/** 卡片折叠态类型徽章文案（locale key）。 */
 const TYPE_LABEL: Record<ParamType, string> = {
-  string: '字符串',
-  number: '数字',
-  integer: '整数',
-  boolean: '布尔',
-  array: '数组',
+  string: 'com_param_type_string',
+  number: 'com_param_type_number',
+  integer: 'com_param_type_integer',
+  boolean: 'com_param_type_boolean',
+  array: 'com_param_type_array',
 };
 
 interface AddPreset {
@@ -319,6 +366,7 @@ export function ParamBuilder({
       placeholder: '',
       enumValues: [],
       choicesFrom: '',
+      choicesFromOpts: {},
       accept: '',
       raw: {},
       rawHint: {},
@@ -491,7 +539,7 @@ export function ParamBuilder({
                   >
                     {open ? '▾' : '▸'} {row.name}
                     <span className="ms-2 text-xs font-normal text-(--cui-color-text-muted)">
-                      {TYPE_LABEL[row.type]}
+                      {localize(TYPE_LABEL[row.type])}
                       {row.widget ? ` · ${row.widget}` : ''}
                     </span>
                   </button>
@@ -538,7 +586,7 @@ export function ParamBuilder({
                         >
                           {(Object.keys(TYPE_LABEL) as ParamType[]).map((t) => (
                             <Select.Item key={t} value={t}>
-                              {TYPE_LABEL[t]}
+                              {localize(TYPE_LABEL[t])}
                             </Select.Item>
                           ))}
                         </Select>
@@ -627,7 +675,9 @@ export function ParamBuilder({
                     )}
                     {row.widget === 'file' && (
                       <label className="flex flex-col gap-1">
-                        <span className="text-(--cui-color-text-muted)">accept</span>
+                        <span className="text-(--cui-color-text-muted)">
+                          {localize('com_param_field_accept')}
+                        </span>
                         <input
                           className="config-input h-7 px-2"
                           placeholder=".csv,.xlsx"
@@ -676,10 +726,7 @@ export function ParamBuilder({
                           value={row.choicesFrom ? 'from' : 'static'}
                           onValueChange={(v) =>
                             patchRow(index, {
-                              choicesFrom:
-                                v === 'from'
-                                  ? row.choicesFrom || localize('com_param_choices_from_hint')
-                                  : '',
+                              choicesFrom: v === 'from' ? row.choicesFrom : '',
                             })
                           }
                         >
@@ -741,10 +788,11 @@ export function ParamBuilder({
                             </div>
                           </div>
                         )}
-                        {row.choicesFrom && (
+                        {row.choicesFrom !== '' && (
                           <input
                             className="config-input h-7 px-2"
                             value={row.choicesFrom}
+                            placeholder={localize('com_param_choices_from_hint')}
                             onChange={(e) => patchRow(index, { choicesFrom: e.target.value })}
                           />
                         )}
