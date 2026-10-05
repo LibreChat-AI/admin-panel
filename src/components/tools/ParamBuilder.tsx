@@ -292,7 +292,6 @@ export function ParamBuilder({
       required: false,
       ...preset.make(),
     };
-    setAddOpen(false);
     setExpanded((prev) => new Set(prev).add(rows.length));
     emit([...rows, row]);
   };

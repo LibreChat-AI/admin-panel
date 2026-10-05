@@ -916,3 +916,12 @@ body > div:has(+ .modal-frost) {
   max-height: 45vh;
   overflow-y: auto;
 }
+
+/* 参数构建器的添加菜单项 hover（菜单 portal 在 body，主题变量不可达） */
+.param-add-menu [role="menuitem"] {
+  background-color: transparent;
+  transition: background-color 120ms;
+}
+.param-add-menu [role="menuitem"]:hover {
+  background-color: rgba(128, 128, 128, 0.25);
+}
