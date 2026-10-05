@@ -925,3 +925,9 @@ body > div:has(+ .modal-frost) {
 .param-add-menu [role="menuitem"]:hover {
   background-color: rgba(128, 128, 128, 0.25);
 }
+
+/* 参数构建器添加菜单：菜单 portal 在 body、位于弹窗焦点陷阱之外，
+ * Radix 的 data-highlighted 不生效——补显式 hover 高亮（值同 gmi-background-hover） */
+.param-add-menu [role="menuitem"]:hover {
+  background-color: #3b3b3b;
+}
