@@ -212,22 +212,22 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
           }
           if (response.status === 401) {
             if (refreshToken) {
-              const refreshed = await refreshAdminTokenDeduped(
-                refreshToken,
-                tokenProvider,
-                user.id,
-              );
-              if (refreshed) {
+              const outcome = await refreshAdminTokenDeduped(refreshToken, tokenProvider, user.id);
+              if (outcome.kind === 'reuse_disabled') {
+                await clearSession(session);
+                return { valid: false, error: 'Session is no longer valid' };
+              }
+              if (outcome.kind === 'success') {
                 const refreshedSession = {
-                  token: refreshed.token,
-                  refreshToken: refreshed.refreshToken ?? refreshToken,
-                  expiresAt: refreshed.expiresAt,
+                  token: outcome.tokens.token,
+                  refreshToken: outcome.tokens.refreshToken ?? refreshToken,
+                  expiresAt: outcome.tokens.expiresAt,
                   lastVerified: now,
                   lastActivity: now,
                 };
                 try {
                   const reVerify = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
-                    headers: { Authorization: `Bearer ${refreshed.token}` },
+                    headers: { Authorization: `Bearer ${outcome.tokens.token}` },
                   });
                   if (reVerify.ok) {
                     await session.update(refreshedSession);
@@ -429,7 +429,7 @@ export const oauthExchangeFn = createServerFn({ method: 'POST' })
       await session.update({
         user: exchangeData.user,
         token: exchangeData.token,
-        refreshToken: exchangeData.refreshToken ?? extractCookieValue(response, 'refreshToken'),
+        refreshToken: exchangeData.refreshToken,
         tokenProvider: 'openid',
         expiresAt: exchangeData.expiresAt,
         lastVerified: now,

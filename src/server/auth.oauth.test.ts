@@ -40,9 +40,10 @@ vi.mock('./utils/url', () => ({
   getServerApiUrl: () => 'http://librechat.test',
 }));
 
-vi.mock('./utils/refresh', () => ({
+const { refreshAdminTokenDeduped } = vi.hoisted(() => ({
   refreshAdminTokenDeduped: vi.fn(),
 }));
+vi.mock('./utils/refresh', () => ({ refreshAdminTokenDeduped }));
 
 import {
   adminLoginFn,
@@ -170,6 +171,32 @@ describe('verifyAdminTokenFn', () => {
     expect(updateSession).toHaveBeenCalledWith({ lastActivity: expect.any(Number) });
   });
 
+  it('clears an openid session when refresh reports TOKEN_REUSE_DISABLED after a 401', async () => {
+    const user = { id: 'user-5', role: 'ADMIN', email: 'openid@example.com' };
+    sessionState.data = {
+      user,
+      token: 'stale-jwt',
+      refreshToken: 'rt-unusable',
+      tokenProvider: 'openid',
+      lastVerified: 0,
+      lastActivity: Date.now(),
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, {}));
+    refreshAdminTokenDeduped.mockResolvedValueOnce({ kind: 'reuse_disabled' });
+
+    const result = await verifyAdminTokenFn();
+
+    expect(result).toEqual({ valid: false, error: 'Session is no longer valid' });
+    expect(refreshAdminTokenDeduped).toHaveBeenCalledWith('rt-unusable', 'openid', 'user-5');
+    expect(updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: undefined,
+        refreshToken: undefined,
+        user: undefined,
+      }),
+    );
+  });
+
   it('clears a delegated admin session when backend capability revalidation is denied', async () => {
     const user = { id: 'user-4', role: 'department-admin', email: 'delegate4@example.com' };
     sessionState.data = {
@@ -239,6 +266,32 @@ describe('oauthExchangeFn', () => {
         refreshToken: 'refresh-token',
         tokenProvider: 'openid',
         codeVerifier: undefined,
+      }),
+    );
+  });
+
+  it('stores no refresh token when the backend omits refreshToken from the exchange response', async () => {
+    sessionState.data = { codeVerifier: 'verifier-456' };
+    requestHeaders.set('origin', 'http://admin.test');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token-no-refresh',
+        expiresAt: 654321,
+        user: { id: 'user-7', role: 'ADMIN', email: 'no-refresh@example.com' },
+      }),
+    );
+
+    const result = await oauthExchangeFn({ data: { code: 'c'.repeat(64) } });
+
+    expect(result).toEqual({
+      error: false,
+      user: { id: 'user-7', role: 'ADMIN', email: 'no-refresh@example.com' },
+    });
+    expect(updateSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        token: 'jwt-token-no-refresh',
+        refreshToken: undefined,
+        tokenProvider: 'openid',
       }),
     );
   });
