@@ -1435,6 +1435,7 @@
   "com_services_edit_title": "编辑绑定",
   "com_services_field_type": "服务类型",
   "com_services_type_map": "地图服务",
+  "com_services_type_all": "全部",
   "com_services_type_data": "数据服务",
   "com_services_type_hint": "地图服务按地图绑定；数据服务按数据源绑定（含其全部数据集）。M1 支持 iServer REST。",
   "com_services_field_name": "展示名",

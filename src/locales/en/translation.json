@@ -1435,6 +1435,7 @@
   "com_services_edit_title": "Edit binding",
   "com_services_field_type": "Service type",
   "com_services_type_map": "Map service",
+  "com_services_type_all": "All",
   "com_services_type_data": "Data service",
   "com_services_type_hint": "Map services bind per map; data services bind per datasource (all its datasets included). M1 supports iServer REST.",
   "com_services_field_name": "Display name",

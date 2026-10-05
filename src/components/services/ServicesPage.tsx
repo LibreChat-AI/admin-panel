@@ -38,9 +38,13 @@ export function ServicesPage() {
   const [discoverOpen, setDiscoverOpen] = useState(false);
   /* 服务管理两个标签：服务绑定 / 底图管理（2.20.0） */
   const [tab, setTab] = useState<'bindings' | 'basemaps'>('bindings');
+  /* 绑定列表按类型筛选（2.21.1）：全部 / 地图服务 / 数据服务 */
+  const [typeFilter, setTypeFilter] = useState<'all' | 'iserver_map' | 'iserver_data'>('all');
 
   const servicesQuery = useQuery(servicesQueryOptions);
   const services = servicesQuery.data?.services ?? [];
+  const shownServices =
+    typeFilter === 'all' ? services : services.filter((s) => s.type === typeFilter);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['terravox', 'admin', 'services'] });
@@ -158,6 +162,47 @@ export function ServicesPage() {
         </p>
       )}
 
+      {/* 类型筛选 chips：全部 / 地图服务 / 数据服务，带计数 */}
+      {services.length > 0 && (() => {
+        const mapCount = services.filter((s) => s.type === 'iserver_map').length;
+        const dataCount = services.length - mapCount;
+        const chips = [
+          ['all', localize('com_services_type_all'), services.length],
+          ['iserver_map', localize('com_services_type_map'), mapCount],
+          ['iserver_data', localize('com_services_type_data'), dataCount],
+        ] as const;
+        return (
+          <div className="flex flex-wrap items-center gap-2">
+            {chips.map(([key, label, count]) => (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={typeFilter === key}
+                onClick={() => setTypeFilter(key)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs transition-colors',
+                  typeFilter === key
+                    ? 'border-(--cui-color-accent-primary) bg-(--cui-color-background-hover) font-medium text-(--cui-color-text-default)'
+                    : 'border-(--cui-color-stroke-default) text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)',
+                )}
+              >
+                {label}
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 text-[10px]',
+                    typeFilter === key
+                      ? 'bg-(--cui-color-accent-primary) text-white'
+                      : 'bg-(--cui-color-background-hover) text-(--cui-color-text-muted)',
+                  )}
+                >
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+        );
+      })()}
+
       {servicesQuery.isLoading && <LoadingState />}
       {servicesQuery.isError && (
         <EmptyState
@@ -169,7 +214,7 @@ export function ServicesPage() {
       )}
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-        {services.map((service) => (
+        {shownServices.map((service) => (
           <div
             key={service.id}
             className="flex flex-col gap-2 rounded-lg border border-(--cui-color-stroke-default) p-4"
