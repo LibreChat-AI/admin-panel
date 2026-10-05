@@ -621,6 +621,45 @@ input[type='number'].config-input::-webkit-outer-spin-button {
   color: var(--cui-color-accent-danger);
 }
 
+.icon-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 4px;
+  border-radius: var(--cui-radii-sm);
+  color: var(--cui-color-text-muted);
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    background 150ms ease;
+}
+
+.icon-btn-xs {
+  padding: 2px;
+}
+
+.icon-btn:not(:disabled):hover {
+  background: var(--cui-color-background-hover);
+  color: var(--cui-color-text-default);
+}
+
+.icon-btn-danger:not(:disabled):hover {
+  color: var(--cui-color-accent-danger);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--cui-color-outline);
+  outline-offset: 1px;
+}
+
+.icon-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 /* ── Config section collapse (grid-rows trick for auto height) ── */
 
 .config-section-grid {

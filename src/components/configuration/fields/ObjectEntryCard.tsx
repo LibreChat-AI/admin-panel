@@ -1,10 +1,11 @@
 import { Icon } from '@clickhouse/click-ui';
 import { useState, useCallback, useRef, useEffect } from 'react';
 import type * as t from '@/types';
+import { BLOCK_UNSAFE_CONFIG_KEYS } from '@/constants';
 import { TrashButton } from '@/components/shared';
+import { cn, isUnsafeConfigKey } from '@/utils';
 import { CodeField } from './CodeField';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 export function ObjectEntryCard({
   id,
@@ -24,6 +25,7 @@ export function ObjectEntryCard({
   const [hasEverExpanded, setHasEverExpanded] = useState(defaultExpanded);
   const [isEditing, setIsEditing] = useState(false);
   const [editKey, setEditKey] = useState(entryKey);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [hasAddField, setHasAddField] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -75,14 +77,27 @@ export function ObjectEntryCard({
   );
 
   const commitRename = useCallback(() => {
-    setIsEditing(false);
     const trimmed = editKey.trim();
+    if (BLOCK_UNSAFE_CONFIG_KEYS && trimmed !== entryKey && isUnsafeConfigKey(trimmed)) {
+      setRenameError(localize('com_config_unsafe_key_error'));
+      return;
+    }
+    setRenameError(null);
+    setIsEditing(false);
     if (trimmed && trimmed !== entryKey && onRename) {
       onRename(trimmed);
     } else {
       setEditKey(entryKey);
     }
-  }, [editKey, entryKey, onRename]);
+  }, [editKey, entryKey, onRename, localize]);
+
+  const cancelRename = useCallback(() => {
+    setEditKey(entryKey);
+    setRenameError(null);
+    setIsEditing(false);
+  }, [entryKey]);
+
+  const renameErrorId = `${(id ?? `entry-${entryKey}`).replace(/[^\w-]/g, '-')}-rename-error`;
 
   const summary = getSummary(value, {
     enabled: localize('com_ui_enabled'),
@@ -108,6 +123,7 @@ export function ObjectEntryCard({
           isEditing
             ? undefined
             : (e) => {
+                if (e.target !== e.currentTarget) return;
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   toggle();
@@ -126,22 +142,36 @@ export function ObjectEntryCard({
         </span>
         <span className="flex min-w-0 flex-1 items-center gap-2">
           {isEditing && onRename ? (
-            <input
-              ref={inputRef}
-              type="text"
-              value={editKey}
-              onChange={(e) => setEditKey(e.target.value)}
-              onBlur={commitRename}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename();
-                if (e.key === 'Escape') {
-                  setEditKey(entryKey);
-                  setIsEditing(false);
-                }
-              }}
-              onClick={(e) => e.stopPropagation()}
-              className="config-input-ghost w-auto max-w-50 min-w-20 text-sm font-medium"
-            />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <input
+                ref={inputRef}
+                type="text"
+                value={editKey}
+                onChange={(e) => {
+                  setEditKey(e.target.value);
+                  setRenameError(null);
+                }}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') commitRename();
+                  if (e.key === 'Escape') cancelRename();
+                }}
+                onClick={(e) => e.stopPropagation()}
+                aria-label={localize('com_a11y_rename_entry', { name: entryKey })}
+                aria-invalid={renameError ? true : undefined}
+                aria-describedby={renameError ? renameErrorId : undefined}
+                className="config-input-ghost w-auto max-w-50 min-w-20 text-sm font-medium"
+              />
+              {renameError && (
+                <span
+                  id={renameErrorId}
+                  role="alert"
+                  className="text-xs font-normal text-(--cui-color-text-danger)"
+                >
+                  {renameError}
+                </span>
+              )}
+            </span>
           ) : (
             <>
               <span
@@ -231,6 +261,7 @@ export function ObjectEntryCard({
                     handleFieldChange,
                     addFieldTriggerRef,
                     editSessionId,
+                    disabled,
                   )}
                 {!isPrimitive(value) && fields.length === 0 && (
                   <CodeField

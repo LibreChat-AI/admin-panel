@@ -58,12 +58,14 @@ export function ProfileValueModal({
 
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={onCancel}
               disabled={saving}
             />
             <Button
+              htmlType="button"
               type="primary"
               label={localize('com_ui_save')}
               onClick={onSave}
@@ -183,6 +185,7 @@ function ModalValueControl({
             </div>
           ))}
           <Button
+            htmlType="button"
             type="secondary"
             label={localize('com_ui_add_item', { item: localize('com_ui_item') })}
             iconLeft="plus"

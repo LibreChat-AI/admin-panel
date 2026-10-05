@@ -24,6 +24,7 @@ import { useCollapsibleSection } from '../useCollapsibleSection';
 import { ArrayObjectField } from '../fields/ArrayObjectField';
 import { countConfigured, hasDescendant } from '../utils';
 import { renderCollapsible } from '../renderCollapsible';
+import { UnknownSettings } from '../UnknownSettings';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -602,6 +603,7 @@ function ProviderSection({
       ) : (
         <FieldRenderer fields={children} {...rendererProps} />
       )}
+      <UnknownSettings fields={children} value={providerValue} path={path} />
     </MultiAccordion.Item>
   );
 }

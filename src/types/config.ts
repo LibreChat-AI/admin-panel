@@ -80,3 +80,12 @@ export interface KeyValuePair {
   value: string;
   valueType?: KVValueType;
 }
+
+/** Why a config section or field cannot be edited in the panel. */
+export type ReadOnlyReason = 'baseOnly' | 'yamlOnly';
+
+/** A record key the admin API cannot store, and the dot-path of the object holding it. */
+export interface UnsafeConfigKey {
+  path: string;
+  key: string;
+}

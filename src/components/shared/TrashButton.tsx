@@ -1,7 +1,13 @@
-import { IconButton } from '@clickhouse/click-ui';
+import { Icon } from '@clickhouse/click-ui';
 import type { MouseEvent } from 'react';
 import type * as t from '@/types';
+import { cn } from '@/utils';
 
+/**
+ * Native button so the accessible name is the caller's `ariaLabel` (click-ui
+ * `IconButton` overwrites `aria-label` with the icon name) and the button can
+ * never act as a form's implicit submit button.
+ */
 export function TrashButton({ onClick, ariaLabel, size = 'sm', disabled }: t.TrashButtonProps) {
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -9,12 +15,17 @@ export function TrashButton({ onClick, ariaLabel, size = 'sm', disabled }: t.Tra
   };
 
   return (
-    <IconButton
-      icon="trash"
-      size={size}
+    <button
+      type="button"
       onClick={handleClick}
       aria-label={ariaLabel}
+      title={ariaLabel}
       disabled={disabled}
-    />
+      className={cn('icon-btn icon-btn-danger', size === 'xs' && 'icon-btn-xs')}
+    >
+      <span aria-hidden="true" className="flex">
+        <Icon name="trash" size={size} />
+      </span>
+    </button>
   );
 }

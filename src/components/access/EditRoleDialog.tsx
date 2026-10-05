@@ -263,6 +263,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                         <p>{localize('com_access_permissions_load_error')}</p>
                         {roleDetail.isError && (
                           <Button
+                            htmlType="button"
                             type="secondary"
                             label={localize('com_ui_retry')}
                             onClick={() => roleDetail.refetch()}
@@ -349,12 +350,14 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={onClose}
               disabled={updateMutation.isPending}
             />
             <Button
+              htmlType="submit"
               type="primary"
               label={localize('com_ui_save')}
               disabled={

@@ -9,8 +9,8 @@ import { renderCollapsible } from '../renderCollapsible';
 import { renderInlineField } from '../FieldRenderer';
 import { SelectField } from '../fields/SelectField';
 import { FormDialog } from '@/components/shared';
+import { cn, isUnsafeConfigKey } from '@/utils';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 const TRANSPORT_FIELDS: Record<string, string[]> = {
   stdio: ['command', 'args', 'env', 'stderr'],
@@ -567,7 +567,7 @@ function CreateMcpServerDialog({
       setError(localize('com_config_server_name_required'));
       return;
     }
-    if (name.includes('.')) {
+    if (isUnsafeConfigKey(name)) {
       setError(localize('com_config_server_name_no_dots'));
       return;
     }
@@ -788,7 +788,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
 
   const handleCreate = useCallback(
     (serverName: string, entry: Record<string, t.ConfigValue>) => {
-      if (serverName.includes('.')) {
+      if (isUnsafeConfigKey(serverName)) {
         onValidationErrorRef.current?.(localizeRef.current('com_config_server_name_no_dots'));
         return;
       }
@@ -860,7 +860,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       const editedValues = editedValuesRef.current;
       const baseRecord = baseRecordRef.current;
       const record = recordRef.current;
-      if (newKey.includes('.')) {
+      if (isUnsafeConfigKey(newKey)) {
         onValidationErrorRef.current?.(localizeRef.current('com_config_server_name_no_dots'));
         return;
       }

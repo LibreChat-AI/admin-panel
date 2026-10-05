@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Select, TextField } from '@clickhouse/click-ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type * as t from '@/types';
 import type { LangfuseConnectionStatus } from '@/server';
+import type * as t from '@/types';
 import {
   getLangfuseConnectionFn,
   LANGFUSE_CONNECTION_QUERY_KEY,
@@ -423,12 +423,14 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         {isEditing ? (
           <>
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               disabled={disabled || busy}
               onClick={handleCancel}
             />
             <Button
+              htmlType="button"
               type="primary"
               label={
                 testMutation.isPending
@@ -442,6 +444,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
           </>
         ) : (
           <Button
+            htmlType="button"
             type={status?.enabled === true ? 'secondary' : 'primary'}
             label={localize(
               status?.enabled === true

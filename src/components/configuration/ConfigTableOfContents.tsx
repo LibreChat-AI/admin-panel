@@ -184,7 +184,7 @@ export const ConfigTableOfContents = memo(function ConfigTableOfContents({
                   onClick={() => handleClick(sectionDomId)}
                   className="toc-item toc-item-parent block w-full cursor-pointer truncate border-none bg-transparent py-1.5 pr-1 pl-3 text-left text-[13px] font-medium text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)"
                 >
-                  {localize(section.titleKey)}
+                  {section.title ?? localize(section.titleKey)}
                 </button>
                 {tocItems && tocItems.length > 0 && (
                   <ul className="toc-children flex flex-col">

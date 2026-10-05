@@ -409,6 +409,7 @@ export function AuditLogTab() {
               const selected = actionFilter.includes(act);
               return (
                 <Button
+                  htmlType="button"
                   key={act}
                   type={selected ? 'primary' : 'secondary'}
                   label={localize(ACTION_LABEL_KEY[act])}
@@ -458,6 +459,7 @@ export function AuditLogTab() {
           </div>
           {(dateFrom || dateTo) && (
             <Button
+              htmlType="button"
               type="danger"
               iconLeft="cross"
               label={localize('com_ui_clear')}
@@ -474,6 +476,7 @@ export function AuditLogTab() {
 
         <div className="flex flex-col items-end gap-1">
           <Button
+            htmlType="button"
             type="secondary"
             iconLeft="download"
             onClick={() => void handleExport()}

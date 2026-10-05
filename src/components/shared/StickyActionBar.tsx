@@ -16,8 +16,8 @@ export function StickyActionBar({
         </span>
       )}
       <div className="ml-auto flex items-center gap-2">
-        <Button type="secondary" label={discardLabel} onClick={onDiscard} />
-        <Button type="primary" label={saveLabel} onClick={onSave} />
+        <Button htmlType="button" type="secondary" label={discardLabel} onClick={onDiscard} />
+        <Button htmlType="button" type="primary" label={saveLabel} onClick={onSave} />
       </div>
     </div>
   );

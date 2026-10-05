@@ -38,12 +38,14 @@ export function ResetBaseConfigDialog({
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={onCancel}
               disabled={resetting}
             />
             <Button
+              htmlType="button"
               type="danger"
               label={
                 resetting

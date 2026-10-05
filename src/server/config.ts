@@ -2,8 +2,12 @@ import { z } from 'zod';
 import yaml from 'js-yaml';
 import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
-import { configSchema } from 'librechat-data-provider';
 import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
+import {
+  configSchema,
+  isProcessMCPServerField,
+  isProcessMCPServerConfig,
+} from 'librechat-data-provider';
 import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import {
@@ -16,8 +20,9 @@ import {
   requireAnyCapability,
   requireAllSectionCapabilities,
 } from './capabilities';
+import { filterSecretPreviewFields, findUnsafeKeys, stripSecretPreviewValues } from '@/utils';
+import { BLOCK_UNSAFE_CONFIG_KEYS, getReadOnlyReason } from '@/constants';
 import { BASE_CONFIG_PRINCIPAL_ID } from './constants';
-import { filterSecretPreviewFields, stripSecretPreviewValues } from '@/utils';
 import { safeFieldPath } from './utils/validation';
 import { flattenObject } from '@/utils/format';
 import { apiFetch } from './utils/api';
@@ -694,65 +699,90 @@ export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(a
   }
 });
 
+const UNSAFE_KEY_MESSAGE =
+  "keys containing '.' or starting with '$' can't be saved through the admin API yet; set this in librechat.yaml";
+
+function describeUnsafeKey({ path, key }: t.UnsafeConfigKey): string {
+  return `${path ? `${path} → ` : ''}"${key}": ${UNSAFE_KEY_MESSAGE}`;
+}
+
+/** Leaf paths of `raw` that the bundled config schema does not describe. */
+export function findUnknownConfigPaths(raw: Record<string, t.ConfigValue>): string[] {
+  return Object.keys(flattenObject(raw)).filter(
+    (path) => resolveSubSchema(configSchema as t.ZodSchemaLike, path.split('.')) == null,
+  );
+}
+
+/**
+ * Parses and validates pasted/uploaded YAML for import. Validation runs on a
+ * copy with `version` filled in (a snippet need not carry it), but the result
+ * is the raw parsed object: no Zod defaults are injected and keys the bundled
+ * schema does not know are kept (and reported in `unknownPaths`).
+ */
+export function parseConfigYaml(yamlContent: string): t.ImportParseResult {
+  const failure = (
+    error: string,
+    validationErrors?: t.ImportValidationError[],
+  ): t.ImportParseResult => ({
+    success: false,
+    error,
+    validationErrors,
+    appConfig: null,
+    unknownPaths: [],
+  });
+
+  let rawConfig: unknown;
+  try {
+    rawConfig = yaml.load(yamlContent, { schema: yaml.JSON_SCHEMA });
+  } catch (parseError) {
+    const mark = (parseError as { mark?: { line: number; column: number } }).mark;
+    const where = mark ? ` (line ${mark.line + 1}, column ${mark.column + 1})` : '';
+    return failure(`Invalid YAML syntax${where}. Please check the content for syntax errors.`);
+  }
+
+  if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) {
+    return failure('YAML did not produce a valid configuration object');
+  }
+
+  const appConfig = rawConfig as Record<string, t.ConfigValue>;
+  const result = configSchema.safeParse({ version: '1.0.0', ...appConfig });
+  if (!result.success) {
+    return failure(
+      'Config validation failed',
+      result.error.errors.map((e: { path: (string | number)[]; message: string }) => ({
+        path: e.path.join('.'),
+        message: e.message,
+      })),
+    );
+  }
+
+  if (BLOCK_UNSAFE_CONFIG_KEYS) {
+    const unsafe = findUnsafeKeys(appConfig, '');
+    if (unsafe.length > 0) {
+      return failure(
+        'Some keys cannot be imported',
+        unsafe.map(({ path, key }) => ({
+          path: path || key,
+          message: `"${key}": ${UNSAFE_KEY_MESSAGE}`,
+        })),
+      );
+    }
+  }
+
+  return {
+    success: true,
+    error: undefined,
+    validationErrors: undefined,
+    appConfig,
+    unknownPaths: findUnknownConfigPaths(appConfig),
+  };
+}
+
 export const parseImportedYaml = createServerFn({ method: 'POST' })
   .inputValidator(z.object({ yamlContent: z.string() }))
-  .handler(async ({ data }: { data: { yamlContent: string } }) => {
-    let rawConfig: unknown;
-    try {
-      rawConfig = yaml.load(data.yamlContent, { schema: yaml.JSON_SCHEMA });
-    } catch (parseError) {
-      console.error('Failed to parse imported YAML content:', parseError);
-      return {
-        success: false,
-        error: 'Invalid YAML syntax. Please check the content for syntax errors.',
-        validationErrors: undefined,
-        appConfig: null,
-      };
-    }
-
-    if (!rawConfig || typeof rawConfig !== 'object') {
-      return {
-        success: false,
-        error: 'YAML did not produce a valid configuration object',
-        validationErrors: undefined,
-        appConfig: null,
-      };
-    }
-
-    const result = configSchema.safeParse(rawConfig);
-
-    if (!result.success) {
-      return {
-        success: false,
-        error: 'Config validation failed',
-        validationErrors: result.error.errors.map(
-          (e: { path: (string | number)[]; message: string }) => ({
-            path: e.path.join('.'),
-            message: e.message,
-          }),
-        ),
-        appConfig: null,
-      };
-    }
-
-    /**
-     * `librechat-data-provider` and `@librechat/data-schemas` both migrated
-     * to tsdown (upstream #13578, #13597) and now ship dual `.d.cts` + `.d.mts`
-     * declaration files. Under `moduleResolution: bundler`, TS treats
-     * `TCustomConfig` resolved through one declaration path as nominally
-     * distinct from `TCustomConfig` resolved through the other, even when
-     * structurally identical. That collision shows up here as "Two different
-     * types with this name exist, but they are unrelated" in the ServerFn
-     * registration. The consumer (ImportYamlDialog) treats appConfig as
-     * `Record<string, ConfigValue>`, so widening the return is the local fix.
-     */
-    return {
-      success: true,
-      error: undefined,
-      validationErrors: undefined,
-      appConfig: result.data as Record<string, t.ConfigValue>,
-    };
-  });
+  .handler(async ({ data }: { data: { yamlContent: string } }) =>
+    parseConfigYaml(data.yamlContent),
+  );
 
 function getFieldDefault(schema: t.ZodSchemaLike): { hasDefault: boolean; value: unknown } {
   let current = schema;
@@ -825,6 +855,7 @@ const APP_SERVICE_KEY_MAP: Record<string, string> = {
 };
 
 const AZURE_OPENAI_DERIVED_KEYS = new Set([
+  'assistantGroups',
   'errors',
   'isValid',
   'groupMap',
@@ -1042,87 +1073,179 @@ async function mergeIndexedArrayEntries(
   return mergeIndexedArrayEntriesIntoBase(entries, baseConfig, mergedPaths);
 }
 
-export const saveBaseConfigFn = createServerFn({ method: 'POST' })
+function isProcessMCPServerFieldPath(fieldPath: string, value: unknown): boolean {
+  const [section, serverName, field] = fieldPath.split('.');
+  if (section !== 'mcpServers') return false;
+  if (serverName == null) {
+    return (
+      value != null &&
+      typeof value === 'object' &&
+      Object.values(value as Record<string, unknown>).some(isProcessMCPServerConfig)
+    );
+  }
+  if (field == null) return isProcessMCPServerConfig(value);
+  return isProcessMCPServerField(field) || (field === 'type' && value === 'stdio');
+}
+
+function skipReasonForPath(fieldPath: string): t.SkippedChange['reason'] | null {
+  if (isInterfacePermissionPath(fieldPath)) return 'permission';
+  return getReadOnlyReason(fieldPath) ?? null;
+}
+
+/**
+ * Pre-flight for a batch of saves and resets, run before anything is written:
+ * per-entry schema validation (an indexed array entry such as
+ * `endpoints.custom.3` is validated against the element schema), the
+ * process-backed MCP field rule, and keys the admin API would silently drop.
+ * Paths the panel must not write are reported in `skipped`.
+ */
+export function checkConfigChanges(saves: t.SaveEntry[], resets: string[]): t.ConfigCheckResult {
+  const errors: t.FieldValidationError[] = [];
+  const skipped: t.SkippedChange[] = [];
+  for (const { fieldPath, value } of saves) {
+    const reason = skipReasonForPath(fieldPath);
+    if (reason) {
+      skipped.push({ fieldPath, reason });
+      continue;
+    }
+    if (isProcessMCPServerFieldPath(fieldPath, value)) {
+      errors.push({
+        fieldPath,
+        error: `${fieldPath}: process-backed MCP servers (command, args, env, cwd, stderr, stdio) can only be configured in librechat.yaml`,
+      });
+      continue;
+    }
+    const unsafe = BLOCK_UNSAFE_CONFIG_KEYS ? findUnsafeKeys(value, fieldPath) : [];
+    if (unsafe.length > 0) {
+      errors.push(...unsafe.map((u) => ({ fieldPath, error: describeUnsafeKey(u) })));
+      continue;
+    }
+    const result = validateFieldValue(fieldPath, value);
+    if (!result.success) errors.push({ fieldPath, error: result.error });
+  }
+  for (const fieldPath of resets) {
+    const reason = skipReasonForPath(fieldPath);
+    if (reason) skipped.push({ fieldPath, reason });
+  }
+  return { errors, skipped };
+}
+
+function formatCheckErrors(errors: t.FieldValidationError[]): string {
+  return `Validation failed — ${errors.map((e) => e.error).join('; ')}`;
+}
+
+function topLevelSections(paths: string[]): string[] {
+  return [...new Set(paths.map((p) => p.split('.')[0]))];
+}
+
+const saveEntrySchema = z.object({ fieldPath: safeFieldPath, value: z.unknown() });
+
+/** Validates a batch before any write so a failed save never leaves resets half-applied. */
+export const validateConfigChangesFn = createServerFn({ method: 'POST' })
   .inputValidator(
     z.object({
-      entries: z
-        .array(z.object({ fieldPath: safeFieldPath, value: z.unknown() }))
-        .min(1)
-        .max(500),
+      target: z.enum(['base', 'scope']),
+      saves: z.array(saveEntrySchema).max(2000),
+      resets: z.array(safeFieldPath).max(2000),
     }),
   )
   .handler(async ({ data }) => {
-    let filtered = data.entries.filter((e) => !isInterfacePermissionPath(e.fieldPath));
-    if (filtered.length === 0) return { success: true };
-
-    // Merge indexed array entries (e.g. endpoints.custom.2) back into
-    // full arrays so the API receives complete field values.
-    // Track which paths were merged so we can skip re-validation — the
-    // individual entries were already validated by the client and the
-    // merge only splices them into the existing array.
-    const mergedArrayPaths = new Set<string>();
-    filtered = await mergeIndexedArrayEntries(filtered, mergedArrayPaths);
-
-    const sections = [...new Set(filtered.map((e) => e.fieldPath.split('.')[0]))];
-    await requireAllSectionCapabilities(sections);
-
-    const errors: t.FieldValidationError[] = [];
-    for (const entry of filtered) {
-      if (mergedArrayPaths.has(entry.fieldPath)) continue;
-      const result = validateFieldValue(entry.fieldPath, entry.value);
-      if (!result.success) {
-        errors.push({ fieldPath: entry.fieldPath, error: result.error });
-      }
+    const saves = data.saves as t.SaveEntry[];
+    const check = checkConfigChanges(saves, data.resets);
+    const skippedPaths = new Set(check.skipped.map((s) => s.fieldPath));
+    const written = [...saves.map((e) => e.fieldPath), ...data.resets].filter(
+      (p) => !skippedPaths.has(p),
+    );
+    if (data.target === 'base') {
+      if (written.length > 0) await requireAllSectionCapabilities(topLevelSections(written));
+    } else {
+      await requireAnyCapability([
+        SystemCapabilities.ASSIGN_CONFIGS,
+        SystemCapabilities.MANAGE_CONFIGS,
+      ]);
     }
-    if (errors.length > 0) {
-      const details = errors.map((e) => e.error).join('; ');
-      throw new Error(`Validation failed — ${details}`);
-    }
-
-    const response = await apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}/fields`, {
-      method: 'PATCH',
-      body: JSON.stringify({ entries: filtered, priority: 0 }),
-    });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(
-        (err as { error?: string }).error ?? `Failed to save base config: ${response.status}`,
-      );
-    }
-
-    return { success: true };
+    return check;
   });
 
-/** Full-replace save used by YAML import (intentionally sends the entire config). */
-export const importBaseConfigFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ config: z.record(z.string(), z.unknown()) }))
-  .handler(async ({ data }) => {
-    await requireCapability(SystemCapabilities.MANAGE_CONFIGS);
-    const overrides = { ...data.config };
-    if (
-      overrides.interface &&
-      typeof overrides.interface === 'object' &&
-      !Array.isArray(overrides.interface)
-    ) {
-      overrides.interface = stripInterfacePermissionFields(
-        overrides.interface as Record<string, unknown>,
-      );
-    }
+/** The admin API accepts at most this many entries per PATCH. */
+const MAX_PATCH_ENTRIES = 100;
 
-    const response = await apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`, {
-      method: 'PUT',
-      body: JSON.stringify({ overrides, priority: 0 }),
+/**
+ * PATCHes field entries in batches the admin API accepts. A 200 "No actionable
+ * field entries" reply means the backend stripped every entry in that batch;
+ * those paths are returned as `dropped` so the caller never reports them saved.
+ */
+export async function patchConfigFields(
+  url: string,
+  entries: Array<{ fieldPath: string; value: unknown }>,
+  extraBody: Record<string, unknown> = {},
+): Promise<{ applied: number; dropped: string[] }> {
+  let applied = 0;
+  const dropped: string[] = [];
+  for (let i = 0; i < entries.length; i += MAX_PATCH_ENTRIES) {
+    const batch = entries.slice(i, i + MAX_PATCH_ENTRIES);
+    const response = await apiFetch(url, {
+      method: 'PATCH',
+      body: JSON.stringify({ entries: batch, ...extraBody }),
     });
-
+    const body = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(
-        (err as { error?: string }).error ?? `Failed to import config: ${response.status}`,
-      );
+      throw new Error(body.error ?? `Failed to save config: ${response.status}`);
     }
+    if (body.message?.startsWith('No actionable')) {
+      dropped.push(...batch.map((e) => e.fieldPath));
+    } else {
+      applied += batch.length;
+    }
+  }
+  return { applied, dropped };
+}
 
-    return { success: true };
+/**
+ * Splits a request into the entries to write and the ones the panel must not
+ * send, and rejects the whole request if any entry fails the pre-flight.
+ */
+export function prepareConfigWrite(entries: t.SaveEntry[]): {
+  writable: t.SaveEntry[];
+  skipped: t.SkippedChange[];
+} {
+  const check = checkConfigChanges(entries, []);
+  if (check.errors.length > 0) throw new Error(formatCheckErrors(check.errors));
+  const skippedPaths = new Set(check.skipped.map((s) => s.fieldPath));
+  return {
+    writable: entries.filter((e) => !skippedPaths.has(e.fieldPath)),
+    skipped: check.skipped,
+  };
+}
+
+export const saveBaseConfigFn = createServerFn({ method: 'POST' })
+  .inputValidator(
+    z.object({
+      entries: z.array(saveEntrySchema).min(1).max(2000),
+    }),
+  )
+  .handler(async ({ data }): Promise<t.ConfigWriteResult> => {
+    const { writable, skipped } = prepareConfigWrite(data.entries as t.SaveEntry[]);
+    if (writable.length === 0) return { success: true, applied: 0, skipped };
+
+    /** Indexed array entries (e.g. endpoints.custom.2) were validated against the element schema above; merge them back into full arrays so the API receives complete field values. */
+    const merged = await mergeIndexedArrayEntries(writable);
+
+    await requireAllSectionCapabilities(topLevelSections(merged.map((e) => e.fieldPath)));
+
+    const { applied, dropped } = await patchConfigFields(
+      `/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}/fields`,
+      merged,
+      { priority: 0 },
+    );
+    return {
+      success: true,
+      applied,
+      skipped: [
+        ...skipped,
+        ...dropped.map((fieldPath) => ({ fieldPath, reason: 'baseOnly' as const })),
+      ],
+    };
   });
 
 export const resetBaseConfigFieldFn = createServerFn({ method: 'POST' })

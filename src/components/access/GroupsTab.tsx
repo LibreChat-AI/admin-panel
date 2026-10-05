@@ -88,6 +88,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
           placeholder={localize('com_access_search_groups')}
         />
         <Button
+          htmlType="button"
           type="secondary"
           iconLeft="plus"
           label={localize('com_access_create_group')}

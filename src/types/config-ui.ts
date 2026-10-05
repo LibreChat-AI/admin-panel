@@ -1,12 +1,19 @@
 import type { ReactNode } from 'react';
 import type {
+  ConfigValue,
+  FlatConfigMap,
+  SchemaField,
+  ReadOnlyReason,
+  UnsafeConfigKey,
+  FieldValidationError,
+} from './config';
+import type {
   ConfigScope,
   IconName,
   ScopeSelection,
   FieldProfileValue,
   ScopePermissions,
 } from './scope';
-import type { ConfigValue, FlatConfigMap, SchemaField } from './config';
 
 export interface ConfigTab {
   id: string;
@@ -40,6 +47,12 @@ export interface ConfigSectionConfig {
   tocItems?: TocItem[];
   /** Optional info banner displayed at the top of the section content. */
   bannerText?: string;
+  /** Literal title for sections without a locale key (e.g. newer schema sections). */
+  title?: string;
+  /** Set for sections the panel must not write; the section renders read-only. */
+  readOnlyReason?: ReadOnlyReason;
+  /** The section is a record keyed by entry name, so its keys are entries, not settings. */
+  isRecord?: boolean;
 }
 
 export interface ConfigPageProps {
@@ -86,6 +99,8 @@ export interface ConfigTabContentProps {
   onValidationError?: (message: string) => void;
   /** See `SingleFieldRendererProps.editSessionId`. */
   editSessionId?: number;
+  /** Top-level config object whose schema-unknown keys are listed read-only after the sections. */
+  unknownSettings?: Pick<UnknownSettingsProps, 'fields' | 'value'>;
 }
 
 export interface ConfigTableOfContentsProps {
@@ -137,8 +152,14 @@ export interface ConfigSectionProps {
 
 export interface ConfirmSaveDialogProps {
   open: boolean;
+  /** Names the target being written (base or the open profile). */
+  title: string;
   editedValues: FlatConfigMap;
   originalValues: FlatConfigMap;
+  /** Pending edits that will not be sent, with the reason. */
+  skipped?: SkippedChange[];
+  /** Keys the admin API would drop; while any exist the save is blocked. */
+  unsafeKeys?: UnsafeConfigKey[];
   saving: boolean;
   error?: string | null;
   onConfirm: () => void;
@@ -270,20 +291,35 @@ export interface FieldRendererProps {
   editSessionId?: number;
 }
 
+/** Where an import is written: base (all users) or one profile. */
+export type ImportTarget = { type: 'base' } | { type: 'scope'; scope: ConfigScope };
+
 export interface ImportYamlDialogProps {
   open: boolean;
   onClose: () => void;
-  onImport: (appConfig: Record<string, ConfigValue>) => void;
-  onImportAsProfile: (appConfig: Record<string, ConfigValue>, scope: ConfigScope) => Promise<void>;
+  /** The profile open on the page, offered (and preselected) as the import target. */
+  currentScope?: ConfigScope;
+  /** Writes the imported values to `target`; rejects with the reason when nothing was written. */
+  onImport: (appConfig: Record<string, ConfigValue>, target: ImportTarget) => Promise<void>;
 }
 
 export type ImportTab = 'upload' | 'paste';
 export type ImportStep = 'input' | 'target';
-export type TargetMode = 'base' | 'existing' | 'create';
+export type TargetMode = 'current' | 'base' | 'existing' | 'create';
 
 export interface ImportValidationError {
   path: string;
   message: string;
+}
+
+export interface ImportParseResult {
+  success: boolean;
+  error?: string;
+  validationErrors?: ImportValidationError[];
+  /** The parsed YAML exactly as written: no schema defaults, unknown keys kept. */
+  appConfig: Record<string, ConfigValue> | null;
+  /** Leaf paths the panel's bundled schema does not describe (kept on import). */
+  unknownPaths: string[];
 }
 
 export interface InfoBannerProps {
@@ -371,8 +407,58 @@ export interface SectionHeaderProps {
   children?: ReactNode;
 }
 
+export interface SaveEntry {
+  fieldPath: string;
+  value: ConfigValue;
+}
+
+/** A pending edit the panel will not send, and why. */
+export interface SkippedChange {
+  fieldPath: string;
+  reason: ReadOnlyReason | 'permission';
+}
+
 export interface SavePayload {
   touched: string[];
-  saves: Array<{ fieldPath: string; value: ConfigValue }>;
+  saves: SaveEntry[];
   resets: string[];
+  skipped: SkippedChange[];
+}
+
+/** What `buildSavePayload` needs to tell a real change from a blank or unchanged one. */
+export interface SaveContext {
+  /** Schema tree used to tell record and list fields apart. */
+  fields: SchemaField[];
+  /** Current saved value at a path in the edit target (base or the open profile). */
+  baselineAt: (path: string) => ConfigValue;
+  /** Whether the edit target holds its own override at (or under) a path. */
+  hasOverride: (path: string) => boolean;
+}
+
+/** Result of the server-side pre-flight that runs before any write. */
+export interface ConfigCheckResult {
+  errors: FieldValidationError[];
+  skipped: SkippedChange[];
+}
+
+/** Outcome of a save call: how many entries the backend applied and which were dropped. */
+export interface ConfigWriteResult {
+  success: boolean;
+  applied: number;
+  skipped: SkippedChange[];
+}
+
+export interface ManagedNoticeProps {
+  /** The edit target holds its own (ignored) override for the field. */
+  hasOverride: boolean;
+  /** Removal of that override is already queued for the next save. */
+  pendingRemoval: boolean;
+  onRemoveOverride?: () => void;
+}
+
+export interface UnknownSettingsProps {
+  /** Every schema field of the object (the full list, not a filtered subset). */
+  fields: SchemaField[];
+  value: ConfigValue;
+  path: string;
 }

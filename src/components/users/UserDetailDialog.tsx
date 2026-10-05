@@ -240,6 +240,7 @@ export function UserDetailDialog({
 
               {(canManageRoles || canManageGroups || canAssignConfigs) && (
                 <Button
+                  htmlType="button"
                   type="secondary"
                   label={localize('com_users_add_profiles')}
                   onClick={() => setView('add')}
@@ -501,7 +502,12 @@ function AddProfilesPanel({
         </div>
       )}
       <div className="flex justify-end">
-        <Button type="secondary" label={localize('com_ui_done')} onClick={onDone} />
+        <Button
+          htmlType="button"
+          type="secondary"
+          label={localize('com_ui_done')}
+          onClick={onDone}
+        />
       </div>
     </div>
   );

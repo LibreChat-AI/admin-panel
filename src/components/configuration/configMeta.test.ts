@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { CONFIG_TABS, OTHER_TAB, SECTION_META, splitCamelCase } from './configMeta';
+import { configSchema } from 'librechat-data-provider';
+import type * as t from '@/types';
+import {
+  CONFIG_TABS,
+  OTHER_TAB,
+  SECTION_META,
+  HIDDEN_SECTIONS,
+  splitCamelCase,
+} from './configMeta';
 
 describe('splitCamelCase', () => {
   it('splits camelCase into words', () => {
@@ -77,5 +85,15 @@ describe('Other tab routing', () => {
     const mappedTab = SECTION_META[mappedKey].tab;
     expect(filterForTab(mappedTab).map((s) => s.key)).toEqual([mappedKey]);
     expect(filterForTab(OTHER_TAB.id).map((s) => s.key)).toEqual(['unknownFeature']);
+  });
+});
+
+describe('schema coverage', () => {
+  it('every top-level configSchema key has SECTION_META or is hidden', () => {
+    const shape = (configSchema as t.ZodSchemaLike).shape ?? {};
+    const unmapped = Object.keys(shape).filter(
+      (key) => !HIDDEN_SECTIONS.has(key) && !Object.hasOwn(SECTION_META, key),
+    );
+    expect(unmapped, `Sections without SECTION_META: ${unmapped.join(', ')}`).toEqual([]);
   });
 });
