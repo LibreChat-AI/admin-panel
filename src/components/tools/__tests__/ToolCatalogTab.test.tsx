@@ -99,6 +99,25 @@ vi.mock('@clickhouse/click-ui', () => ({
   Select: Object.assign(({ children }: { children: React.ReactNode }) => <div>{children}</div>, {
     Item: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   }),
+  Checkbox: ({
+    label,
+    checked,
+    disabled,
+    onCheckedChange,
+  }: {
+    label?: string;
+    checked?: boolean;
+    disabled?: boolean;
+    onCheckedChange?: (checked: boolean) => void;
+  }) => (
+    <input
+      type="checkbox"
+      checked={checked ?? false}
+      disabled={disabled}
+      onChange={(e) => onCheckedChange?.(e.target.checked)}
+      aria-label={label}
+    />
+  ),
 }));
 
 vi.mock('@/utils', () => ({
