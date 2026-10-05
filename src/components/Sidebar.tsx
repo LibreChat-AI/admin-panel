@@ -3,11 +3,33 @@ import { Icon, Dropdown } from '@clickhouse/click-ui';
 import { Link, useRouter } from '@tanstack/react-router';
 import type * as t from '@/types';
 import { useStripAriaExpanded, useCapabilities, useLocalize } from '@/hooks';
+import { SystemCapabilities, READ_BALANCES_CAPABILITY } from '@/constants';
 import libreChatLogo from '@/assets/librechat.svg';
 import { SettingsDialog } from './SettingsDialog';
-import { SystemCapabilities } from '@/constants';
 import { getInitials, cn } from '@/utils';
 import { adminLogoutFn } from '@/server';
+
+/**
+ * click-ui's built-in icon set has no coin/token glyph, so Balance gets a
+ * purpose-drawn one instead of settling for an unrelated shape (hexagon,
+ * dollar, …). Matches the rest of the set's style: 24x24, 1.5 stroke,
+ * `currentColor` so it inherits the nav item's active/hover color.
+ */
+function CreditsIcon() {
+  return (
+    // size-4 (1rem/16px) matches click-ui's Icon size="sm" rendered size exactly.
+    <svg className="size-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="12" cy="12" r="8.25" stroke="currentColor" strokeWidth="1.5" />
+      <path
+        d="M12 7.5v9M14.25 9.75c0-1.036-1.007-1.875-2.25-1.875s-2.25.84-2.25 1.875c0 1.036 1.007 1.5 2.25 1.5s2.25.464 2.25 1.5c0 1.036-1.007 1.875-2.25 1.875s-2.25-.84-2.25-1.875"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
 
 const navItems: t.NavItem[] = [
   { labelKey: 'com_nav_dashboard', path: '/', icon: 'home' },
@@ -31,6 +53,12 @@ const navItems: t.NavItem[] = [
     capability: [SystemCapabilities.READ_ROLES, SystemCapabilities.READ_GROUPS],
   },
   { labelKey: 'com_nav_grants', path: '/grants', icon: 'lock' },
+  {
+    labelKey: 'com_nav_balance',
+    path: '/balance',
+    customIcon: <CreditsIcon />,
+    capability: READ_BALANCES_CAPABILITY,
+  },
   { labelKey: 'com_nav_help', path: '/help', icon: 'question' },
 ];
 
@@ -88,7 +116,11 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
       >
         <div className="flex h-14 shrink-0 items-center px-2">
           <div className="flex items-center gap-2.5 overflow-hidden px-1.5">
-            <img src={libreChatLogo} alt={localize('com_a11y_logo_alt')} className="h-6 w-6 shrink-0" />
+            <img
+              src={libreChatLogo}
+              alt={localize('com_a11y_logo_alt')}
+              className="h-6 w-6 shrink-0"
+            />
             <span className="truncate text-sm font-semibold text-(--cui-color-text-default)">
               {localize('com_auth_title')}
             </span>
@@ -112,7 +144,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
                 )}
               >
                 <span aria-hidden="true" className="shrink-0">
-                  <Icon name={item.icon} size="sm" />
+                  {item.customIcon ?? (item.icon && <Icon name={item.icon} size="sm" />)}
                 </span>
                 <span className="truncate text-sm">{localize(item.labelKey)}</span>
               </Link>

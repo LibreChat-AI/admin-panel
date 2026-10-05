@@ -5,7 +5,10 @@ import type * as t from '@/types';
 import { useCapabilities, useLocalize } from '@/hooks';
 import { SystemCapabilities } from '@/constants';
 
-const QUICK_LINKS: (t.NavItem & { descKey: string })[] = [
+const QUICK_LINKS: (Omit<t.NavItem, 'icon' | 'customIcon'> & {
+  icon: t.IconName;
+  descKey: string;
+})[] = [
   {
     labelKey: 'com_nav_configuration',
     path: '/configuration',

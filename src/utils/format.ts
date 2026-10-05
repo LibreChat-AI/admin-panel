@@ -63,6 +63,30 @@ export function getInitials(name: string): string {
 }
 
 /**
+ * Bucketed relative-time formatter for the balance-request "Requested Xh ago"
+ * badge. Falls back to a locale date string beyond ~7 days — no date-library
+ * dependency needed for this.
+ */
+export function formatRelativeTime(date: string | Date): string {
+  const target = typeof date === 'string' ? new Date(date) : date;
+  const diffMs = Date.now() - target.getTime();
+  const diffSeconds = Math.floor(diffMs / 1000);
+
+  if (diffSeconds < 60) return 'just now';
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+
+  return target.toLocaleDateString();
+}
+
+/**
  * Recursively flattens a nested object into dot-separated paths.
  * Plain objects become prefixes; arrays, primitives, and null become leaf entries.
  * e.g. { balance: { startBalance: 100 } } → { 'balance.startBalance': 100 }
