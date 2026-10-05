@@ -79,18 +79,6 @@ function findField(fields: t.SchemaField[], key: string): t.SchemaField | undefi
 }
 
 describe('applyLangfuseSchemaVisibility', () => {
-  it('injects the Langfuse section when fanout is enabled and the pinned schema lacks it', () => {
-    const tree = extractSchemaTree(z3.object({ interface: z3.object({ theme: z3.string() }) }));
-
-    applyLangfuseSchemaVisibility(tree, true);
-
-    expect(findField(tree, 'langfuse')).toMatchObject({
-      key: 'langfuse',
-      isObject: true,
-    });
-    expect(findField(tree, 'destination')?.path).toBe('langfuse.destination');
-  });
-
   it('removes a Langfuse section supplied by the schema when fanout is disabled', () => {
     const tree = extractSchemaTree(z3.object({ langfuse: z3.object({ enabled: z3.boolean() }) }));
 
@@ -120,12 +108,13 @@ describe('applyLangfuseSchemaVisibility', () => {
     expect(findField(tree, 'schemaOnlyField')).toBeDefined();
   });
 
-  it('does not inject the compatibility shim when fanout state is unknown', () => {
-    const tree = extractSchemaTree(z3.object({ interface: z3.object({ theme: z3.string() }) }));
+  it('keeps the Langfuse section shipped in the pinned configSchema', () => {
+    const tree = extractSchemaTree(realConfigSchema);
 
-    applyLangfuseSchemaVisibility(tree, undefined);
+    applyLangfuseSchemaVisibility(tree, true);
 
-    expect(findField(tree, 'langfuse')).toBeUndefined();
+    expect(findField(tree, 'langfuse')?.isObject).toBe(true);
+    expect(findField(tree, 'destination')?.path).toBe('langfuse.destination');
   });
 });
 
@@ -785,8 +774,23 @@ const SAMPLE_OVERRIDES: Record<string, unknown> = {
   'mcpSettings.allowedAddresses': ['localhost:11434'],
   'actions.allowedAddresses': ['localhost:11434'],
   'endpoints.allowedAddresses': ['localhost:11434'],
+  'ocr.allowedAddresses': ['localhost:11434'],
+  'webSearch.allowedAddresses': ['localhost:11434'],
+  'speech.tts.allowedAddresses': ['localhost:11434'],
+  'speech.stt.allowedAddresses': ['localhost:11434'],
   'endpoints.agents.remoteApi.auth.oidc.issuer': 'https://example.com',
   'endpoints.agents.remoteApi.auth.oidc.jwksUri': 'https://example.com/.well-known/jwks.json',
+  'endpoints.agents.managementApi.auth.oidc.issuer': 'https://example.com',
+  'endpoints.agents.managementApi.auth.oidc.jwksUri': 'https://example.com/.well-known/jwks.json',
+  'endpoints.agents.managementApi.auth.oidc.tokenUse': 'access',
+  'endpoints.agents.eventDriven.selfUrl': 'https://example.com',
+  'endpoints.agents.repositoryInstructions.timeoutMs': 1000,
+  'endpoints.agents.maxToolCallArgBytesByTool': { sample_tool: 1024 },
+  'fileConfig.defaultLLMDeliveryPath.overrides': { 'application/pdf': 'text' },
+  'interface.traceViewer.requestTimeoutMs': 1000,
+  'registration.oauthStateTtlMs': 60000,
+  'registration.openidDiscovery.retryDelayMs': 100,
+  'balance.reservationTtlMs': 10000,
   'summarization.trigger': { type: 'token_ratio', value: 0.5 },
   'skillSync.github.intervalMinutes': 5,
   'skillSync.github.sources': [

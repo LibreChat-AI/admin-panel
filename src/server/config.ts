@@ -22,49 +22,15 @@ import { safeFieldPath } from './utils/validation';
 import { flattenObject } from '@/utils/format';
 import { apiFetch } from './utils/api';
 
-/**
- * Forward-compat shim: the pinned `librechat-data-provider@^0.8.509` predates the
- * `langfuse` config group. Inject the section node so the custom renderer remains
- * discoverable until a data-provider release containing the group is pinned. The
- * renderer persists through LibreChat's dedicated Langfuse connection API.
- */
-const LANGFUSE_SHIM_FIELD: t.SchemaField = {
-  path: 'langfuse',
-  key: 'langfuse',
-  type: 'object',
-  isOptional: true,
-  isNullable: false,
-  isArray: false,
-  isObject: true,
-  depth: 0,
-  children: (['enabled', 'destination', 'publicKey', 'secretKey', 'displaySecretKey'] as const).map(
-    (key) => ({
-      path: `langfuse.${key}`,
-      key,
-      type: key === 'enabled' ? 'boolean' : 'string',
-      isOptional: true,
-      isNullable: false,
-      isArray: false,
-      isObject: false,
-      depth: 1,
-    }),
-  ),
-};
-
+/** Hide the Langfuse section when LibreChat reports fanout is disabled. When the
+ *  fanout state is unknown (older backends), the schema-provided section is kept. */
 export function applyLangfuseSchemaVisibility(
   tree: t.SchemaField[],
   fanoutEnabled: boolean | undefined,
 ): t.SchemaField[] {
+  if (fanoutEnabled !== false) return tree;
   const langfuseIndex = tree.findIndex((section) => section.key === 'langfuse');
-  if (fanoutEnabled === false) {
-    if (langfuseIndex >= 0) {
-      tree.splice(langfuseIndex, 1);
-    }
-    return tree;
-  }
-  if (fanoutEnabled === true && langfuseIndex < 0) {
-    tree.push(LANGFUSE_SHIM_FIELD);
-  }
+  if (langfuseIndex >= 0) tree.splice(langfuseIndex, 1);
   return tree;
 }
 

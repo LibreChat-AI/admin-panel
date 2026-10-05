@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   ACTION_BADGE_STATE,
+  ACTION_LABEL_KEY,
+  ACTION_SUMMARY_KEY,
   auditCapability,
+  auditGrantee,
+  auditSubject,
+  auditTargetConfig,
   buildEntryPermalink,
   capabilityLabel,
   dateToIsoDate,
@@ -9,6 +14,8 @@ import {
   isoDateToDate,
   localDayBoundaryIso,
 } from './auditLogUtils';
+import translation from '@/locales/en/translation.json';
+import { AUDIT_ACTIONS } from '@/constants';
 
 const identityLocalize = (k: string) => k;
 
@@ -16,6 +23,60 @@ describe('ACTION_BADGE_STATE', () => {
   it('maps each audit action to a badge state', () => {
     expect(ACTION_BADGE_STATE['grant.assigned']).toBe('success');
     expect(ACTION_BADGE_STATE['grant.removed']).toBe('danger');
+    expect(ACTION_BADGE_STATE['permission.insights_assigned']).toBe('success');
+    expect(ACTION_BADGE_STATE['permission.insights_removed']).toBe('danger');
+  });
+
+  it('has a localized label and summary for every audit action', () => {
+    const localeKeys = new Set(Object.keys(translation));
+    for (const action of AUDIT_ACTIONS) {
+      expect(localeKeys.has(ACTION_LABEL_KEY[action])).toBe(true);
+      expect(localeKeys.has(ACTION_SUMMARY_KEY[action])).toBe(true);
+    }
+  });
+});
+
+describe('auditSubject', () => {
+  it('uses the capability for grant entries', () => {
+    expect(
+      auditSubject(
+        { action: 'grant.assigned', metadata: { capability: 'manage:users' } },
+        identityLocalize,
+      ),
+    ).toEqual({ label: 'manage:users', value: 'manage:users' });
+  });
+
+  it('reports the VIEW_INSIGHTS permission for Insights entries', () => {
+    expect(
+      auditSubject(
+        { action: 'permission.insights_removed', metadata: { principalType: 'user' } },
+        identityLocalize,
+      ),
+    ).toEqual({ label: 'com_audit_insights_permission', value: 'VIEW_INSIGHTS' });
+  });
+});
+
+describe('auditGrantee', () => {
+  it('reads the affected principal from metadata', () => {
+    expect(auditGrantee({ metadata: { principalType: 'group', principalId: 'g1' } })).toEqual({
+      type: 'group',
+      id: 'g1',
+    });
+  });
+
+  it('returns undefined for grant entries without principal metadata', () => {
+    expect(auditGrantee({ metadata: { capability: 'manage:users' } })).toBeUndefined();
+    expect(auditGrantee({ metadata: undefined })).toBeUndefined();
+  });
+});
+
+describe('auditTargetConfig', () => {
+  it('labels agent targets as agents', () => {
+    expect(auditTargetConfig('agent').labelKey).toBe('com_audit_target_agent');
+  });
+
+  it('uses the scope config for principal targets', () => {
+    expect(auditTargetConfig('role').labelKey).toBe('com_scope_roles');
   });
 });
 
