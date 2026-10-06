@@ -365,16 +365,21 @@ function BasicTab({
           </code>
         ) : (
           <div className="flex items-center gap-2">
-            <SelectField
-              id="tool-prefix"
-              value={draft.prefix}
-              options={[
-                ...groups.map((name) => ({ value: name, label: name })),
-                { value: '__custom__', label: localize('com_tools_custom_group') },
-              ]}
-              onChange={(v) => onSet('prefix', v)}
-              aria-label={localize('com_tools_field_group')}
-            />
+            {/* SelectField 无宽度约束时在 flex 行里收缩到当前值宽度（实测 77px），
+                定宽防选项截断；SelectField 自身无 className 通道，按 KeyValueField
+                惯例外包一层宽度 div。 */}
+            <div className="w-44 shrink-0">
+              <SelectField
+                id="tool-prefix"
+                value={draft.prefix}
+                options={[
+                  ...groups.map((name) => ({ value: name, label: name })),
+                  { value: '__custom__', label: localize('com_tools_custom_group') },
+                ]}
+                onChange={(v) => onSet('prefix', v)}
+                aria-label={localize('com_tools_field_group')}
+              />
+            </div>
             <span aria-hidden="true" className="text-(--cui-color-text-muted)">
               .
             </span>
@@ -554,18 +559,20 @@ function ExecTab({
           <label className={labelClass} htmlFor="exec-kind">
             {localize('com_tools_field_exec_kind')}
           </label>
-          <SelectField
-            id="exec-kind"
-            value={draft.execKind}
-            options={[
-              { value: 'server', label: 'server' },
-              { value: 'desktop', label: 'desktop' },
-              { value: 'plugin', label: 'plugin' },
-              { value: 'web', label: 'web' },
-            ]}
-            onChange={(v) => onSet('execKind', v as Draft['execKind'])}
-            aria-label={localize('com_tools_field_exec_kind')}
-          />
+          <div className="w-full">
+            <SelectField
+              id="exec-kind"
+              value={draft.execKind}
+              options={[
+                { value: 'server', label: 'server' },
+                { value: 'desktop', label: 'desktop' },
+                { value: 'plugin', label: 'plugin' },
+                { value: 'web', label: 'web' },
+              ]}
+              onChange={(v) => onSet('execKind', v as Draft['execKind'])}
+              aria-label={localize('com_tools_field_exec_kind')}
+            />
+          </div>
         </div>
         {draft.execKind === 'web' && (
           <div className="col-span-2">
@@ -587,16 +594,18 @@ function ExecTab({
             <label className={labelClass} htmlFor="exec-handler">
               {localize('com_tools_field_handler')}
             </label>
-            <SelectField
-              id="exec-handler"
-              value={draft.handler || '__none__'}
-              options={[
-                { value: '__none__', label: '—' },
-                ...handlers.map((name) => ({ value: name, label: name })),
-              ]}
-              onChange={(v) => onSet('handler', v === '__none__' ? '' : v)}
-              aria-label={localize('com_tools_field_handler')}
-            />
+            <div className="w-full">
+              <SelectField
+                id="exec-handler"
+                value={draft.handler || '__none__'}
+                options={[
+                  { value: '__none__', label: '—' },
+                  ...handlers.map((name) => ({ value: name, label: name })),
+                ]}
+                onChange={(v) => onSet('handler', v === '__none__' ? '' : v)}
+                aria-label={localize('com_tools_field_handler')}
+              />
+            </div>
           </div>
         ) : (
           <div>
@@ -721,18 +730,20 @@ function ExecTab({
                 <label className={labelClass} htmlFor="exec-dist-runtime">
                   {localize('com_tools_field_dist_runtime')}
                 </label>
-                <SelectField
-                  id="exec-dist-runtime"
-                  value={draft.distRuntime || '__none__'}
-                  options={[
-                    { value: '__none__', label: '—' },
-                    { value: 'self-contained', label: 'self-contained' },
-                    { value: 'standard-python', label: 'standard-python' },
-                    { value: 'arcpy3', label: 'arcpy3' },
-                  ]}
-                  onChange={(v) => onSet('distRuntime', v === '__none__' ? '' : v)}
-                  aria-label={localize('com_tools_field_dist_runtime')}
-                />
+                <div className="w-full">
+                  <SelectField
+                    id="exec-dist-runtime"
+                    value={draft.distRuntime || '__none__'}
+                    options={[
+                      { value: '__none__', label: '—' },
+                      { value: 'self-contained', label: 'self-contained' },
+                      { value: 'standard-python', label: 'standard-python' },
+                      { value: 'arcpy3', label: 'arcpy3' },
+                    ]}
+                    onChange={(v) => onSet('distRuntime', v === '__none__' ? '' : v)}
+                    aria-label={localize('com_tools_field_dist_runtime')}
+                  />
+                </div>
               </div>
               <div>
                 <label className={labelClass} htmlFor="exec-dist-launcher">
