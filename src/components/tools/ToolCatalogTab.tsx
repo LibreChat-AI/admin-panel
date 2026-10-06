@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Checkbox, Icon, Select } from '@clickhouse/click-ui';
 import {
   DndContext,
+  KeyboardSensor,
   PointerSensor,
   closestCenter,
   useSensor,
@@ -292,7 +293,7 @@ export function ToolCatalogTab() {
    * 即清空）。乐观覆盖即时反映新序，落库成功后清空。 ── */
   const toolSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(sortableKeyboardCoordinates),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   const onToolDragEnd = ({ active, over }: DragEndEvent) => {

@@ -449,7 +449,7 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(sortableKeyboardCoordinates),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
   const findContainer = (id: string): string | undefined => {

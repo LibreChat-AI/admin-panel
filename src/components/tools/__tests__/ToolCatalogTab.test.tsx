@@ -124,6 +124,7 @@ vi.mock('@clickhouse/click-ui', () => ({
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   PointerSensor: class {},
+  KeyboardSensor: class {},
   closestCenter: {},
   useSensor: () => undefined,
   useSensors: () => [],
