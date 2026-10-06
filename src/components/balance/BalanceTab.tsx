@@ -7,6 +7,7 @@ import { useCapabilities, useLocalize, useDebouncedFilter } from '@/hooks';
 import { balanceListQueryOptions, BALANCE_PAGE_SIZE } from '@/server';
 import { MANAGE_BALANCES_CAPABILITY } from '@/constants';
 import { ResetLimitDialog } from './ResetLimitDialog';
+import { canResetLimit } from './eligibility';
 import { cn, formatRelativeTime } from '@/utils';
 
 type Localize = ReturnType<typeof useLocalize>;
@@ -74,13 +75,14 @@ function ResetLimitButton({
 }) {
   const hasRefillAmount = (item.refillAmount ?? 0) > 0;
   const hasPendingRequest = item.pendingRequest != null;
-  const disabled = !canManage || !item.balanceEnabled || !hasPendingRequest || !hasRefillAmount;
+  const outOfCredits = item.tokenCredits === 0;
+  const disabled = !canManage || !canResetLimit(item);
   let title: string | undefined;
   if (!canManage) {
     title = localize('com_cap_no_permission', { cap: MANAGE_BALANCES_CAPABILITY });
   } else if (!item.balanceEnabled) {
     title = localize('com_balance_status_not_enabled');
-  } else if (!hasPendingRequest) {
+  } else if (!hasPendingRequest && !outOfCredits) {
     title = localize('com_balance_no_pending_request');
   } else if (!hasRefillAmount) {
     title = localize('com_balance_no_refill_amount');

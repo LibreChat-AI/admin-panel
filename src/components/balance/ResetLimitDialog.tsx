@@ -2,6 +2,17 @@ import { useEffect, useState } from 'react';
 import { ConfirmationDialog } from '@clickhouse/click-ui';
 import type { AdminBalanceListItem } from '@/types';
 import { useAddCredit, useLocalize } from '@/hooks';
+import { canResetLimit } from './eligibility';
+
+function unavailableMessage(item: AdminBalanceListItem) {
+  if (!item.balanceEnabled) {
+    return 'com_balance_status_not_enabled' as const;
+  }
+  if ((item.refillAmount ?? 0) <= 0) {
+    return 'com_balance_no_refill_amount' as const;
+  }
+  return 'com_balance_no_pending_request' as const;
+}
 
 export function ResetLimitDialog({
   target,
@@ -27,14 +38,8 @@ export function ResetLimitDialog({
     return null;
   }
 
-  // The row action is disabled whenever either of these is falsy, so
-  // reaching here without them would only happen if the underlying data
-  // changed out from under an already-open dialog (e.g. another admin just
-  // resolved the request) — guard defensively rather than assume the
-  // disabled button always wins the race.
   const refillAmount = target.refillAmount ?? 0;
-  const hasPendingRequest = target.pendingRequest != null;
-  const canReset = refillAmount > 0 && hasPendingRequest;
+  const canReset = canResetLimit(target);
   const resultingBalance = target.tokenCredits + refillAmount;
 
   const handleConfirm = () => {
@@ -95,9 +100,7 @@ export function ResetLimitDialog({
           </>
         ) : (
           <p role="alert" className="text-sm text-(--cui-color-text-danger)">
-            {localize(
-              hasPendingRequest ? 'com_balance_no_refill_amount' : 'com_balance_no_pending_request',
-            )}
+            {localize(unavailableMessage(target))}
           </p>
         )}
       </div>

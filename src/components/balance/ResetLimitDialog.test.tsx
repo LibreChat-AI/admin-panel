@@ -48,8 +48,6 @@ const target: AdminBalanceListItem = {
   tokenCredits: 500,
   balanceEnabled: true,
   refillAmount: 2000,
-  // The row action that opens this dialog is itself gated on a pending
-  // request existing, so every "normal" scenario here has one by default.
   pendingRequest: { requestId: 'req-base', requestedAt: '2026-01-01T00:00:00.000Z' },
 };
 
@@ -118,6 +116,24 @@ describe('ResetLimitDialog', () => {
     );
   });
 
+  it('confirms for an out-of-credit target without a pending request', () => {
+    const outOfCredits: AdminBalanceListItem = {
+      ...target,
+      tokenCredits: 0,
+      pendingRequest: undefined,
+    };
+    render(<ResetLimitDialog target={outOfCredits} onClose={vi.fn()} />);
+
+    const confirmButton = screen.getByText('com_balance_reset_limit');
+    expect(confirmButton).not.toBeDisabled();
+    fireEvent.click(confirmButton);
+
+    expect(mockMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'u1', amount: 2000, requestId: undefined }),
+      expect.anything(),
+    );
+  });
+
   it('does not confirm when there is no usable refill amount', () => {
     const noRefill: AdminBalanceListItem = { ...target, refillAmount: 0 };
     render(<ResetLimitDialog target={noRefill} onClose={vi.fn()} />);
@@ -127,7 +143,7 @@ describe('ResetLimitDialog', () => {
     expect(mockMutate).not.toHaveBeenCalled();
   });
 
-  it('disables confirm and shows a warning if the dialog is somehow open without a pending request', () => {
+  it('disables confirm for a positive-balance target without a pending request', () => {
     const noPending: AdminBalanceListItem = { ...target, pendingRequest: undefined };
     render(<ResetLimitDialog target={noPending} onClose={vi.fn()} />);
 

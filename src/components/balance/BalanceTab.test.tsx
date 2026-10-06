@@ -201,6 +201,20 @@ describe('BalanceTab', () => {
     expect(table.getByText('com_balance_status_out_of_credits')).toBeInTheDocument();
   });
 
+  it('enables Reset limit for an out-of-credit user without a pending request', async () => {
+    renderWithClient(<BalanceTab />);
+
+    await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
+    const table = within(screen.getByRole('table'));
+    const caraRow = table.getByText('cara@example.com').closest('tr') as HTMLElement;
+    const actionButton = within(caraRow).getByRole('button');
+
+    expect(actionButton).not.toBeDisabled();
+    actionButton.click();
+
+    await waitFor(() => expect(screen.getByTestId('reset-limit-dialog')).toHaveTextContent('Cara'));
+  });
+
   it('shows "Not enabled" — and disables the action with a visible reason — for a user with balanceEnabled: false, regardless of capability', async () => {
     renderWithClient(<BalanceTab />);
 
@@ -255,7 +269,7 @@ describe('BalanceTab', () => {
     expect(within(deeRow).getByRole('button')).toBeDisabled();
   });
 
-  it('disables Reset limit for an otherwise-eligible user with no pending request', async () => {
+  it('disables Reset limit for a positive-balance user with no pending request', async () => {
     renderWithClient(<BalanceTab />);
 
     await waitFor(() => expect(screen.getByRole('table')).toBeInTheDocument());
