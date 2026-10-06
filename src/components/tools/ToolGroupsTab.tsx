@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Icon } from '@clickhouse/click-ui';
 import type { TerraVoxGroup } from '@/server';
@@ -10,6 +10,7 @@ import {
 } from '@/server';
 import { EmptyState, InlineAction, LoadingState } from '@/components/shared';
 import { ConfirmDialog } from '@/components/access';
+import { cn } from '@/utils';
 import { useLocalize } from '@/hooks';
 import { ToolGroupEditDialog } from './ToolGroupEditDialog';
 
@@ -79,6 +80,108 @@ export function ToolGroupsTab() {
     onError: (error: Error) => setMutError(error.message),
   });
 
+  /* ── 分组拖拽排序（2.22.0）：显式分组卡片拖拽 → sort_order 落库；
+   * 隐式分组（工具前缀自动合成）无把手、固定沉底。 ── */
+  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const dragFromRef = useRef<string | null>(null);
+
+  const explicitGroups = groups.filter((g) => g.explicit);
+  const implicitGroups = groups.filter((g) => !g.explicit);
+  const orderedExplicit = localOrder
+    ? explicitGroups.slice().sort((a, b) => localOrder.indexOf(a.name) - localOrder.indexOf(b.name))
+    : explicitGroups;
+  const orderedGroups = [...orderedExplicit, ...implicitGroups];
+
+  /* 分组集合变化（增删/刷新）时丢弃本地顺序，回退服务端序 */
+  useEffect(() => {
+    const serverNames = groups.filter((g) => g.explicit).map((g) => g.name);
+    setLocalOrder((prev) =>
+      prev && (prev.length !== serverNames.length || prev.some((n) => !serverNames.includes(n)))
+        ? null
+        : prev,
+    );
+  }, [groups]);
+
+  const persistOrder = async () => {
+    if (!localOrder) {
+      return;
+    }
+    const byName = new Map(explicitGroups.map((g) => [g.name, g]));
+    const changed = localOrder
+      .map((name, idx) => ({ group: byName.get(name), sort_order: idx * 10 }))
+      .filter(
+        (x): x is { group: (typeof explicitGroups)[number]; sort_order: number } =>
+          !!x.group && x.group.sort_order !== x.sort_order,
+      );
+    if (changed.length === 0) {
+      return;
+    }
+    setSavingOrder(true);
+    setMutError(null);
+    try {
+      for (const { group, sort_order } of changed) {
+        await updateToolGroupFn({
+          data: {
+            name: group.name,
+            display_name: group.display_name,
+            description: group.description,
+            sort_order,
+            allowed_groups: group.allowed_groups,
+          },
+        });
+      }
+      void queryClient.invalidateQueries({ queryKey: ['terravox'] });
+    } catch (error) {
+      setMutError((error as Error).message);
+    } finally {
+      setSavingOrder(false);
+    }
+  };
+
+  const onCardPointerDown = (e: ReactPointerEvent<HTMLElement>, name: string) => {
+    if (e.button !== 0) {
+      return;
+    }
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragFromRef.current = name;
+    setDragging(name);
+  };
+  const onCardPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const from = dragFromRef.current;
+    if (!from) {
+      return;
+    }
+    const hit = document
+      .elementFromPoint(e.clientX, e.clientY)
+      ?.closest<HTMLElement>('[data-group-card]');
+    const target = hit?.dataset.groupCard;
+    if (target && target !== from) {
+      setLocalOrder((prev) => {
+        const base = prev ?? explicitGroups.map((g) => g.name);
+        const fromIdx = base.indexOf(from);
+        const toIdx = base.indexOf(target);
+        if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) {
+          return prev;
+        }
+        const next = [...base];
+        const [moved] = next.splice(fromIdx, 1);
+        next.splice(toIdx, 0, moved);
+        return next;
+      });
+      dragFromRef.current = target;
+    }
+  };
+  const onCardPointerUp = () => {
+    if (dragFromRef.current) {
+      dragFromRef.current = null;
+      setDragging(null);
+      void persistOrder();
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -112,23 +215,47 @@ export function ToolGroupsTab() {
         <EmptyState message={localize('com_tools_groups_empty')} />
       )}
 
+      {savingOrder && (
+        <p className="text-xs text-(--cui-color-text-muted)">
+          {localize('com_tools_group_order_saving')}
+        </p>
+      )}
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {groups.map((group) => (
+        {orderedGroups.map((group) => (
           <div
             key={group.name}
-            className="flex flex-col gap-2 rounded-lg border border-(--cui-color-stroke-default) p-4"
+            data-group-card={group.explicit ? group.name : undefined}
+            onPointerMove={group.explicit ? onCardPointerMove : undefined}
+            onPointerUp={group.explicit ? onCardPointerUp : undefined}
+            onPointerCancel={group.explicit ? onCardPointerUp : undefined}
+            className={cn(
+              'group flex flex-col gap-2 rounded-lg border border-(--cui-color-stroke-default) p-4',
+              dragging === group.name && 'border-(--cui-color-accent-primary)',
+            )}
           >
             <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate font-medium text-(--cui-color-text-default)">
-                    {group.display_name || group.name}
+              <div className="flex min-w-0 items-start gap-1">
+                {group.explicit && (
+                  <span
+                    title={localize('com_tools_drag_handle')}
+                    aria-label={localize('com_tools_drag_handle')}
+                    className="mt-0.5 shrink-0 cursor-grab touch-none px-0.5 text-(--cui-color-text-disabled) opacity-0 transition-opacity select-none group-hover:opacity-100 active:cursor-grabbing"
+                    onPointerDown={(e) => onCardPointerDown(e, group.name)}
+                  >
+                    ⠿
                   </span>
-                  {!group.explicit && (
-                    <span className={IMPLICIT_STYLE}>{localize('com_tools_group_implicit')}</span>
-                  )}
+                )}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-medium text-(--cui-color-text-default)">
+                      {group.display_name || group.name}
+                    </span>
+                    {!group.explicit && (
+                      <span className={IMPLICIT_STYLE}>{localize('com_tools_group_implicit')}</span>
+                    )}
+                  </div>
+                  <code className="text-xs text-(--cui-color-text-muted)">{group.name}</code>
                 </div>
-                <code className="text-xs text-(--cui-color-text-muted)">{group.name}</code>
               </div>
               {/* 行内操作（2.19.0）：平铺按钮替代三点菜单 */}
               <div className="flex shrink-0 items-center gap-1">

@@ -33,6 +33,8 @@ export interface TerraVoxTool {
   allowed_groups?: string[];
   dangerous?: boolean;
   display_group?: string;
+  /** 2.22.0 分组内显示顺序：升序，缺省沉底（再按 tool_id）。 */
+  display_order?: number;
   help_url?: string;
   usage_stats?: boolean;
   parameters?: { [key: string]: JsonValue };

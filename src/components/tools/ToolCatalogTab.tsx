@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Checkbox, Icon, Select } from '@clickhouse/click-ui';
 import type { PendingToolUpdate, TerraVoxTool } from '@/server';
@@ -206,9 +206,23 @@ export function ToolCatalogTab() {
     onError: (error: Error) => setMutError(error.message),
   });
 
+  /* 分组内显示顺序（2.22.0）：display_order 升序，未设置者沉到已设置者之后
+   * （再按 tool_id 稳定排序）；拖拽产生的本地覆盖优先于已落库值。 */
+  const [orderOverride, setOrderOverride] = useState<Record<string, number>>({});
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [draggingTool, setDraggingTool] = useState<string | null>(null);
+  const dragToolRef = useRef<string | null>(null);
+  const dragSectionRef = useRef<string | null>(null);
+
+  const effOrder = (tool: TerraVoxTool) =>
+    orderOverride[tool.tool_id] ??
+    (typeof tool.display_order === 'number' ? tool.display_order : Number.MAX_SAFE_INTEGER);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const sorted = [...tools].sort((a, b) => a.tool_id.localeCompare(b.tool_id));
+    const sorted = [...tools].sort(
+      (a, b) => effOrder(a) - effOrder(b) || a.tool_id.localeCompare(b.tool_id),
+    );
     if (!q) {
       return sorted;
     }
@@ -234,12 +248,15 @@ export function ToolCatalogTab() {
       list.push(tool);
       byGroup.set(group, list);
     }
+    for (const list of byGroup.values()) {
+      list.sort((a, b) => effOrder(a) - effOrder(b) || a.tool_id.localeCompare(b.tool_id));
+    }
     return [...byGroup.entries()].sort(([a], [b]) => {
       if (a === '') return 1;
       if (b === '') return -1;
       return a.localeCompare(b);
     });
-  }, [filtered]);
+  }, [filtered, orderOverride]);
 
   /** 「手动创建」/ 清空预填：以空白创建模式打开编辑对话框 */
   const openCreate = () => {
@@ -254,6 +271,105 @@ export function ToolCatalogTab() {
     } catch {
       /* clipboard may be denied — non-critical convenience action */
     }
+  };
+
+  /* ── 组内工具拖拽排序（2.22.0）：拖放后按新序回写 display_order（×10），
+   * 仅同分组内移动；乐观覆盖保持拖拽中的视觉稳定，落库后 invalidate 清空。 ── */
+  const onRowPointerDown = (
+    e: ReactPointerEvent<HTMLElement>,
+    tool: TerraVoxTool,
+    section: string,
+  ) => {
+    if (e.button !== 0) {
+      return;
+    }
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragToolRef.current = tool.tool_id;
+    dragSectionRef.current = section;
+    setDraggingTool(tool.tool_id);
+  };
+  const onRowPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
+    const from = dragToolRef.current;
+    const section = dragSectionRef.current;
+    if (!from || !section) {
+      return;
+    }
+    const hit = document
+      .elementFromPoint(e.clientX, e.clientY)
+      ?.closest<HTMLElement>('tr[data-tool-row]');
+    const target = hit?.dataset.toolRow;
+    if (!target || target === from || hit?.dataset.section !== section) {
+      return;
+    }
+    setOrderOverride((prev) => {
+      const sectionItems = (grouped.find(([g]) => g === section)?.[1] ?? []).map((t) => t.tool_id);
+      const base = sectionItems.filter((id) => id);
+      const fromIdx = base.indexOf(from);
+      const toIdx = base.indexOf(target);
+      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) {
+        return prev;
+      }
+      const next = [...base];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      const patch: Record<string, number> = {};
+      next.forEach((id, idx) => {
+        patch[id] = idx * 10;
+      });
+      return { ...prev, ...patch };
+    });
+    dragToolRef.current = target;
+  };
+  const onRowPointerUp = () => {
+    const section = dragSectionRef.current;
+    dragToolRef.current = null;
+    dragSectionRef.current = null;
+    setDraggingTool(null);
+    if (!section) {
+      return;
+    }
+    const items = grouped.find(([g]) => g === section)?.[1] ?? [];
+    const changed = items.filter(
+      (t) => typeof t.display_order !== 'number' || t.display_order !== orderOverride[t.tool_id],
+    );
+    if (changed.length === 0) {
+      setOrderOverride((prev) => {
+        const next = { ...prev };
+        for (const t of items) {
+          delete next[t.tool_id];
+        }
+        return next;
+      });
+      return;
+    }
+    void (async () => {
+      setSavingOrder(true);
+      setMutError(null);
+      try {
+        for (const tool of items) {
+          const order = orderOverride[tool.tool_id];
+          if (typeof order !== 'number' || tool.display_order === order) {
+            continue;
+          }
+          await updateToolFn({
+            data: { toolId: tool.tool_id, manifest: { ...tool, display_order: order } },
+          });
+        }
+        void queryClient.invalidateQueries({ queryKey: ['terravox'] });
+        setOrderOverride((prev) => {
+          const next = { ...prev };
+          for (const t of items) {
+            delete next[t.tool_id];
+          }
+          return next;
+        });
+      } catch (error) {
+        setMutError((error as Error).message);
+      } finally {
+        setSavingOrder(false);
+      }
+    })();
   };
 
   const renderBody = () => {
@@ -321,6 +437,11 @@ export function ToolCatalogTab() {
                     key={tool.tool_id}
                     tool={tool}
                     groups={displayGroups}
+                    section={group}
+                    dragging={draggingTool === tool.tool_id}
+                    onDragPointerDown={onRowPointerDown}
+                    onDragPointerMove={onRowPointerMove}
+                    onDragPointerUp={onRowPointerUp}
                     moving={
                       moveGroupMutation.isPending &&
                       moveGroupMutation.variables?.tool.tool_id === tool.tool_id
@@ -399,6 +520,11 @@ export function ToolCatalogTab() {
       {mutError && (
         <p role="alert" className="text-sm text-(--cui-color-text-danger)">
           {mutError}
+        </p>
+      )}
+      {savingOrder && (
+        <p className="text-xs text-(--cui-color-text-muted)">
+          {localize('com_tools_group_order_saving')}
         </p>
       )}
 
@@ -567,6 +693,11 @@ function PendingUpdatesPanel({
 function ToolRow({
   tool,
   groups,
+  section,
+  dragging,
+  onDragPointerDown,
+  onDragPointerMove,
+  onDragPointerUp,
   moving,
   onMoveGroup,
   toggling,
@@ -578,6 +709,15 @@ function ToolRow({
 }: {
   tool: TerraVoxTool;
   groups: string[];
+  section: string;
+  dragging: boolean;
+  onDragPointerDown: (
+    e: ReactPointerEvent<HTMLElement>,
+    tool: TerraVoxTool,
+    section: string,
+  ) => void;
+  onDragPointerMove: (e: ReactPointerEvent<HTMLElement>) => void;
+  onDragPointerUp: () => void;
   moving: boolean;
   onMoveGroup: (group: string) => void;
   toggling: boolean;
@@ -595,7 +735,17 @@ function ToolRow({
       ? [...groups, current].sort((a, b) => a.localeCompare(b))
       : groups;
   return (
-    <tr className="border-b border-(--cui-color-stroke-default) last:border-b-0">
+    <tr
+      data-tool-row={tool.tool_id}
+      data-section={section}
+      onPointerMove={onDragPointerMove}
+      onPointerUp={onDragPointerUp}
+      onPointerCancel={onDragPointerUp}
+      className={
+        'group/row border-b border-(--cui-color-stroke-default) last:border-b-0' +
+        (dragging ? ' bg-(--cui-color-background-hover)' : '')
+      }
+    >
       <td className="px-4 py-3">
         <div className="flex flex-col">
           <span className="flex items-center gap-2 font-medium text-(--cui-color-text-default)">
@@ -643,8 +793,16 @@ function ToolRow({
         />
       </td>
       <td className="px-4 py-3 text-end">
-        {/* 行内操作（2.19.0）：平铺按钮替代三点菜单 */}
+        {/* 行内操作（2.19.0）：平铺按钮替代三点菜单；首位拖拽把手（2.22.0 组内排序） */}
         <div className="flex items-center justify-end gap-1">
+          <span
+            title={localize('com_tools_drag_handle')}
+            aria-label={localize('com_tools_drag_handle')}
+            className="hidden shrink-0 cursor-grab touch-none px-1 text-(--cui-color-text-disabled) opacity-0 transition-opacity select-none group-hover/row:opacity-100 md:block"
+            onPointerDown={(e) => onDragPointerDown(e, tool, section)}
+          >
+            ⠿
+          </span>
           <InlineAction label={localize('com_ui_edit')} onClick={onEdit}>
             ✎
           </InlineAction>
