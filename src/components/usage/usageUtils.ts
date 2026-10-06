@@ -17,6 +17,13 @@ export const RUN_STATUS_LABEL_KEY: Record<RunReport['status'], string> = {
   timeout: 'com_usage_status_timeout',
 };
 
+/** 调用方式（2.24.0）：mcp=AI 经 MCP facade，server=人工表单执行，toolbox=浏览器直跑。 */
+export const SOURCE_LABEL_KEY: Record<string, string> = {
+  mcp: 'com_usage_source_mcp',
+  server: 'com_usage_source_server',
+  toolbox: 'com_usage_source_toolbox',
+};
+
 /** 8500 → "8.5s", 420 → "420ms", null → "—" (not recorded / still unknown). */
 export function formatRunDuration(ms: number | null | undefined): string {
   if (ms == null) {

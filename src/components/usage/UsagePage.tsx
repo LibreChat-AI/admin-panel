@@ -27,6 +27,7 @@ import {
 import {
   RUN_STATUS_BADGE_STATE,
   RUN_STATUS_LABEL_KEY,
+  SOURCE_LABEL_KEY,
   buildRunReportsCsv,
   downloadTextCsv,
   formatRunDuration,
@@ -279,19 +280,22 @@ export function UsagePage() {
               >
                 {localize('com_usage_col_duration')}
               </th>
+              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
+                {localize('com_usage_col_source')}
+              </th>
             </tr>
           </thead>
           <tbody>
             {showLoading && (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <LoadingState />
                 </td>
               </tr>
             )}
             {!showLoading && isError && (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <EmptyState message={localize('com_usage_error')} />
                 </td>
               </tr>
@@ -303,7 +307,7 @@ export function UsagePage() {
               ))}
             {!showLoading && !isError && pageReports.length === 0 && (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <EmptyState message={localize('com_usage_empty')} />
                 </td>
               </tr>
@@ -382,6 +386,11 @@ function UsageTableRow({
       </td>
       <td className="px-4 py-3 text-xs whitespace-nowrap text-(--cui-color-text-muted)">
         {formatRunDuration(report.duration_ms)}
+      </td>
+      <td className="px-4 py-3 text-(--cui-color-text-default)">
+        {SOURCE_LABEL_KEY[report.source]
+          ? localize(SOURCE_LABEL_KEY[report.source])
+          : (report.source || '—')}
       </td>
     </tr>
   );
