@@ -197,6 +197,8 @@ describe('verifyAdminTokenFn', () => {
 });
 
 describe('oauthExchangeFn', () => {
+  const originalPublicUrl = process.env.ADMIN_PANEL_PUBLIC_URL;
+
   beforeEach(() => {
     fetchMock.mockReset();
     updateSession.mockReset();
@@ -204,6 +206,93 @@ describe('oauthExchangeFn', () => {
     sessionState.data = {};
     requestHeaders.clear();
     vi.stubGlobal('fetch', fetchMock);
+    delete process.env.ADMIN_PANEL_PUBLIC_URL;
+  });
+
+  afterEach(() => {
+    if (originalPublicUrl === undefined) delete process.env.ADMIN_PANEL_PUBLIC_URL;
+    else process.env.ADMIN_PANEL_PUBLIC_URL = originalPublicUrl;
+  });
+
+  it('sends the configured ADMIN_PANEL_PUBLIC_URL origin ahead of any header derivation', async () => {
+    process.env.ADMIN_PANEL_PUBLIC_URL = 'https://public.example.com/admin';
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('origin', 'http://other.test');
+    requestHeaders.set('host', 'admin-panel:3000');
+    requestHeaders.set('x-forwarded-host', 'internal-lb.local');
+    requestHeaders.set('x-forwarded-proto', 'http');
+    requestHeaders.set('referer', 'https://login.microsoftonline.com/');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: '3'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://public.example.com',
+      },
+      body: JSON.stringify({ code: '3'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+  });
+
+  it('rejects a non-web ADMIN_PANEL_PUBLIC_URL scheme instead of sending a null origin', async () => {
+    process.env.ADMIN_PANEL_PUBLIC_URL = 'file:///etc/passwd';
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('origin', 'https://example.com');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: '8'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://example.com',
+      },
+      body: JSON.stringify({ code: '8'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[getRequestOrigin] Ignoring malformed ADMIN_PANEL_PUBLIC_URL:',
+      'file:///etc/passwd',
+    );
+  });
+
+  it('falls back to header derivation when ADMIN_PANEL_PUBLIC_URL is malformed', async () => {
+    process.env.ADMIN_PANEL_PUBLIC_URL = 'not a url';
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('origin', 'https://example.com');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: '4'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://example.com',
+      },
+      body: JSON.stringify({ code: '4'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[getRequestOrigin] Ignoring malformed ADMIN_PANEL_PUBLIC_URL:',
+      'not a url',
+    );
   });
 
   it('exchanges the callback code with the PKCE verifier stored in the admin session', async () => {
@@ -241,6 +330,174 @@ describe('oauthExchangeFn', () => {
         codeVerifier: undefined,
       }),
     );
+  });
+
+  it('derives the exchange Origin from the serving host when the callback carries the IdP referer', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('referer', 'https://login.microsoftonline.com/');
+    requestHeaders.set('host', 'example.com');
+    requestHeaders.set('x-forwarded-proto', 'https');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    const result = await oauthExchangeFn({ data: { code: 'c'.repeat(64) } });
+
+    expect(result).toEqual({
+      error: false,
+      user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+    });
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://example.com',
+      },
+      body: JSON.stringify({ code: 'c'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+  });
+
+  it('uses the first x-forwarded-proto value when the proxy chain appends multiple', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('host', 'example.com');
+    requestHeaders.set('x-forwarded-proto', 'https, http');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: 'd'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://example.com',
+      },
+      body: JSON.stringify({ code: 'd'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+  });
+
+  it('prefers x-forwarded-host over a proxy-rewritten upstream host', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('host', 'admin-panel:3000');
+    requestHeaders.set('x-forwarded-host', 'example.com');
+    requestHeaders.set('x-forwarded-proto', 'https');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: 'e'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://example.com',
+      },
+      body: JSON.stringify({ code: 'e'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+  });
+
+  it('uses the first x-forwarded-host value when the proxy chain appends multiple', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('host', 'admin-panel:3000');
+    requestHeaders.set('x-forwarded-host', 'example.com, internal-lb.local');
+    requestHeaders.set('x-forwarded-proto', 'https');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: 'f'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://example.com',
+      },
+      body: JSON.stringify({ code: 'f'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+  });
+
+  it('recovers the https scheme from a same-host referer when x-forwarded-proto is absent', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('host', 'example.com');
+    requestHeaders.set('referer', 'https://example.com/admin/auth/openid/callback?code=abc');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: '1'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://example.com',
+      },
+      body: JSON.stringify({ code: '1'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+  });
+
+  it('matches a same-host referer when the serving authority carries an explicit default port', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('host', 'example.com:443');
+    requestHeaders.set('referer', 'https://example.com/admin/auth/openid/callback?code=abc');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: '7'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'https://example.com',
+      },
+      body: JSON.stringify({ code: '7'.repeat(64), code_verifier: 'verifier-123' }),
+    });
+  });
+
+  it('never adopts a foreign referer origin even when x-forwarded-proto is absent', async () => {
+    sessionState.data = { codeVerifier: 'verifier-123' };
+    requestHeaders.set('host', 'example.com');
+    requestHeaders.set('referer', 'https://login.microsoftonline.com/');
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token: 'jwt-token',
+        user: { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' },
+      }),
+    );
+
+    await oauthExchangeFn({ data: { code: '2'.repeat(64) } });
+
+    expect(fetchMock).toHaveBeenCalledWith('http://librechat.test/api/admin/oauth/exchange', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: 'http://example.com',
+      },
+      body: JSON.stringify({ code: '2'.repeat(64), code_verifier: 'verifier-123' }),
+    });
   });
 
   it('does not consume the one-time LibreChat exchange code when the PKCE verifier was lost', async () => {
