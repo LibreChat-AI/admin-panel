@@ -163,13 +163,6 @@ export async function requireAllSectionCapabilities(sections: string[]): Promise
   }
 }
 
-export const effectiveCapabilitiesOptions = (userId: string) =>
-  queryOptions<string[]>({
-    queryKey: ['effectiveCapabilities', userId],
-    queryFn: () => getEffectiveCapabilitiesFn().then((r) => r.capabilities),
-    staleTime: 30_000,
-  });
-
 // ── Mutations ────────────────────────────────────────────────────────
 
 export const grantCapabilityFn = createServerFn({ method: 'POST' })
