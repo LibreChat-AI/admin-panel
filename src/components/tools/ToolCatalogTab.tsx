@@ -10,6 +10,7 @@ import {
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import {
   SortableContext,
   arrayMove,
@@ -295,6 +296,8 @@ export function ToolCatalogTab() {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
+  /* 表格单列：拖动锁定竖直轴，横向位移不触发重排 */
+  const toolModifiers = [restrictToVerticalAxis];
 
   const onToolDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) {

@@ -6,6 +6,7 @@ import { ToolCatalogTab } from '../ToolCatalogTab';
 /* 用真实 dnd-kit（importOriginal）渲染 ToolCatalogTab，复现浏览器端 /tools 路由崩溃。 */
 
 vi.mock('@dnd-kit/core', async (importOriginal) => await importOriginal());
+vi.mock('@dnd-kit/modifiers', async (importOriginal) => await importOriginal());
 vi.mock('@dnd-kit/sortable', async (importOriginal) => await importOriginal());
 vi.mock('@dnd-kit/utilities', async (importOriginal) => await importOriginal());
 
