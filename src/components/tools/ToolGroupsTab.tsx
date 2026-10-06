@@ -13,7 +13,6 @@ import {
   type DragEndEvent,
   type DragOverEvent,
 } from '@dnd-kit/core';
-import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import {
   SortableContext,
   arrayMove,
@@ -571,10 +570,11 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
           )}
           {toolsQuery.isLoading && <LoadingState />}
           {!toolsQuery.isLoading && (
+            {/* 双列表跨列=添加/移除：closestCorners 按被拖项矩形算碰撞，
+                不能加 restrictToVerticalAxis（锁轴即锁死跨列，实测） */}
             <DndContext
               sensors={sensors}
               collisionDetection={closestCorners}
-              modifiers={[restrictToVerticalAxis]}
               onDragOver={onDragOver}
               onDragEnd={onDragEnd}
             >
