@@ -7,6 +7,7 @@ import {
   closestCenter,
   closestCorners,
   useDroppable,
+  KeyboardSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
@@ -166,7 +167,9 @@ export function ToolGroupsTab() {
     }
   };
 
-  const cardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const cardSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
 
   const onCardDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) {
@@ -221,7 +224,11 @@ export function ToolGroupsTab() {
           {localize('com_tools_group_order_saving')}
         </p>
       )}
-      <DndContext sensors={cardSensors} collisionDetection={closestCenter} onDragEnd={onCardDragEnd}>
+      <DndContext
+        sensors={cardSensors}
+        collisionDetection={closestCenter}
+        onDragEnd={onCardDragEnd}
+      >
         <SortableContext items={orderedExplicit.map((g) => g.name)} strategy={rectSortingStrategy}>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {orderedGroups.map((group) => (
@@ -308,7 +315,7 @@ function SortableGroupCard({
               aria-label={localize('com_tools_drag_handle')}
               {...sortable.listeners}
               {...sortable.attributes}
-              className="mt-0.5 shrink-0 cursor-grab touch-none select-none px-0.5 text-(--cui-color-text-disabled) opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+              className="mt-0.5 shrink-0 cursor-grab touch-none px-0.5 text-(--cui-color-text-disabled) opacity-0 transition-opacity select-none group-hover:opacity-100 active:cursor-grabbing"
             >
               ⠿
             </span>
@@ -327,10 +334,7 @@ function SortableGroupCard({
         </div>
         {/* 行内操作（2.19.0）：平铺按钮替代三点菜单；☰ = 分组工具详情（2.22.0） */}
         <div className="flex shrink-0 items-center gap-1">
-          <InlineAction
-            label={localize('com_tools_group_detail_manage')}
-            onClick={onManage}
-          >
+          <InlineAction label={localize('com_tools_group_detail_manage')} onClick={onManage}>
             ☰
           </InlineAction>
           <InlineAction label={localize('com_ui_edit')} onClick={onEdit}>
@@ -367,6 +371,9 @@ function SortableGroupCard({
 
 const LEFT = 'available';
 const RIGHT = 'members';
+/* 稳定空数组：data 未到时 `?? []` 的每轮新引用会让派生 useMemo 失效 →
+ * 同步 effect 无限 setState（Maximum update depth，实测崩整页） */
+const EMPTY_TOOLS: TerraVoxTool[] = [];
 
 /** 分组工具详情（2.22.0，dnd-kit 双列表）：左列=未加入分组的工具，右列=组内
  * 工具（按 display_order）；跨列拖拽即添加/移除，右列内拖拽即排序。落库：
@@ -379,34 +386,46 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [availableIds, setAvailableIds] = useState<string[]>([]);
-  const [memberIds, setMemberIds] = useState<string[]>([]);
-
-  const tools = toolsQuery.data?.tools ?? [];
+  const tools = toolsQuery.data?.tools ?? EMPTY_TOOLS;
   const byId = useMemo(() => new Map(tools.map((t) => [t.tool_id, t])), [tools]);
 
-  /* 服务端数据到位/刷新后重建两列（提交后的 refetch 与当前列一致，不抖动；
-   * 拖拽过程中不发生 refetch，不会打断进行中的拖拽） */
-  useEffect(() => {
+  /* 服务端数据 → 两列初始内容（useMemo 派生；tools/byId 身份稳定时不重算，
+   * 拖拽进行中不发生 refetch，不会打断拖拽） */
+  const initialAvailable = useMemo(() => {
     const available: string[] = [];
-    const members: string[] = [];
     for (const tool of tools) {
-      ((tool.display_group?.trim() || '') === group.name ? members : available).push(tool.tool_id);
+      if ((tool.display_group?.trim() || '') !== group.name) {
+        available.push(tool.tool_id);
+      }
     }
-    members.sort(
-      (a, b) =>
-        (byId.get(a)?.display_order ?? Number.MAX_SAFE_INTEGER) -
-          (byId.get(b)?.display_order ?? Number.MAX_SAFE_INTEGER) ||
-        a.localeCompare(b),
-    );
     available.sort(
       (a, b) =>
         (byId.get(a)?.display_name ?? '').localeCompare(byId.get(b)?.display_name ?? '') ||
         a.localeCompare(b),
     );
-    setMemberIds(members);
-    setAvailableIds(available);
+    return available;
   }, [tools, group.name, byId]);
+  const initialMembers = useMemo(() => {
+    const members: string[] = [];
+    for (const tool of tools) {
+      if ((tool.display_group?.trim() || '') === group.name) {
+        members.push(tool.tool_id);
+      }
+    }
+    members.sort(
+      (a, b) =>
+        (byId.get(a)?.display_order ?? Number.MAX_SAFE_INTEGER) -
+          (byId.get(b)?.display_order ?? Number.MAX_SAFE_INTEGER) || a.localeCompare(b),
+    );
+    return members;
+  }, [tools, group.name, byId]);
+  /* 拖拽改动的本地列状态：数据刷新（identity 变化）时从服务端重建 */
+  const [memberIds, setMemberIds] = useState<string[]>(initialMembers);
+  const [availableIds, setAvailableIds] = useState<string[]>(initialAvailable);
+  useEffect(() => {
+    setMemberIds(initialMembers);
+    setAvailableIds(initialAvailable);
+  }, [initialMembers, initialAvailable]);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['terravox'] });
@@ -435,7 +454,10 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
         const order = idx * 10;
         if ((tool.display_group?.trim() || '') !== group.name || tool.display_order !== order) {
           await updateToolFn({
-            data: { toolId: tool.tool_id, manifest: { ...tool, display_group: group.name, display_order: order } },
+            data: {
+              toolId: tool.tool_id,
+              manifest: { ...tool, display_group: group.name, display_order: order },
+            },
           });
         }
       }
@@ -476,7 +498,8 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
     }
     /* 跨列：把 active.id 移到目标列（over 项之前/末尾）——官方多容器模式 */
     const move = (ids: string[]) => ids.filter((id) => id !== String(active.id));
-    const overIdx = to === RIGHT ? memberIds.indexOf(String(over.id)) : availableIds.indexOf(String(over.id));
+    const overIdx =
+      to === RIGHT ? memberIds.indexOf(String(over.id)) : availableIds.indexOf(String(over.id));
     if (from === RIGHT) {
       setMemberIds(move(memberIds));
       setAvailableIds((prev) => {
@@ -559,10 +582,7 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
                   title={localize('com_tools_group_detail_left')}
                   count={availableIds.length}
                 >
-                  <SortableContext
-                    items={visibleAvailable}
-                    strategy={verticalListSortingStrategy}
-                  >
+                  <SortableContext items={visibleAvailable} strategy={verticalListSortingStrategy}>
                     {visibleAvailable.map((id) => (
                       <PickableToolRow key={id} tool={byId.get(id) as TerraVoxTool} />
                     ))}
@@ -642,11 +662,9 @@ function ListPane({
   const { setNodeRef, isOver } = useDroppable({ id: containerId });
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <p className="text-xs font-semibold uppercase text-(--cui-color-text-muted)">
+      <p className="text-xs font-semibold text-(--cui-color-text-muted) uppercase">
         {title}
-        <span className="ms-1.5 font-normal">
-          {localize('com_tools_count', { count })}
-        </span>
+        <span className="ms-1.5 font-normal">{localize('com_tools_count', { count })}</span>
       </p>
       <div
         ref={setNodeRef}
@@ -683,7 +701,7 @@ function PickableToolRow({ tool }: { tool: TerraVoxTool }) {
         {...attributes}
         {...listeners}
         title={localize('com_tools_drag_handle')}
-        className="shrink-0 cursor-grab touch-none select-none px-0.5 text-(--cui-color-text-disabled) active:cursor-grabbing"
+        className="shrink-0 cursor-grab touch-none px-0.5 text-(--cui-color-text-disabled) select-none active:cursor-grabbing"
       >
         ⠿
       </span>
@@ -726,7 +744,7 @@ function MemberToolRow({
         {...attributes}
         {...listeners}
         title={localize('com_tools_drag_handle')}
-        className="shrink-0 cursor-grab touch-none select-none px-0.5 text-(--cui-color-text-disabled) active:cursor-grabbing"
+        className="shrink-0 cursor-grab touch-none px-0.5 text-(--cui-color-text-disabled) select-none active:cursor-grabbing"
       >
         ⠿
       </span>
