@@ -1,8 +1,11 @@
+import { useMemo, useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type * as t from '@/types';
 import { SingleFieldRenderer, FieldRenderer, renderInlineField } from './FieldRenderer';
+import { applyConfigEdit, buildSavePayload, mergeIndexedArrayEdits } from './utils';
 import { createField } from '@/test/fixtures';
+import { flattenObject } from '@/utils';
 
 vi.mock('@/hooks/useLocalize', () => ({
   default: () => (key: string) => key,
@@ -714,5 +717,156 @@ describe('renderInlineField masked secrets (collection entries)', () => {
 
     expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
     expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
+  });
+});
+
+/**
+ * Integration flow for array-object collections, wired the same way ConfigPage
+ * wires SingleFieldRenderer: edits accumulate through the real applyConfigEdit,
+ * indexed edits merge into the baseline through the real mergeIndexedArrayEdits,
+ * and getValue resolves pending edits by exact path. Regression coverage for
+ * issues #44 and #105, where typing into a newly-added (prepended) entry turned
+ * the pending whole-array edit into a bare indexed edit that resolved against
+ * the baseline array, overwriting the first existing entry and saving an
+ * indexed fieldPath instead of the full array.
+ */
+function ArrayFlowHarness({
+  baselineConfig,
+  sectionKey,
+  fieldPath,
+  onState,
+}: {
+  baselineConfig: Record<string, t.ConfigValue>;
+  sectionKey: string;
+  fieldPath: string;
+  onState: (state: { editedValues: t.FlatConfigMap; touchedPaths: Set<string> }) => void;
+}) {
+  const [editedValues, setEditedValues] = useState<t.FlatConfigMap>({});
+  const [touchedPaths, setTouchedPaths] = useState<Set<string>>(() => new Set());
+  onState({ editedValues, touchedPaths });
+
+  const flatBaseline = useMemo(() => flattenObject(baselineConfig), [baselineConfig]);
+  const handleFieldChange = (path: string, value: t.ConfigValue) => {
+    setTouchedPaths((prev) => new Set(prev).add(path));
+    setEditedValues((prev) =>
+      applyConfigEdit(prev, path, value, flatBaseline, new Set(), new Set()),
+    );
+  };
+
+  const activeConfigValues = useMemo(() => {
+    const indexedEdits = Object.entries(editedValues).filter(([k]) => /\.\d+$/.test(k));
+    if (indexedEdits.length === 0) return baselineConfig;
+    return mergeIndexedArrayEdits(baselineConfig, indexedEdits);
+  }, [baselineConfig, editedValues]);
+
+  const getValueWithEdits = (path: string, fallback: t.ConfigValue): t.ConfigValue =>
+    path in editedValues ? editedValues[path] : fallback;
+
+  const leafKey = fieldPath.split('.').pop()!;
+  const field = createField({
+    key: leafKey,
+    path: fieldPath,
+    type: 'array<object>',
+    isArray: true,
+    children: [
+      createField({ key: 'name', path: `${fieldPath}.name` }),
+      createField({ key: 'group', path: `${fieldPath}.group` }),
+    ],
+  });
+
+  const segments = fieldPath.split('.');
+  let sectionValue: t.ConfigValue = activeConfigValues[sectionKey];
+  for (const seg of segments.slice(1)) {
+    sectionValue =
+      sectionValue && typeof sectionValue === 'object' && !Array.isArray(sectionValue)
+        ? (sectionValue as Record<string, t.ConfigValue>)[seg]
+        : undefined;
+  }
+
+  return (
+    <SingleFieldRenderer
+      field={field}
+      value={sectionValue}
+      path={fieldPath}
+      getValue={getValueWithEdits}
+      onChange={handleFieldChange}
+      isSoleField={false}
+    />
+  );
+}
+
+const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+
+describe('array-object add-entry flow (issues #44, #105)', () => {
+  it('keeps existing entries when typing into a newly-added entry', () => {
+    const state = { editedValues: {} as t.FlatConfigMap, touchedPaths: new Set<string>() };
+    const baselineConfig = {
+      modelSpecs: {
+        list: [
+          { name: 'agent-one', group: 'a' },
+          { name: 'agent-two', group: 'b' },
+        ],
+      },
+    };
+    render(
+      <ArrayFlowHarness
+        baselineConfig={baselineConfig}
+        sectionKey="modelSpecs"
+        fieldPath="modelSpecs.list"
+        onState={(s) => Object.assign(state, s)}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('com_ui_add_item'));
+    expect(state.editedValues['modelSpecs.list']).toEqual([
+      {},
+      { name: 'agent-one', group: 'a' },
+      { name: 'agent-two', group: 'b' },
+    ]);
+
+    const nameInput = document.getElementById('com_config_entry_n-name')!;
+    expect(nameInput).not.toBeNull();
+    fireEvent.change(nameInput, { target: { value: 'agent-new' } });
+    fireEvent.blur(nameInput);
+
+    expect(state.editedValues['modelSpecs.list']).toEqual([
+      { name: 'agent-new' },
+      { name: 'agent-one', group: 'a' },
+      { name: 'agent-two', group: 'b' },
+    ]);
+    expect(state.editedValues).not.toHaveProperty('modelSpecs.list.0');
+    expect(screen.getAllByText('agent-one').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('agent-two').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('agent-new').length).toBeGreaterThan(0);
+  });
+
+  it('saves a new entry in a previously-unset array as the full array path', async () => {
+    const state = { editedValues: {} as t.FlatConfigMap, touchedPaths: new Set<string>() };
+    const baselineConfig = {
+      endpoints: { azureOpenAI: { titleModel: 'gpt-4o-mini' } },
+    };
+    render(
+      <ArrayFlowHarness
+        baselineConfig={baselineConfig}
+        sectionKey="endpoints"
+        fieldPath="endpoints.azureOpenAI.groups"
+        onState={(s) => Object.assign(state, s)}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('com_ui_add_item'));
+    await nextFrame();
+    await nextFrame();
+
+    const groupInput = document.getElementById('com_config_entry_n-group')!;
+    expect(groupInput).not.toBeNull();
+    fireEvent.change(groupInput, { target: { value: 'gpt-5.1' } });
+    fireEvent.blur(groupInput);
+
+    const { saves } = buildSavePayload(state.touchedPaths, state.editedValues, new Set());
+    expect(saves).toEqual([
+      { fieldPath: 'endpoints.azureOpenAI.groups', value: [{ group: 'gpt-5.1' }] },
+    ]);
+    expect(saves.some((s) => /\.\d+$/.test(s.fieldPath))).toBe(false);
   });
 });
