@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { Icon } from '@clickhouse/click-ui';
 import { createFileRoute, Outlet, useRouter, Link, redirect } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
+import { AccessDenied, PermissionsUnavailable } from '@/components/shared';
 import { useCapabilities, useCommandMenu, useLocalize } from '@/hooks';
 import { CommandMenu } from '@/components/CommandMenu';
-import { AccessDenied } from '@/components/shared';
 import { SystemCapabilities } from '@/constants';
 import { Sidebar } from '@/components/Sidebar';
 import { verifyAdminTokenFn } from '@/server';
@@ -68,7 +68,9 @@ function AppLayout() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (!isLoading && !isError && !hasCapability(SystemCapabilities.ACCESS_ADMIN)) {
+  if (isLoading) return null;
+  if (isError) return <PermissionsUnavailable />;
+  if (!hasCapability(SystemCapabilities.ACCESS_ADMIN)) {
     return <AccessDenied />;
   }
 
