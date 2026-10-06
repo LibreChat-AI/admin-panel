@@ -36,3 +36,17 @@ export interface OAuthExchangeResponse {
   user: SerializableUser;
   expiresAt?: number;
 }
+
+export interface FloodGuardDecision {
+  admitted: boolean;
+  suppressedInPriorWindow: number;
+}
+
+export interface FloodGuard {
+  admit: (nowMs: number) => FloodGuardDecision;
+}
+
+export interface MemoryWatermark {
+  /** Returns the highest threshold (in MiB) newly crossed upward, or null. */
+  check: (rssBytes: number) => number | null;
+}

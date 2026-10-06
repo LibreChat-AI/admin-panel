@@ -1,6 +1,14 @@
 import { Glob } from 'bun';
 import { join } from 'node:path';
 import {
+  isProbeRequest,
+  reportOnBodyComplete,
+  createFloodGuard,
+  formatLoggedPath,
+  createMemoryWatermark,
+  parseMemoryThresholdsMb,
+} from './src/server/logging';
+import {
   metricsResponse,
   httpRequestsTotal,
   httpRequestDurationSeconds,
@@ -97,18 +105,71 @@ type Handler = { default: { fetch: (req: Request) => Promise<Response> } };
 
 const { default: handler } = (await import(SERVER_ENTRY.href)) as Handler;
 
-async function withHttpMetrics(
+const REQUEST_LOG = process.env.ADMIN_PANEL_REQUEST_LOG !== 'false';
+const floodGuard = createFloodGuard();
+
+async function withHttpObservability(
   req: Request,
   pathname: string,
   getResponse: () => Response | Promise<Response>,
+  options?: { monitorBody?: boolean },
 ): Promise<Response> {
   const path = normalizeMetricsPath(pathname);
   const end = httpRequestDurationSeconds.startTimer({ method: req.method, path });
-  const res = await getResponse();
+
+  // The arrival line is logged before the handler runs so that a request that
+  // kills the process still leaves its method and path as the last log line.
+  let logCompletion = false;
+  let startedAt = 0;
+  let loggedPath = '';
+  if (REQUEST_LOG && !isProbeRequest(req.headers.get('user-agent'), new URL(req.url).pathname)) {
+    const { admitted, suppressedInPriorWindow } = floodGuard.admit(Date.now());
+    if (suppressedInPriorWindow > 0) {
+      console.log(`[req] suppressed ${suppressedInPriorWindow} requests in prior window`);
+    }
+    if (admitted) {
+      loggedPath = formatLoggedPath(new URL(req.url).pathname);
+      startedAt = performance.now();
+      console.log(`[req] ${req.method} ${loggedPath}`);
+      logCompletion = true;
+    }
+  }
+
+  const logDone = (status: string, note = ''): void => {
+    const elapsed = Math.round(performance.now() - startedAt);
+    console.log(`[req] ${req.method} ${loggedPath} ${status} ${elapsed}ms${note}`);
+  };
+
+  let res: Response;
+  try {
+    res = await getResponse();
+  } catch (err) {
+    // Bun's error callback turns this into a 500, but that line carries no method or
+    // path, so the arrival tombstone would otherwise never be closed out.
+    httpRequestsTotal.inc({ method: req.method, path, status_code: '500' });
+    end({ status_code: '500' });
+    if (logCompletion) logDone('500', ' handler-error');
+    throw err;
+  }
+
   const statusCode = String(res.status);
   httpRequestsTotal.inc({ method: req.method, path, status_code: statusCode });
   end({ status_code: statusCode });
-  return res;
+  if (!logCompletion) return res;
+
+  // Bun discards a HEAD body without reading or cancelling it, so a monitored
+  // stream would never settle and the completion line would never be emitted.
+  // A native file body must also be left intact: replacing it with a JavaScript
+  // stream costs Bun's sendfile path and the Content-Length it derives from the
+  // file, turning every static asset into a chunked transfer.
+  if (req.method === 'HEAD' || options?.monitorBody === false) {
+    logDone(statusCode);
+    return res;
+  }
+
+  return reportOnBodyComplete(res, (outcome) =>
+    logDone(statusCode, outcome === 'stream-error' ? ' stream-error' : ''),
+  );
 }
 
 async function buildStaticRoutes(): Promise<Record<string, (req: Request) => Promise<Response>>> {
@@ -118,11 +179,16 @@ async function buildStaticRoutes(): Promise<Record<string, (req: Request) => Pro
     const cache = getCacheHeaders(path);
     const routePath = `${BASE_PATH}/${path}`;
     routes[routePath] = (req) =>
-      withHttpMetrics(req, routePath, () => {
-        const res = new Response(file, { headers: { 'Content-Type': file.type, ...cache } });
-        applySecurityHeaders(res.headers);
-        return res;
-      });
+      withHttpObservability(
+        req,
+        routePath,
+        () => {
+          const res = new Response(file, { headers: { 'Content-Type': file.type, ...cache } });
+          applySecurityHeaders(res.headers);
+          return res;
+        },
+        { monitorBody: false },
+      );
   }
   return routes;
 }
@@ -139,7 +205,7 @@ const server = Bun.serve({
       const metricsPath = BASE_PATH && url.pathname.startsWith(BASE_PATH)
         ? url.pathname.slice(BASE_PATH.length) || '/'
         : url.pathname;
-      const res = await withHttpMetrics(req, metricsPath, () => handler.fetch(req));
+      const res = await withHttpObservability(req, metricsPath, () => handler.fetch(req));
       const patched = new Response(res.body, res);
       for (const [k, v] of Object.entries(NO_CACHE)) {
         patched.headers.set(k, v);
@@ -148,7 +214,26 @@ const server = Bun.serve({
       return patched;
     },
   },
+  error(error: Error): Response {
+    console.error(`[error] unhandled server error: ${error.message}`, error.stack ?? '');
+    return new Response('Internal Server Error', { status: 500 });
+  },
 });
+
+const memoryWatermark = createMemoryWatermark(
+  parseMemoryThresholdsMb(env.ADMIN_PANEL_MEMORY_LOG_THRESHOLDS_MB),
+);
+const MEMORY_CHECK_INTERVAL_MS = 10_000;
+setInterval(() => {
+  const { rss, heapUsed } = process.memoryUsage();
+  const crossedMb = memoryWatermark.check(rss);
+  if (crossedMb !== null) {
+    const mib = 1024 * 1024;
+    console.log(
+      `[mem] rss=${Math.round(rss / mib)}Mi heapUsed=${Math.round(heapUsed / mib)}Mi (crossed ${crossedMb}Mi)`,
+    );
+  }
+}, MEMORY_CHECK_INTERVAL_MS);
 
 console.log(`Admin panel listening on http://localhost:${server.port}${BASE_PATH}/`);
 
