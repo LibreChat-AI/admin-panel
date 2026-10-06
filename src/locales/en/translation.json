@@ -1370,6 +1370,8 @@
   "com_tools_group_implicit": "implicit",
   "com_tools_drag_handle": "Drag to reorder",
   "com_tools_group_detail_manage": "Manage group tools",
+  "com_tools_group_detail_left": "Not in group",
+  "com_tools_group_detail_right": "In group",
   "com_tools_group_detail_add_ph": "Search and add tools to this group…",
   "com_tools_group_detail_remove": "Remove from group",
   "com_tools_group_detail_empty": "No tools in this group",

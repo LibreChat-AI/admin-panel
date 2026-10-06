@@ -1,7 +1,27 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Dialog, Icon } from '@clickhouse/click-ui';
-import type { TerraVoxGroup } from '@/server';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  closestCorners,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import type { TerraVoxGroup, TerraVoxTool } from '@/server';
 import {
   createToolGroupFn,
   deleteToolGroupFn,
@@ -26,6 +46,10 @@ const IMPLICIT_STYLE =
  * metadata; implicit ones exist only because tools with that prefix exist —
  * editing one promotes it to explicit (upsert on the gateway), deleting is
  * blocked while any tool still lives in the namespace.
+ *
+ * 排序（2.22.0，dnd-kit）：显式分组卡片拖拽调整先后（松手落库 sort_order）；
+ * 卡片 ☰ 打开分组工具详情——双列表并排拖拽（左=未加入、右=组内），跨列拖拽
+ * 即添加/移除，右列内拖拽即组内排序（display_order）。
  */
 export function ToolGroupsTab() {
   const localize = useLocalize();
@@ -34,7 +58,6 @@ export function ToolGroupsTab() {
   const [editing, setEditing] = useState<TerraVoxGroup | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<TerraVoxGroup | null>(null);
   const [mutError, setMutError] = useState<string | null>(null);
-  /* 分组详情（2.22.0）：组内工具的添加/移除/拖拽排序都在这一个界面完成 */
   const [detailGroup, setDetailGroup] = useState<TerraVoxGroup | null>(null);
 
   const groupsQuery = useQuery(toolGroupsQueryOptions);
@@ -84,18 +107,20 @@ export function ToolGroupsTab() {
     onError: (error: Error) => setMutError(error.message),
   });
 
-  /* ── 分组拖拽排序（2.22.0）：显式分组卡片拖拽 → sort_order 落库；
-   * 隐式分组（工具前缀自动合成）无把手、固定沉底。 ── */
-  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
-  const [savingOrder, setSavingOrder] = useState(false);
-  const [dragging, setDragging] = useState<string | null>(null);
-  const dragFromRef = useRef<string | null>(null);
-
   const explicitGroups = groups.filter((g) => g.explicit);
   const implicitGroups = groups.filter((g) => !g.explicit);
-  const orderedExplicit = localOrder
-    ? explicitGroups.slice().sort((a, b) => localOrder.indexOf(a.name) - localOrder.indexOf(b.name))
-    : explicitGroups;
+  /* 服务端已按 (sort_order, name) 排序；拖拽产生的本地顺序优先展示 */
+  const [localOrder, setLocalOrder] = useState<string[] | null>(null);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const orderedExplicit = useMemo(
+    () =>
+      localOrder
+        ? explicitGroups
+            .slice()
+            .sort((a, b) => localOrder.indexOf(a.name) - localOrder.indexOf(b.name))
+        : explicitGroups,
+    [explicitGroups, localOrder],
+  );
   const orderedGroups = [...orderedExplicit, ...implicitGroups];
 
   /* 分组集合变化（增删/刷新）时丢弃本地顺序，回退服务端序 */
@@ -108,12 +133,9 @@ export function ToolGroupsTab() {
     );
   }, [groups]);
 
-  const persistOrder = async () => {
-    if (!localOrder) {
-      return;
-    }
+  const persistOrder = async (order: string[]) => {
     const byName = new Map(explicitGroups.map((g) => [g.name, g]));
-    const changed = localOrder
+    const changed = order
       .map((name, idx) => ({ group: byName.get(name), sort_order: idx * 10 }))
       .filter(
         (x): x is { group: (typeof explicitGroups)[number]; sort_order: number } =>
@@ -136,7 +158,7 @@ export function ToolGroupsTab() {
           },
         });
       }
-      void queryClient.invalidateQueries({ queryKey: ['terravox'] });
+      invalidate();
     } catch (error) {
       setMutError((error as Error).message);
     } finally {
@@ -144,46 +166,21 @@ export function ToolGroupsTab() {
     }
   };
 
-  const onCardPointerDown = (e: ReactPointerEvent<HTMLElement>, name: string) => {
-    if (e.button !== 0) {
+  const cardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const onCardDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) {
       return;
     }
-    e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragFromRef.current = name;
-    setDragging(name);
-  };
-  const onCardPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
-    const from = dragFromRef.current;
-    if (!from) {
+    const base = orderedExplicit.map((g) => g.name);
+    const from = base.indexOf(String(active.id));
+    const to = base.indexOf(String(over.id));
+    if (from < 0 || to < 0) {
       return;
     }
-    const hit = document
-      .elementFromPoint(e.clientX, e.clientY)
-      ?.closest<HTMLElement>('[data-group-card]');
-    const target = hit?.dataset.groupCard;
-    if (target && target !== from) {
-      setLocalOrder((prev) => {
-        const base = prev ?? explicitGroups.map((g) => g.name);
-        const fromIdx = base.indexOf(from);
-        const toIdx = base.indexOf(target);
-        if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) {
-          return prev;
-        }
-        const next = [...base];
-        const [moved] = next.splice(fromIdx, 1);
-        next.splice(toIdx, 0, moved);
-        return next;
-      });
-      dragFromRef.current = target;
-    }
-  };
-  const onCardPointerUp = () => {
-    if (dragFromRef.current) {
-      dragFromRef.current = null;
-      setDragging(null);
-      void persistOrder();
-    }
+    const next = arrayMove(base, from, to);
+    setLocalOrder(next);
+    void persistOrder(next);
   };
 
   return (
@@ -224,94 +221,25 @@ export function ToolGroupsTab() {
           {localize('com_tools_group_order_saving')}
         </p>
       )}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {orderedGroups.map((group) => (
-          <div
-            key={group.name}
-            data-group-card={group.explicit ? group.name : undefined}
-            onPointerMove={group.explicit ? onCardPointerMove : undefined}
-            onPointerUp={group.explicit ? onCardPointerUp : undefined}
-            onPointerCancel={group.explicit ? onCardPointerUp : undefined}
-            className={cn(
-              'group flex flex-col gap-2 rounded-lg border border-(--cui-color-stroke-default) p-4',
-              dragging === group.name && 'border-(--cui-color-accent-primary)',
-            )}
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex min-w-0 items-start gap-1">
-                {group.explicit && (
-                  <span
-                    title={localize('com_tools_drag_handle')}
-                    aria-label={localize('com_tools_drag_handle')}
-                    className="mt-0.5 shrink-0 cursor-grab touch-none px-0.5 text-(--cui-color-text-disabled) opacity-0 transition-opacity select-none group-hover:opacity-100 active:cursor-grabbing"
-                    onPointerDown={(e) => onCardPointerDown(e, group.name)}
-                  >
-                    ⠿
-                  </span>
-                )}
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-medium text-(--cui-color-text-default)">
-                      {group.display_name || group.name}
-                    </span>
-                    {!group.explicit && (
-                      <span className={IMPLICIT_STYLE}>{localize('com_tools_group_implicit')}</span>
-                    )}
-                  </div>
-                  <code className="text-xs text-(--cui-color-text-muted)">{group.name}</code>
-                </div>
-              </div>
-              {/* 行内操作（2.19.0）：平铺按钮替代三点菜单；☰ = 分组工具详情（2.22.0） */}
-              <div className="flex shrink-0 items-center gap-1">
-                <InlineAction
-                  label={localize('com_tools_group_detail_manage')}
-                  onClick={() => setDetailGroup(group)}
-                >
-                  ☰
-                </InlineAction>
-                <InlineAction
-                  label={localize('com_ui_edit')}
-                  onClick={() => {
-                    setEditing(group);
-                    setEditOpen(true);
-                  }}
-                >
-                  ✎
-                </InlineAction>
-                <InlineAction
-                  label={localize('com_ui_delete')}
-                  danger
-                  onClick={() => setDeleteTarget(group)}
-                >
-                  ✕
-                </InlineAction>
-              </div>
-            </div>
-            {group.description && (
-              <p className="line-clamp-2 text-xs text-(--cui-color-text-muted)">
-                {group.description}
-              </p>
-            )}
-            {group.allowed_groups.length > 0 && (
-              <div className="flex flex-wrap gap-1">
-                {group.allowed_groups.map((name) => (
-                  <span key={name} className={TAG_STYLE}>
-                    {name === '*' ? localize('com_tools_all_groups') : name}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="mt-auto flex items-center gap-2 pt-1">
-              <span className={TAG_STYLE}>
-                {localize('com_tools_group_tool_count', { count: group.tool_count })}
-              </span>
-              <span className={TAG_STYLE}>
-                {localize('com_tools_group_sort', { order: group.sort_order })}
-              </span>
-            </div>
+      <DndContext sensors={cardSensors} collisionDetection={closestCenter} onDragEnd={onCardDragEnd}>
+        <SortableContext items={orderedExplicit.map((g) => g.name)} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {orderedGroups.map((group) => (
+              <SortableGroupCard
+                key={group.name}
+                group={group}
+                dragging={false}
+                onManage={() => setDetailGroup(group)}
+                onEdit={() => {
+                  setEditing(group);
+                  setEditOpen(true);
+                }}
+                onDelete={() => setDeleteTarget(group)}
+              />
+            ))}
           </div>
-        ))}
-      </div>
+        </SortableContext>
+      </DndContext>
 
       {detailGroup && <GroupToolsDialog group={detailGroup} onClose={() => setDetailGroup(null)} />}
 
@@ -345,9 +273,105 @@ export function ToolGroupsTab() {
   );
 }
 
-/** 分组工具详情（2.22.0）：组内工具一目了然——拖拽排序（display_order）、
- * 移除（清 display_group/display_order 归未分组）、搜索添加（设 display_group、
- * 顺序留空自然沉到已排序工具之后）。改动即时落库并失效清单缓存。 */
+/** 显式分组卡：dnd-kit sortable（网格策略）；隐式分组 plain 渲染、固定沉底。 */
+function SortableGroupCard({
+  group,
+  onManage,
+  onEdit,
+  onDelete,
+}: {
+  group: TerraVoxGroup;
+  onManage: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const localize = useLocalize();
+  const sortable = useSortable({ id: group.name, disabled: !group.explicit });
+  const style = {
+    transform: CSS.Transform.toString(sortable.transform),
+    transition: sortable.transition,
+  };
+  return (
+    <div
+      ref={sortable.setNodeRef}
+      style={style}
+      className={cn(
+        'group flex flex-col gap-2 rounded-lg border border-(--cui-color-stroke-default) p-4',
+        sortable.isDragging && 'border-(--cui-color-accent-primary) opacity-60',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-1">
+          {group.explicit && (
+            <span
+              title={localize('com_tools_drag_handle')}
+              aria-label={localize('com_tools_drag_handle')}
+              {...sortable.listeners}
+              {...sortable.attributes}
+              className="mt-0.5 shrink-0 cursor-grab touch-none select-none px-0.5 text-(--cui-color-text-disabled) opacity-0 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+            >
+              ⠿
+            </span>
+          )}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="truncate font-medium text-(--cui-color-text-default)">
+                {group.display_name || group.name}
+              </span>
+              {!group.explicit && (
+                <span className={IMPLICIT_STYLE}>{localize('com_tools_group_implicit')}</span>
+              )}
+            </div>
+            <code className="text-xs text-(--cui-color-text-muted)">{group.name}</code>
+          </div>
+        </div>
+        {/* 行内操作（2.19.0）：平铺按钮替代三点菜单；☰ = 分组工具详情（2.22.0） */}
+        <div className="flex shrink-0 items-center gap-1">
+          <InlineAction
+            label={localize('com_tools_group_detail_manage')}
+            onClick={onManage}
+          >
+            ☰
+          </InlineAction>
+          <InlineAction label={localize('com_ui_edit')} onClick={onEdit}>
+            ✎
+          </InlineAction>
+          <InlineAction label={localize('com_ui_delete')} danger onClick={onDelete}>
+            ✕
+          </InlineAction>
+        </div>
+      </div>
+      {group.description && (
+        <p className="line-clamp-2 text-xs text-(--cui-color-text-muted)">{group.description}</p>
+      )}
+      {group.allowed_groups.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {group.allowed_groups.map((name) => (
+            <span key={name} className={TAG_STYLE}>
+              {name === '*' ? localize('com_tools_all_groups') : name}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mt-auto flex items-center gap-2 pt-1">
+        <span className={TAG_STYLE}>
+          {localize('com_tools_group_tool_count', { count: group.tool_count })}
+        </span>
+        <span className={TAG_STYLE}>
+          {localize('com_tools_group_sort', { order: group.sort_order })}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const LEFT = 'available';
+const RIGHT = 'members';
+
+/** 分组工具详情（2.22.0，dnd-kit 双列表）：左列=未加入分组的工具，右列=组内
+ * 工具（按 display_order）；跨列拖拽即添加/移除，右列内拖拽即排序。落库：
+ * 添加=设 display_group、移除=清 display_group+display_order、排序=display_order
+ * ×10 重建。改动即时落库并失效清单缓存。 */
 function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: () => void }) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
@@ -355,38 +379,66 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [orderOverride, setOrderOverride] = useState<Record<string, number>>({});
-  const [draggingTool, setDraggingTool] = useState<string | null>(null);
-  const dragToolRef = useRef<string | null>(null);
+  const [availableIds, setAvailableIds] = useState<string[]>([]);
+  const [memberIds, setMemberIds] = useState<string[]>([]);
 
   const tools = toolsQuery.data?.tools ?? [];
-  const orderOf = (tool: TerraVoxTool) =>
-    orderOverride[tool.tool_id] ??
-    (typeof tool.display_order === 'number' ? tool.display_order : Number.MAX_SAFE_INTEGER);
-  const inGroup = tools
-    .filter((t) => (t.display_group?.trim() || '') === group.name)
-    .sort((a, b) => orderOf(a) - orderOf(b) || a.tool_id.localeCompare(b.tool_id));
-  const q = search.trim().toLowerCase();
-  const candidates = tools
-    .filter((t) => (t.display_group?.trim() || '') !== group.name)
-    .filter(
-      (t) =>
-        !q ||
-        t.display_name.toLowerCase().includes(q) ||
-        t.tool_id.toLowerCase().includes(q) ||
-        (t.display_group ?? '').toLowerCase().includes(q),
-    )
-    .slice(0, 8);
+  const byId = useMemo(() => new Map(tools.map((t) => [t.tool_id, t])), [tools]);
+
+  /* 服务端数据到位/刷新后重建两列（提交后的 refetch 与当前列一致，不抖动；
+   * 拖拽过程中不发生 refetch，不会打断进行中的拖拽） */
+  useEffect(() => {
+    const available: string[] = [];
+    const members: string[] = [];
+    for (const tool of tools) {
+      ((tool.display_group?.trim() || '') === group.name ? members : available).push(tool.tool_id);
+    }
+    members.sort(
+      (a, b) =>
+        (byId.get(a)?.display_order ?? Number.MAX_SAFE_INTEGER) -
+          (byId.get(b)?.display_order ?? Number.MAX_SAFE_INTEGER) ||
+        a.localeCompare(b),
+    );
+    available.sort(
+      (a, b) =>
+        (byId.get(a)?.display_name ?? '').localeCompare(byId.get(b)?.display_name ?? '') ||
+        a.localeCompare(b),
+    );
+    setMemberIds(members);
+    setAvailableIds(available);
+  }, [tools, group.name, byId]);
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['terravox'] });
   };
 
-  const patchTool = async (tool: TerraVoxTool, manifest: Record<string, unknown>) => {
+  const commit = async () => {
     setBusy(true);
     setError(null);
     try {
-      await updateToolFn({ data: { toolId: tool.tool_id, manifest } });
+      /* 移除：右列消失、服务端仍在本组 → 清 display_group + display_order */
+      for (const id of availableIds) {
+        const tool = byId.get(id);
+        if (tool && (tool.display_group?.trim() || '') === group.name) {
+          const manifest: Record<string, unknown> = { ...tool };
+          delete manifest.display_group;
+          delete manifest.display_order;
+          await updateToolFn({ data: { toolId: id, manifest } });
+        }
+      }
+      /* 添加 + 排序：右列成员统一重建 display_order = idx×10 */
+      for (let idx = 0; idx < memberIds.length; idx++) {
+        const tool = byId.get(memberIds[idx]);
+        if (!tool) {
+          continue;
+        }
+        const order = idx * 10;
+        if ((tool.display_group?.trim() || '') !== group.name || tool.display_order !== order) {
+          await updateToolFn({
+            data: { toolId: tool.tool_id, manifest: { ...tool, display_group: group.name, display_order: order } },
+          });
+        }
+      }
       invalidate();
     } catch (err) {
       setError((err as Error).message);
@@ -395,96 +447,84 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
     }
   };
 
-  const removeTool = (tool: TerraVoxTool) => {
-    const manifest: Record<string, unknown> = { ...tool };
-    delete manifest.display_group;
-    delete manifest.display_order;
-    setOrderOverride((prev) => {
-      const next = { ...prev };
-      delete next[tool.tool_id];
-      return next;
-    });
-    void patchTool(tool, manifest);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(sortableKeyboardCoordinates),
+  );
+
+  const findContainer = (id: string): string | undefined => {
+    if (id === LEFT || id === RIGHT) {
+      return id;
+    }
+    if (memberIds.includes(id)) {
+      return RIGHT;
+    }
+    if (availableIds.includes(id)) {
+      return LEFT;
+    }
+    return undefined;
   };
 
-  const addTool = (tool: TerraVoxTool) => {
-    const manifest: Record<string, unknown> = { ...tool, display_group: group.name };
-    /* 顺序留空：新工具沉到组内已排序工具之后（再按 tool_id），拖拽时再定序 */
-    delete manifest.display_order;
-    setOrderOverride((prev) => {
-      const next = { ...prev };
-      delete next[tool.tool_id];
-      return next;
-    });
-    void patchTool(tool, manifest);
-  };
-
-  const onRowPointerDown = (e: ReactPointerEvent<HTMLElement>, tool: TerraVoxTool) => {
-    if (e.button !== 0) {
+  const onDragOver = ({ active, over }: DragOverEvent) => {
+    if (!over) {
       return;
     }
-    e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragToolRef.current = tool.tool_id;
-    setDraggingTool(tool.tool_id);
-  };
-  const onRowPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
-    const from = dragToolRef.current;
-    if (!from) {
+    const from = findContainer(String(active.id));
+    const to = findContainer(String(over.id));
+    if (!from || !to || from === to) {
       return;
     }
-    const hit = document
-      .elementFromPoint(e.clientX, e.clientY)
-      ?.closest<HTMLElement>('[data-detail-row]');
-    const target = hit?.dataset.detailRow;
-    if (!target || target === from) {
-      return;
-    }
-    setOrderOverride((prev) => {
-      const base = inGroup.map((t) => t.tool_id);
-      const fromIdx = base.indexOf(from);
-      const toIdx = base.indexOf(target);
-      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) {
-        return prev;
-      }
-      const next = [...base];
-      const [moved] = next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, moved);
-      const patch: Record<string, number> = {};
-      next.forEach((id, idx) => {
-        patch[id] = idx * 10;
-      });
-      return { ...prev, ...patch };
-    });
-    dragToolRef.current = target;
-  };
-  const onRowPointerUp = () => {
-    const from = dragToolRef.current;
-    dragToolRef.current = null;
-    setDraggingTool(null);
-    if (!from) {
-      return;
-    }
-    void (async () => {
-      for (const tool of inGroup) {
-        const order = orderOverride[tool.tool_id];
-        if (typeof order !== 'number' || tool.display_order === order) {
-          continue;
-        }
-        await patchTool(tool, { ...tool, display_order: order });
-      }
-      setOrderOverride((prev) => {
-        const next = { ...prev };
-        for (const t of inGroup) {
-          delete next[t.tool_id];
-        }
+    /* 跨列：把 active.id 移到目标列（over 项之前/末尾）——官方多容器模式 */
+    const move = (ids: string[]) => ids.filter((id) => id !== String(active.id));
+    const overIdx = to === RIGHT ? memberIds.indexOf(String(over.id)) : availableIds.indexOf(String(over.id));
+    if (from === RIGHT) {
+      setMemberIds(move(memberIds));
+      setAvailableIds((prev) => {
+        const next = prev.filter((id) => id !== String(active.id));
+        next.splice(overIdx < 0 ? next.length : overIdx, 0, String(active.id));
         return next;
       });
-    })();
+    } else {
+      setAvailableIds(move(availableIds));
+      setMemberIds((prev) => {
+        const next = prev.filter((id) => id !== String(active.id));
+        next.splice(overIdx < 0 ? next.length : overIdx, 0, String(active.id));
+        return next;
+      });
+    }
   };
 
-  const rowCls =
-    'flex items-center gap-2 rounded-md border border-(--cui-color-stroke-default) px-2 py-1.5 text-sm';
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over) {
+      return;
+    }
+    const container = findContainer(String(active.id));
+    if (!container || findContainer(String(over.id)) !== container) {
+      return;
+    }
+    if (container === RIGHT) {
+      const from = memberIds.indexOf(String(active.id));
+      const to = memberIds.indexOf(String(over.id));
+      if (from >= 0 && to >= 0 && from !== to) {
+        setMemberIds(arrayMove(memberIds, from, to));
+      }
+    }
+    void commit();
+  };
+
+  const q = search.trim().toLowerCase();
+  const visibleAvailable = availableIds.filter((id) => {
+    const tool = byId.get(id);
+    if (!tool) {
+      return false;
+    }
+    return (
+      !q ||
+      tool.display_name.toLowerCase().includes(q) ||
+      tool.tool_id.toLowerCase().includes(q) ||
+      (tool.display_group ?? '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <Dialog
@@ -497,7 +537,7 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
         onInteractOutside={(event) => event.preventDefault()}
         title={`${localize('com_tools_group_detail_manage')} · ${group.display_name || group.name}`}
         showClose
-        className="modal-frost max-w-2xl!"
+        className="modal-frost max-w-3xl!"
       >
         <div className="flex flex-col gap-3 text-sm">
           {error && (
@@ -505,53 +545,65 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
               {error}
             </p>
           )}
-
-          <div className="flex max-h-[42vh] flex-col gap-1 overflow-y-auto pe-1">
-            {toolsQuery.isLoading && <LoadingState />}
-            {!toolsQuery.isLoading && inGroup.length === 0 && (
-              <p className="py-6 text-center text-xs text-(--cui-color-text-muted)">
-                {localize('com_tools_group_detail_empty')}
-              </p>
-            )}
-            {inGroup.map((tool) => (
-              <div
-                key={tool.tool_id}
-                data-detail-row={tool.tool_id}
-                onPointerMove={onRowPointerMove}
-                onPointerUp={onRowPointerUp}
-                onPointerCancel={onRowPointerUp}
-                className={
-                  rowCls +
-                  (draggingTool === tool.tool_id ? ' border-(--cui-color-accent-primary)' : '')
-                }
-              >
-                <span
-                  title={localize('com_tools_drag_handle')}
-                  aria-label={localize('com_tools_drag_handle')}
-                  className="shrink-0 cursor-grab touch-none px-0.5 text-(--cui-color-text-disabled) select-none active:cursor-grabbing"
-                  onPointerDown={(e) => onRowPointerDown(e, tool)}
+          {toolsQuery.isLoading && <LoadingState />}
+          {!toolsQuery.isLoading && (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragOver={onDragOver}
+              onDragEnd={onDragEnd}
+            >
+              <div className="grid grid-cols-2 gap-3">
+                <ListPane
+                  containerId={LEFT}
+                  title={localize('com_tools_group_detail_left')}
+                  count={availableIds.length}
                 >
-                  ⠿
-                </span>
-                <span className="min-w-0 flex-1 truncate font-medium text-(--cui-color-text-default)">
-                  {tool.display_name}
-                </span>
-                <code className="min-w-0 flex-1 truncate text-xs text-(--cui-color-text-muted)">
-                  {tool.tool_id}
-                </code>
-                <InlineAction
-                  label={localize('com_tools_group_detail_remove')}
-                  danger
-                  disabled={busy}
-                  onClick={() => removeTool(tool)}
+                  <SortableContext
+                    items={visibleAvailable}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    {visibleAvailable.map((id) => (
+                      <PickableToolRow key={id} tool={byId.get(id) as TerraVoxTool} />
+                    ))}
+                  </SortableContext>
+                  {visibleAvailable.length === 0 && (
+                    <p className="p-3 text-center text-xs text-(--cui-color-text-muted)">—</p>
+                  )}
+                </ListPane>
+                <ListPane
+                  containerId={RIGHT}
+                  title={localize('com_tools_group_detail_right')}
+                  count={memberIds.length}
                 >
-                  ✕
-                </InlineAction>
+                  <SortableContext items={memberIds} strategy={verticalListSortingStrategy}>
+                    {memberIds.map((id) => {
+                      const tool = byId.get(id);
+                      return tool ? (
+                        <MemberToolRow
+                          key={id}
+                          tool={tool}
+                          busy={busy}
+                          onRemove={() => {
+                            setMemberIds((prev) => prev.filter((x) => x !== id));
+                            setAvailableIds((prev) => [...prev, id]);
+                            void commit();
+                          }}
+                        />
+                      ) : null;
+                    })}
+                  </SortableContext>
+                  {memberIds.length === 0 && (
+                    <p className="p-3 text-center text-xs text-(--cui-color-text-muted)">
+                      {localize('com_tools_group_detail_empty')}
+                    </p>
+                  )}
+                </ListPane>
               </div>
-            ))}
-          </div>
+            </DndContext>
+          )}
 
-          <div className="flex flex-col gap-1 border-t border-(--cui-color-stroke-default) pt-2">
+          <div className="flex items-center justify-between gap-2">
             <SearchInput
               value={search}
               onChange={setSearch}
@@ -559,42 +611,11 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
               ariaLabel={localize('com_tools_group_detail_add_ph')}
               className="w-full"
             />
-            <div className="flex max-h-40 flex-col gap-1 overflow-y-auto">
-              {candidates.map((tool) => (
-                <button
-                  key={tool.tool_id}
-                  type="button"
-                  disabled={busy}
-                  className="flex items-center gap-2 rounded-md border border-(--cui-color-stroke-default) px-2 py-1 text-start text-xs transition-colors hover:bg-(--cui-color-background-hover) disabled:opacity-50"
-                  onClick={() => addTool(tool)}
-                >
-                  <span className="min-w-0 flex-1 truncate text-(--cui-color-text-default)">
-                    {tool.display_name}
-                  </span>
-                  <code className="min-w-0 flex-1 truncate text-(--cui-color-text-muted)">
-                    {tool.tool_id}
-                  </code>
-                  <span className="shrink-0 text-xs text-(--cui-color-text-muted)">
-                    {tool.display_group?.trim()
-                      ? tool.display_group
-                      : localize('com_tools_group_ungrouped')}
-                  </span>
-                  <span className="shrink-0 font-medium text-(--cui-color-accent-primary)">
-                    {localize('com_tools_group_detail_add')}
-                  </span>
-                </button>
-              ))}
-              {!toolsQuery.isLoading && search.trim() && candidates.length === 0 && (
-                <p className="p-1 text-center text-xs text-(--cui-color-text-muted)">—</p>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-(--cui-color-stroke-default) px-3 py-1.5 text-sm transition-colors hover:bg-(--cui-color-background-hover)"
+              disabled={busy}
+              className="shrink-0 rounded-lg border border-(--cui-color-stroke-default) px-3 py-1.5 text-sm transition-colors hover:bg-(--cui-color-background-hover) disabled:opacity-50"
             >
               {localize('com_ui_close')}
             </button>
@@ -602,5 +623,125 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
         </div>
       </Dialog.Content>
     </Dialog>
+  );
+}
+
+/** 双列表的列容器：droppable（空列也能接收拖入），悬停拖拽时高亮边框。 */
+function ListPane({
+  containerId,
+  title,
+  count,
+  children,
+}: {
+  containerId: string;
+  title: string;
+  count: number;
+  children: React.ReactNode;
+}) {
+  const localize = useLocalize();
+  const { setNodeRef, isOver } = useDroppable({ id: containerId });
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <p className="text-xs font-semibold uppercase text-(--cui-color-text-muted)">
+        {title}
+        <span className="ms-1.5 font-normal">
+          {localize('com_tools_count', { count })}
+        </span>
+      </p>
+      <div
+        ref={setNodeRef}
+        className={cn(
+          'flex max-h-[46vh] min-h-40 flex-col gap-1 overflow-y-auto rounded-lg border p-1 transition-colors',
+          isOver
+            ? 'border-(--cui-color-accent-primary) bg-(--cui-color-background-hover)'
+            : 'border-(--cui-color-stroke-default)',
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** 左列行：跨列拖到右列 = 添加。 */
+function PickableToolRow({ tool }: { tool: TerraVoxTool }) {
+  const localize = useLocalize();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tool.tool_id,
+    data: { container: LEFT },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        'flex items-center gap-2 rounded-md border border-(--cui-color-stroke-default) px-2 py-1.5 text-xs',
+        isDragging && 'opacity-40',
+      )}
+    >
+      <span
+        {...attributes}
+        {...listeners}
+        title={localize('com_tools_drag_handle')}
+        className="shrink-0 cursor-grab touch-none select-none px-0.5 text-(--cui-color-text-disabled) active:cursor-grabbing"
+      >
+        ⠿
+      </span>
+      <span className="min-w-0 flex-1 truncate text-(--cui-color-text-default)">
+        {tool.display_name}
+      </span>
+      <code className="min-w-0 flex-1 truncate text-(--cui-color-text-muted)">{tool.tool_id}</code>
+      <span className="shrink-0 text-xs text-(--cui-color-text-muted)">
+        {tool.display_group?.trim() ? tool.display_group : localize('com_tools_group_ungrouped')}
+      </span>
+    </div>
+  );
+}
+
+/** 右列行：组内成员——列内拖拽排序；✕ 快捷移除（同拖回左列）。 */
+function MemberToolRow({
+  tool,
+  busy,
+  onRemove,
+}: {
+  tool: TerraVoxTool;
+  busy: boolean;
+  onRemove: () => void;
+}) {
+  const localize = useLocalize();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tool.tool_id,
+    data: { container: RIGHT },
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        'flex items-center gap-2 rounded-md border border-(--cui-color-stroke-default) px-2 py-1.5 text-xs',
+        isDragging && 'opacity-40',
+      )}
+    >
+      <span
+        {...attributes}
+        {...listeners}
+        title={localize('com_tools_drag_handle')}
+        className="shrink-0 cursor-grab touch-none select-none px-0.5 text-(--cui-color-text-disabled) active:cursor-grabbing"
+      >
+        ⠿
+      </span>
+      <span className="min-w-0 flex-1 truncate font-medium text-(--cui-color-text-default)">
+        {tool.display_name}
+      </span>
+      <code className="min-w-0 flex-1 truncate text-(--cui-color-text-muted)">{tool.tool_id}</code>
+      <InlineAction
+        label={localize('com_tools_group_detail_remove')}
+        danger
+        disabled={busy}
+        onClick={onRemove}
+      >
+        ✕
+      </InlineAction>
+    </div>
   );
 }

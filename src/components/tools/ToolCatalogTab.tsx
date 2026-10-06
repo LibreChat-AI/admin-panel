@@ -1,6 +1,22 @@
-import { Fragment, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Checkbox, Icon, Select } from '@clickhouse/click-ui';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { PendingToolUpdate, TerraVoxTool } from '@/server';
 import {
   createToolFn,
@@ -210,9 +226,7 @@ export function ToolCatalogTab() {
    * （再按 tool_id 稳定排序）；拖拽产生的本地覆盖优先于已落库值。 */
   const [orderOverride, setOrderOverride] = useState<Record<string, number>>({});
   const [savingOrder, setSavingOrder] = useState(false);
-  const [draggingTool, setDraggingTool] = useState<string | null>(null);
-  const dragToolRef = useRef<string | null>(null);
-  const dragSectionRef = useRef<string | null>(null);
+  const toolById = useMemo(() => new Map(tools.map((t) => [t.tool_id, t])), [tools]);
 
   const effOrder = (tool: TerraVoxTool) =>
     orderOverride[tool.tool_id] ??
@@ -273,94 +287,95 @@ export function ToolCatalogTab() {
     }
   };
 
-  /* ── 组内工具拖拽排序（2.22.0）：拖放后按新序回写 display_order（×10），
-   * 仅同分组内移动；乐观覆盖保持拖拽中的视觉稳定，落库后 invalidate 清空。 ── */
-  const onRowPointerDown = (
-    e: ReactPointerEvent<HTMLElement>,
-    tool: TerraVoxTool,
-    section: string,
-  ) => {
-    if (e.button !== 0) {
+  /* ── 组内/跨组工具拖拽（2.22.0，dnd-kit）：松手后按目标节顺序重建
+   * display_order（×10）；跨节拖动同时改写 display_group（拖入「未分组」
+   * 即清空）。乐观覆盖即时反映新序，落库成功后清空。 ── */
+  const toolSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(sortableKeyboardCoordinates),
+  );
+
+  const onToolDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) {
       return;
     }
-    e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    dragToolRef.current = tool.tool_id;
-    dragSectionRef.current = section;
-    setDraggingTool(tool.tool_id);
-  };
-  const onRowPointerMove = (e: ReactPointerEvent<HTMLElement>) => {
-    const from = dragToolRef.current;
-    const section = dragSectionRef.current;
-    if (!from || !section) {
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    const sourceSection = grouped.find(([, items]) => items.some((t) => t.tool_id === activeId));
+    const overSection = grouped.find(([, items]) => items.some((t) => t.tool_id === overId));
+    if (!sourceSection || !overSection) {
       return;
     }
-    const hit = document
-      .elementFromPoint(e.clientX, e.clientY)
-      ?.closest<HTMLElement>('tr[data-tool-row]');
-    const target = hit?.dataset.toolRow;
-    if (!target || target === from || hit?.dataset.section !== section) {
-      return;
-    }
-    setOrderOverride((prev) => {
-      const sectionItems = (grouped.find(([g]) => g === section)?.[1] ?? []).map((t) => t.tool_id);
-      const base = sectionItems.filter((id) => id);
-      const fromIdx = base.indexOf(from);
-      const toIdx = base.indexOf(target);
-      if (fromIdx < 0 || toIdx < 0 || fromIdx === toIdx) {
-        return prev;
+    const [sourceName, sourceItems] = sourceSection;
+    const [targetName, targetItems] = overSection;
+    const updates: { tool: TerraVoxTool; manifest: Record<string, unknown> }[] = [];
+    const overridePatch: Record<string, number> = {};
+
+    const buildManifest = (tool: TerraVoxTool, order: number, group: string) => {
+      const manifest: Record<string, unknown> = { ...tool, display_order: order };
+      if (group) {
+        manifest.display_group = group;
+      } else {
+        delete manifest.display_group;
       }
-      const next = [...base];
-      const [moved] = next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, moved);
-      const patch: Record<string, number> = {};
+      return manifest;
+    };
+
+    if (sourceName === targetName) {
+      const ids = sourceItems.map((t) => t.tool_id);
+      const next = arrayMove(ids, ids.indexOf(activeId), ids.indexOf(overId));
       next.forEach((id, idx) => {
-        patch[id] = idx * 10;
+        overridePatch[id] = idx * 10;
       });
-      return { ...prev, ...patch };
-    });
-    dragToolRef.current = target;
-  };
-  const onRowPointerUp = () => {
-    const section = dragSectionRef.current;
-    dragToolRef.current = null;
-    dragSectionRef.current = null;
-    setDraggingTool(null);
-    if (!section) {
-      return;
-    }
-    const items = grouped.find(([g]) => g === section)?.[1] ?? [];
-    const changed = items.filter(
-      (t) => typeof t.display_order !== 'number' || t.display_order !== orderOverride[t.tool_id],
-    );
-    if (changed.length === 0) {
-      setOrderOverride((prev) => {
-        const next = { ...prev };
-        for (const t of items) {
-          delete next[t.tool_id];
+      for (let idx = 0; idx < next.length; idx++) {
+        const tool = toolById.get(next[idx]);
+        if (tool && tool.display_order !== idx * 10) {
+          updates.push({ tool, manifest: buildManifest(tool, idx * 10, sourceName) });
         }
-        return next;
+      }
+    } else {
+      const targetIds = targetItems.map((t) => t.tool_id);
+      targetIds.splice(Math.max(0, targetIds.indexOf(overId)), 0, activeId);
+      targetIds.forEach((id, idx) => {
+        overridePatch[id] = idx * 10;
       });
+      const moved = toolById.get(activeId);
+      if (moved) {
+        updates.push({
+          tool: moved,
+          manifest: buildManifest(moved, overridePatch[activeId], targetName),
+        });
+      }
+      for (let idx = 0; idx < targetIds.length; idx++) {
+        const tool = toolById.get(targetIds[idx]);
+        if (!tool || tool.tool_id === activeId) {
+          continue;
+        }
+        if ((tool.display_group?.trim() ?? '') !== targetName || tool.display_order !== idx * 10) {
+          updates.push({
+            tool,
+            manifest: buildManifest(tool, idx * 10, targetName),
+          });
+        }
+      }
+    }
+
+    if (updates.length === 0) {
       return;
     }
+    setOrderOverride((prev) => ({ ...prev, ...overridePatch }));
     void (async () => {
       setSavingOrder(true);
       setMutError(null);
       try {
-        for (const tool of items) {
-          const order = orderOverride[tool.tool_id];
-          if (typeof order !== 'number' || tool.display_order === order) {
-            continue;
-          }
-          await updateToolFn({
-            data: { toolId: tool.tool_id, manifest: { ...tool, display_order: order } },
-          });
+        for (const { tool, manifest } of updates) {
+          await updateToolFn({ data: { toolId: tool.tool_id, manifest } });
         }
         void queryClient.invalidateQueries({ queryKey: ['terravox'] });
         setOrderOverride((prev) => {
           const next = { ...prev };
-          for (const t of items) {
-            delete next[t.tool_id];
+          for (const id of Object.keys(overridePatch)) {
+            delete next[id];
           }
           return next;
         });
@@ -396,80 +411,88 @@ export function ToolCatalogTab() {
       );
     }
     return (
-      <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-muted)">
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_tools_col_tool')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_tools_col_group')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_tools_col_version')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_tools_col_expose')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_tools_col_status')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                <span className="sr-only">{localize('com_ui_actions')}</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {grouped.map(([group, items]) => (
-              <Fragment key={group || '__ungrouped__'}>
-                <tr className="bg-(--cui-color-background-muted)">
-                  <td
-                    colSpan={6}
-                    className="px-4 py-2 text-xs font-semibold text-(--cui-color-text-muted)"
-                  >
-                    {group || localize('com_tools_group_ungrouped')}
-                    <span className="ms-2 font-normal">{items.length}</span>
-                  </td>
-                </tr>
-                {items.map((tool) => (
-                  <ToolRow
-                    key={tool.tool_id}
-                    tool={tool}
-                    groups={displayGroups}
-                    section={group}
-                    dragging={draggingTool === tool.tool_id}
-                    onDragPointerDown={onRowPointerDown}
-                    onDragPointerMove={onRowPointerMove}
-                    onDragPointerUp={onRowPointerUp}
-                    moving={
-                      moveGroupMutation.isPending &&
-                      moveGroupMutation.variables?.tool.tool_id === tool.tool_id
-                    }
-                    onMoveGroup={(group) => moveGroupMutation.mutate({ tool, group })}
-                    toggling={
-                      toggleMutation.isPending && toggleMutation.variables?.toolId === tool.tool_id
-                    }
-                    onExposeToggle={(tool, front) => {
-                      const expose = (tool.expose ?? []).includes(front)
-                        ? (tool.expose ?? []).filter((f) => f !== front)
-                        : [...(tool.expose ?? []), front];
-                      exposeMutation.mutate({ tool, expose });
-                    }}
-                    onToggle={(enabled) => toggleMutation.mutate({ toolId: tool.tool_id, enabled })}
-                    onEdit={() => {
-                      setEditing(tool);
-                      setEditOpen(true);
-                    }}
-                    onCopy={() => void copyId(tool)}
-                    onDelete={() => setDeleteTarget(tool)}
-                  />
-                ))}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DndContext
+        sensors={toolSensors}
+        collisionDetection={closestCenter}
+        onDragEnd={onToolDragEnd}
+      >
+        <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-muted)">
+                <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
+                  {localize('com_tools_col_tool')}
+                </th>
+                <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
+                  {localize('com_tools_col_group')}
+                </th>
+                <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
+                  {localize('com_tools_col_version')}
+                </th>
+                <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
+                  {localize('com_tools_col_expose')}
+                </th>
+                <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
+                  {localize('com_tools_col_status')}
+                </th>
+                <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
+                  <span className="sr-only">{localize('com_ui_actions')}</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {grouped.map(([group, items]) => (
+                <SortableContext
+                  key={group || '__ungrouped__'}
+                  items={items.map((t) => t.tool_id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <tr className="bg-(--cui-color-background-muted)">
+                    <td
+                      colSpan={6}
+                      className="px-4 py-2 text-xs font-semibold text-(--cui-color-text-muted)"
+                    >
+                      {group || localize('com_tools_group_ungrouped')}
+                      <span className="ms-2 font-normal">{items.length}</span>
+                    </td>
+                  </tr>
+                  {items.map((tool) => (
+                    <ToolRow
+                      key={tool.tool_id}
+                      tool={tool}
+                      groups={displayGroups}
+                      moving={
+                        moveGroupMutation.isPending &&
+                        moveGroupMutation.variables?.tool.tool_id === tool.tool_id
+                      }
+                      onMoveGroup={(group) => moveGroupMutation.mutate({ tool, group })}
+                      toggling={
+                        toggleMutation.isPending &&
+                        toggleMutation.variables?.toolId === tool.tool_id
+                      }
+                      onExposeToggle={(tool, front) => {
+                        const expose = (tool.expose ?? []).includes(front)
+                          ? (tool.expose ?? []).filter((f) => f !== front)
+                          : [...(tool.expose ?? []), front];
+                        exposeMutation.mutate({ tool, expose });
+                      }}
+                      onToggle={(enabled) =>
+                        toggleMutation.mutate({ toolId: tool.tool_id, enabled })
+                      }
+                      onEdit={() => {
+                        setEditing(tool);
+                        setEditOpen(true);
+                      }}
+                      onCopy={() => void copyId(tool)}
+                      onDelete={() => setDeleteTarget(tool)}
+                    />
+                  ))}
+                </SortableContext>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </DndContext>
     );
   };
 
@@ -693,11 +716,6 @@ function PendingUpdatesPanel({
 function ToolRow({
   tool,
   groups,
-  section,
-  dragging,
-  onDragPointerDown,
-  onDragPointerMove,
-  onDragPointerUp,
   moving,
   onMoveGroup,
   toggling,
@@ -709,15 +727,6 @@ function ToolRow({
 }: {
   tool: TerraVoxTool;
   groups: string[];
-  section: string;
-  dragging: boolean;
-  onDragPointerDown: (
-    e: ReactPointerEvent<HTMLElement>,
-    tool: TerraVoxTool,
-    section: string,
-  ) => void;
-  onDragPointerMove: (e: ReactPointerEvent<HTMLElement>) => void;
-  onDragPointerUp: () => void;
   moving: boolean;
   onMoveGroup: (group: string) => void;
   toggling: boolean;
@@ -734,16 +743,17 @@ function ToolRow({
     current && !groups.includes(current)
       ? [...groups, current].sort((a, b) => a.localeCompare(b))
       : groups;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: tool.tool_id,
+    data: { section: tool.display_group?.trim() ?? '' },
+  });
   return (
     <tr
-      data-tool-row={tool.tool_id}
-      data-section={section}
-      onPointerMove={onDragPointerMove}
-      onPointerUp={onDragPointerUp}
-      onPointerCancel={onDragPointerUp}
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
       className={
         'group/row border-b border-(--cui-color-stroke-default) last:border-b-0' +
-        (dragging ? ' bg-(--cui-color-background-hover)' : '')
+        (isDragging ? ' opacity-40' : '')
       }
     >
       <td className="px-4 py-3">
@@ -799,7 +809,8 @@ function ToolRow({
             title={localize('com_tools_drag_handle')}
             aria-label={localize('com_tools_drag_handle')}
             className="hidden shrink-0 cursor-grab touch-none px-1 text-(--cui-color-text-disabled) opacity-0 transition-opacity select-none group-hover/row:opacity-100 md:block"
-            onPointerDown={(e) => onDragPointerDown(e, tool, section)}
+            {...attributes}
+            {...listeners}
           >
             ⠿
           </span>

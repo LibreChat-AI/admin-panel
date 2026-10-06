@@ -1370,6 +1370,8 @@
   "com_tools_group_implicit": "隐式",
   "com_tools_drag_handle": "拖拽调整顺序",
   "com_tools_group_detail_manage": "管理分组工具",
+  "com_tools_group_detail_left": "未加入的工具",
+  "com_tools_group_detail_right": "组内工具",
   "com_tools_group_detail_add_ph": "搜索并添加工具到本分组…",
   "com_tools_group_detail_remove": "从分组移除",
   "com_tools_group_detail_empty": "该分组暂无工具",

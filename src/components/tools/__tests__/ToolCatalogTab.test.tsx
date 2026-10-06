@@ -120,6 +120,37 @@ vi.mock('@clickhouse/click-ui', () => ({
   ),
 }));
 
+/* dnd-kit 在 vitest 的 CJS 互操作下命名导出为 undefined——桩化（测试不模拟拖拽） */
+vi.mock('@dnd-kit/core', () => ({
+  DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  PointerSensor: class {},
+  closestCenter: {},
+  useSensor: () => undefined,
+  useSensors: () => [],
+}));
+vi.mock('@dnd-kit/sortable', () => ({
+  SortableContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  arrayMove: (arr: unknown[], from: number, to: number) => {
+    const next = [...arr];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    return next;
+  },
+  sortableKeyboardCoordinates: () => undefined,
+  useSortable: () => ({
+    attributes: {},
+    listeners: undefined,
+    setNodeRef: () => undefined,
+    transform: null,
+    transition: undefined,
+    isDragging: false,
+  }),
+  verticalListSortingStrategy: undefined,
+}));
+vi.mock('@dnd-kit/utilities', () => ({
+  CSS: { Transform: { toString: () => undefined } },
+}));
+
 vi.mock('@/utils', () => ({
   cn: (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' '),
   notifySuccess: vi.fn(),
