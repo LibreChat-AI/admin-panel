@@ -573,6 +573,7 @@ function GroupToolsDialog({ group, onClose }: { group: TerraVoxGroup; onClose: (
             <DndContext
               sensors={sensors}
               collisionDetection={closestCorners}
+              modifiers={[restrictToVerticalAxis]}
               onDragOver={onDragOver}
               onDragEnd={onDragEnd}
             >

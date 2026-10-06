@@ -418,6 +418,7 @@ export function ToolCatalogTab() {
       <DndContext
         sensors={toolSensors}
         collisionDetection={closestCenter}
+        modifiers={toolModifiers}
         onDragEnd={onToolDragEnd}
       >
         <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
