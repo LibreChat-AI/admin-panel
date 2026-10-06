@@ -7,6 +7,7 @@ import { ToolGroupsTab } from '../ToolGroupsTab';
  * 复现浏览器端点 ☰ 后整路由崩溃的问题。 */
 
 vi.mock('@dnd-kit/core', async (importOriginal) => await importOriginal());
+vi.mock('@dnd-kit/modifiers', async (importOriginal) => await importOriginal());
 vi.mock('@dnd-kit/sortable', async (importOriginal) => await importOriginal());
 vi.mock('@dnd-kit/utilities', async (importOriginal) => await importOriginal());
 
