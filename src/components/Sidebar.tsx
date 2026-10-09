@@ -5,7 +5,7 @@ import type * as t from '@/types';
 import { useStripAriaExpanded, useCapabilities, useLocalize } from '@/hooks';
 import libreChatLogo from '@/assets/librechat.svg';
 import { SettingsDialog } from './SettingsDialog';
-import { SystemCapabilities } from '@/constants';
+import { SystemCapabilities, READ_QUESTIONNAIRES_CAPABILITY } from '@/constants';
 import { getInitials, cn } from '@/utils';
 import { adminLogoutFn } from '@/server';
 
@@ -31,6 +31,12 @@ const navItems: t.NavItem[] = [
     capability: [SystemCapabilities.READ_ROLES, SystemCapabilities.READ_GROUPS],
   },
   { labelKey: 'com_nav_grants', path: '/grants', icon: 'lock' },
+  {
+    labelKey: 'com_nav_questionnaires',
+    path: '/questionnaires',
+    icon: 'document',
+    capability: READ_QUESTIONNAIRES_CAPABILITY,
+  },
   { labelKey: 'com_nav_help', path: '/help', icon: 'question' },
 ];
 
