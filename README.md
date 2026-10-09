@@ -78,3 +78,33 @@ docker run -p 3000:3000 \
   -e VITE_BASE_PATH=/adminpanel \
   librechat-admin-panel
 ```
+
+### Serverless (AWS Lambda)
+
+The panel can also run as a single AWS Lambda. The handler in `lambda.ts` detects the incoming event shape and supports both:
+
+- a [Lambda Function URL](https://docs.aws.amazon.com/lambda/latest/dg/lambda-urls.html) or API Gateway HTTP API (payload format 2.0)
+- an [Application Load Balancer target](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/lambda-functions.html) (`target_type = lambda`)
+
+The Lambda serves both the server routes and the static client assets, so no CDN or S3 bucket is needed.
+
+> **Note:** Returning static files from a Lambda is not what Lambdas are designed
+> for — in production you would normally put a CDN (or S3 + CloudFront) in front
+> and let it serve `dist/client` directly. The handler does it inline purely for
+> simplicity, so a single self-contained zip deploys with no extra infrastructure.
+
+```bash
+bun run build:lambda     # outputs dist/lambda/{index.mjs, client/}
+```
+
+Zip the contents of `dist/lambda/` and deploy with handler `index.handler` on a Node.js runtime. Set the runtime environment variables used by the Docker deployment (`SESSION_SECRET`, `VITE_API_BASE_URL`, `ADMIN_SSO_*`, `SESSION_COOKIE_SECURE`, etc.). A `GET /health` route returns `200 ok` for health checks.
+
+> **Note:** The Prometheus `/metrics` endpoint (and `ADMIN_PANEL_METRICS_SECRET`)
+> is specific to the long-running `server.ts` deployment and is **not** exposed by
+> the Lambda — in-process pull-model metrics don't fit Lambda's ephemeral, horizontally
+> scaled instances. Use CloudWatch (or another push-based exporter) for Lambda metrics.
+
+> **ALB targets:** enable multi-value headers on the target group so multiple
+> `Set-Cookie` headers (required for the session/PKCE flow) survive. ALB caps
+> Lambda responses at 1 MB; the handler gzips compressible assets to stay under
+> it. With plain-HTTP listeners, also set `SESSION_COOKIE_SECURE=false` (see above).
