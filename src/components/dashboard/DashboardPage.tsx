@@ -57,21 +57,21 @@ export function DashboardPage() {
     <div
       role="region"
       aria-label={localize('com_nav_dashboard')}
-      className="flex flex-1 flex-col gap-8 overflow-auto p-6"
+      className="admin-content-page flex flex-1 flex-col gap-6 overflow-auto"
     >
       <section aria-label={localize('com_dash_quick_links')}>
         <h3 className="mb-3 text-sm font-medium text-(--cui-color-text-muted)">
           {localize('com_dash_quick_links')}
         </h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {visibleLinks.map((link) => (
             <Link
               key={link.path}
               to={link.path}
-              className="flex items-start gap-3 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-4 no-underline transition-colors hover:bg-(--cui-color-background-hover)"
+              className="flex items-start gap-3 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-6 no-underline transition-colors hover:bg-(--cui-color-background-hover)"
             >
               <span aria-hidden="true" className="mt-0.5 text-(--cui-color-text-muted)">
-                <Icon name={link.icon} size="sm" />
+                <Icon name={link.icon} width="20px" height="20px" />
               </span>
               <div className="flex flex-col gap-0.5">
                 <span className="text-sm font-medium text-(--cui-color-text-default)">
@@ -88,7 +88,7 @@ export function DashboardPage() {
 
       <section
         aria-label={localize('com_dash_nav_tips')}
-        className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-5"
+        className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-6"
       >
         <h3 className="mb-3 text-sm font-medium text-(--cui-color-text-default)">
           {localize('com_dash_nav_tips')}

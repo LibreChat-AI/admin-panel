@@ -397,7 +397,7 @@ export function ImportYamlDialog({
 
           {error && (
             <div
-              className="flex flex-col gap-1 rounded-lg bg-[rgba(220,38,38,0.1)] px-3 py-2"
+              className="flex flex-col gap-1 rounded-lg bg-(--cui-color-feedback-danger-bg) px-3 py-2"
               role="alert"
             >
               <span className="text-sm font-medium text-(--cui-color-text-danger)">{error}</span>

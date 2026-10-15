@@ -5,6 +5,7 @@ import { AuthCard } from '@/components/AuthCard';
 import { checkOpenIdFn } from '@/server';
 
 export const Route = createFileRoute('/login')({
+  head: () => ({ meta: [{ title: 'AIMO · Chat Admin Panel · Sign in' }] }),
   validateSearch: (search: Record<string, unknown>) => ({
     redirect: typeof search.redirect === 'string' ? search.redirect : '/',
   }),

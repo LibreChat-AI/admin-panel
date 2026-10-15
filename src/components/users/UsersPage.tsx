@@ -101,14 +101,18 @@ export function UsersPage() {
   };
 
   if (isLoading) {
-    return <LoadingState />;
+    return (
+      <div className="admin-content-page flex flex-1 flex-col gap-6 overflow-auto">
+        <LoadingState />
+      </div>
+    );
   }
 
   return (
     <div
       role="region"
       aria-label={localize('com_nav_users')}
-      className="flex flex-1 flex-col gap-6 overflow-auto p-6"
+      className="admin-content-page flex flex-1 flex-col gap-6 overflow-auto"
     >
       <section aria-label={localize('com_users_list')}>
         <div className="mb-3 flex flex-wrap items-center gap-3">

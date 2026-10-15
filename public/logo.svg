@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 220" role="img" aria-labelledby="title">
+  <title id="title">AIMO wordmark with a half-rounded I</title>
+  <g transform="translate(41.3 22) scale(2.2)" fill="none" stroke="#101010" stroke-width="18" stroke-linecap="butt" stroke-linejoin="round">
+    <path d="M0 84V25Q0 0 25 0H65Q90 0 90 25V84 M0 43H90"/>
+    <path transform="translate(108 0)" d="M2 84V-9H11A9 9 0 0 1 20 0V84Z" fill="#101010" stroke="none"/>
+    <path transform="translate(148 0)" d="M0 84V25Q0 0 25 0H45Q75 0 75 25V84 M75 25Q75 0 105 0H125Q150 0 150 25V84"/>
+    <path transform="translate(327 0)" d="M27 0H63Q90 0 90 27V48Q90 75 63 75H27Q0 75 0 48V27Q0 0 27 0Z"/>
+  </g>
+</svg>

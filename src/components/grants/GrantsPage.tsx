@@ -19,9 +19,13 @@ export function GrantsPage({ activeTab, onTabChange }: t.GrantsPageProps) {
     <div
       role="region"
       aria-label={localize('com_grants_title')}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-2"
+      className="admin-content-page flex min-h-0 flex-1 flex-col gap-6 overflow-hidden"
     >
-      <Tabs value={resolvedTab} onValueChange={onTabChange} ariaLabel={localize('com_grants_title')}>
+      <Tabs
+        value={resolvedTab}
+        onValueChange={onTabChange}
+        ariaLabel={localize('com_grants_title')}
+      >
         <Tabs.TriggersList>
           <Tabs.Trigger value="management">{localize('com_grants_tab_management')}</Tabs.Trigger>
           {canReadAuditLog && (
@@ -32,7 +36,7 @@ export function GrantsPage({ activeTab, onTabChange }: t.GrantsPageProps) {
         {canReadAuditLog && <Tabs.Content value="audit-log" tabIndex={-1} />}
       </Tabs>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {resolvedTab === 'management' && <GrantManagementTab />}
         {resolvedTab === 'audit-log' && canReadAuditLog && <AuditLogTab />}
       </div>

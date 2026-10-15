@@ -10,13 +10,13 @@ import { Sidebar } from '@/components/Sidebar';
 import { getNavigationUrlsFn, getPilotModeFn, verifyAdminTokenFn } from '@/server';
 import { Header } from '@/components/Header';
 
-const ROUTE_TITLE_KEYS: Record<string, string> = {
-  '/': 'com_dash_title',
-  '/configuration': 'com_config_title',
-  '/users': 'com_users_title',
-  '/access': 'com_access_title',
-  '/grants': 'com_grants_title',
-  '/help': 'com_help_title',
+const PAGE_HEADINGS: Record<string, { titleKey: string }> = {
+  '/': { titleKey: 'com_dash_title' },
+  '/configuration': { titleKey: 'com_config_title' },
+  '/users': { titleKey: 'com_users_title' },
+  '/access': { titleKey: 'com_access_title' },
+  '/grants': { titleKey: 'com_grants_title' },
+  '/help': { titleKey: 'com_help_title' },
 };
 
 export const Route = createFileRoute('/_app')({
@@ -42,14 +42,11 @@ function AppLayout() {
   const { user, navigation } = Route.useRouteContext();
   const { hasCapability, isLoading, isError } = useCapabilities();
   const router = useRouter();
-  const localize = useLocalize();
   const { open, setOpen } = useCommandMenu();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     const stored = localStorage.getItem('admin-panel:sidebar-collapsed');
     return stored !== null ? stored === 'true' : true;
   });
-  const pathname = router.state.location.pathname;
-
   const toggleSidebar = () =>
     setSidebarCollapsed((prev) => {
       const next = !prev;
@@ -72,10 +69,11 @@ function AppLayout() {
     return <AccessDenied />;
   }
 
-  const matchedKey = Object.keys(ROUTE_TITLE_KEYS).find((route) =>
-    route === '/' ? pathname === '/' : pathname.startsWith(route),
+  const pathname = router.state.location.pathname;
+  const matchedPath = Object.keys(PAGE_HEADINGS).find((path) =>
+    path === '/' ? pathname === '/' : pathname.startsWith(path),
   );
-  const title = matchedKey ? localize(ROUTE_TITLE_KEYS[matchedKey]) : undefined;
+  const heading = PAGE_HEADINGS[matchedPath ?? '/'];
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -86,7 +84,7 @@ function AppLayout() {
         onToggle={toggleSidebar}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header title={title} onSearchClick={() => setOpen(true)} />
+        <Header titleKey={heading.titleKey} onSearchClick={() => setOpen(true)} />
         <main className="flex min-h-0 flex-1 flex-col overflow-auto">
           <Outlet />
         </main>

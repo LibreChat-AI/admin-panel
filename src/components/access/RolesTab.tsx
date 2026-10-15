@@ -72,7 +72,7 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2 pr-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 pr-1">
       <div className="flex items-center justify-between gap-3">
         <SearchInput
           value={search}

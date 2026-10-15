@@ -13,6 +13,7 @@ describe('cross-application navigation', () => {
       resolveNavigationUrls('https://gateway.example.test/', 'https://chat.example.test/chat'),
     ).toEqual({
       gatewayUrl: 'https://gateway.example.test',
+      governanceAdminUrl: 'https://gateway.example.test/admin',
       chatUrl: 'https://gateway.example.test/api/auth/open-chat',
     });
   });
@@ -20,6 +21,7 @@ describe('cross-application navigation', () => {
   it('uses the configured Chat base path without a Gateway', () => {
     expect(resolveNavigationUrls(undefined, 'https://chat.example.test/chat/')).toEqual({
       gatewayUrl: undefined,
+      governanceAdminUrl: undefined,
       chatUrl: 'https://chat.example.test/chat/c/new',
     });
   });
@@ -31,6 +33,7 @@ describe('cross-application navigation', () => {
 
     expect(await getNavigationUrlsFn()).toEqual({
       gatewayUrl: undefined,
+      governanceAdminUrl: undefined,
       chatUrl: 'https://chat.example.test/c/new',
     });
   });
@@ -38,6 +41,7 @@ describe('cross-application navigation', () => {
   it('does not expose unsupported URL schemes', () => {
     expect(resolveNavigationUrls('javascript:alert(1)', 'data:text/html,unsafe')).toEqual({
       gatewayUrl: undefined,
+      governanceAdminUrl: undefined,
       chatUrl: undefined,
     });
   });

@@ -1,4 +1,4 @@
-import { Dialog } from '@clickhouse/click-ui';
+import * as Dialog from '@radix-ui/react-dialog';
 import type * as t from '@/types';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLocalize } from '@/hooks';
@@ -13,52 +13,57 @@ const THEME_LABEL_KEYS: Record<t.ThemeOption, string> = {
 
 export function SettingsDialog({ open, onClose }: t.SettingsDialogProps) {
   const localize = useLocalize();
-  const { theme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
 
   return (
-    <Dialog
+    <Dialog.Root
       open={open}
       onOpenChange={(isOpen) => {
         if (!isOpen) onClose();
       }}
     >
-      <Dialog.Content
-        title={localize('com_ui_settings')}
-        showClose
-        onClose={onClose}
-        className="modal-frost"
-      >
-        <div className="flex flex-col gap-6 py-2">
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-sm font-medium text-(--cui-color-text-default)">
-                {localize('com_nav_theme')}
-              </span>
-              <span className="text-xs text-(--cui-color-text-muted)">
-                {localize('com_settings_theme_desc')}
-              </span>
+      <Dialog.Portal>
+        <Dialog.Overlay
+          className={cn('admin-settings-overlay', resolvedTheme === 'dark' && 'is-dark')}
+        />
+        <Dialog.Content
+          className={cn('admin-settings-dialog', resolvedTheme === 'dark' && 'is-dark')}
+        >
+          <Dialog.Title className="admin-settings-title">
+            {localize('com_ui_settings')}
+          </Dialog.Title>
+          <Dialog.Close asChild>
+            <button className="admin-settings-close" type="button" aria-label="Close settings">
+              ×
+            </button>
+          </Dialog.Close>
+          <Dialog.Description className="sr-only">
+            {localize('com_settings_theme_desc')}
+          </Dialog.Description>
+          <div className="admin-settings-theme-row">
+            <div>
+              <strong>{localize('com_nav_theme')}</strong>
+              <p>{localize('com_settings_theme_desc')}</p>
             </div>
-            <div className="flex gap-1 rounded-lg border border-(--cui-color-stroke-default) p-0.5">
-              {THEME_OPTIONS.map((opt) => (
+            <div
+              className="admin-settings-theme-options"
+              role="group"
+              aria-label={localize('com_nav_theme')}
+            >
+              {THEME_OPTIONS.map((option) => (
                 <button
-                  key={opt}
+                  key={option}
                   type="button"
-                  onClick={() => setTheme(opt)}
-                  className={cn(
-                    'cursor-pointer rounded-md px-3 py-1 text-xs font-medium transition-colors',
-                    theme === opt
-                      ? 'bg-(--cui-color-background-active) text-(--cui-color-text-default)'
-                      : 'text-(--cui-color-text-muted) hover:text-(--cui-color-text-default)',
-                  )}
-                  aria-pressed={theme === opt}
+                  aria-pressed={theme === option}
+                  onClick={() => setTheme(option)}
                 >
-                  {localize(THEME_LABEL_KEYS[opt])}
+                  {localize(THEME_LABEL_KEYS[option])}
                 </button>
               ))}
             </div>
           </div>
-        </div>
-      </Dialog.Content>
-    </Dialog>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

@@ -21,7 +21,7 @@ export function AccessPage({
     <div
       role="region"
       aria-label={localize('com_nav_access')}
-      className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-2"
+      className="admin-content-page flex min-h-0 flex-1 flex-col gap-6 overflow-hidden"
     >
       {canReadRoles && canReadGroups && (
         <Tabs value={activeTab} onValueChange={onTabChange} ariaLabel={localize('com_nav_access')}>
@@ -34,7 +34,7 @@ export function AccessPage({
         </Tabs>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {activeTab === 'groups' && canReadGroups && (
           <GroupsTab onCreateGroup={() => setCreateGroupOpen(true)} />
         )}

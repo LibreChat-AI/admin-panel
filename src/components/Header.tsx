@@ -1,7 +1,7 @@
 import type * as t from '@/types';
 import { useLocalize } from '@/hooks';
 
-export function Header({ title, onSearchClick, children }: t.HeaderProps) {
+export function Header({ titleKey, onSearchClick, children }: t.HeaderProps) {
   const localize = useLocalize();
   const isMac =
     typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.userAgent);
@@ -9,15 +9,11 @@ export function Header({ title, onSearchClick, children }: t.HeaderProps) {
 
   return (
     <header className="shrink-0 border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-panel)">
-      <div className="flex items-center gap-3 px-4 py-3">
-        <div className="flex shrink-0 flex-col">
-          {title ? (
-            <h1 className="text-base font-bold text-(--cui-color-text-default)">{title}</h1>
-          ) : (
-            <div />
-          )}
+      <div className="admin-content-header flex flex-wrap items-center gap-3">
+        <div className="min-w-40 flex-1">
+          <h1 className="admin-header-title">{localize(titleKey)}</h1>
         </div>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {children}
           <div id="header-actions-portal" className="contents" />
           {onSearchClick && (

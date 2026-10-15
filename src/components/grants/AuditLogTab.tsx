@@ -385,7 +385,7 @@ export function AuditLogTab() {
   const exportLabel = localize('com_audit_export_server');
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-4 pr-1 pl-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 pl-1">
       <div className="flex items-center justify-between gap-3">
         <div
           className="flex flex-1 flex-wrap items-center gap-3"

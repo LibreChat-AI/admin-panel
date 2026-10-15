@@ -9,6 +9,7 @@ import { adminLoginFn, adminVerify2FAFn, openIdCheckOptions, openidLoginFn } fro
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from './InputOTP';
 import { PasswordInput } from './PasswordInput';
 import { useLocalize } from '@/hooks';
+import aimoLogo from '@/assets/logo.svg';
 
 export function AuthCard({
   redirectTo = '/',
@@ -221,6 +222,7 @@ export function AuthCard({
         color="default"
       >
         <Container orientation="vertical" gap="lg" alignItems="center">
+          <img src={aimoLogo} alt={localize('com_a11y_logo_alt')} className="aimo-logo h-12 w-44" />
           <Title type="h1">{localize('com_auth_title')}</Title>
           <p className="text-center text-sm text-(--cui-color-text-muted)">
             {localize('com_auth_sso_redirecting_auto')}
@@ -241,6 +243,7 @@ export function AuthCard({
       color="default"
     >
       <Container orientation="vertical" gap="lg" alignItems="center">
+        <img src={aimoLogo} alt={localize('com_a11y_logo_alt')} className="aimo-logo h-12 w-44" />
         <Title type="h1">
           {step === '2fa' ? localize('com_auth_2fa_title') : localize('com_auth_title')}
         </Title>

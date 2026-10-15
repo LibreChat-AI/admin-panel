@@ -25,6 +25,7 @@ export function resolveNavigationUrls(gatewayValue?: string, chatValue?: string)
   const libreChatUrl = configuredHttpUrl(chatValue);
   return {
     gatewayUrl,
+    governanceAdminUrl: gatewayUrl && `${gatewayUrl}/admin`,
     chatUrl: gatewayUrl
       ? `${gatewayUrl}/api/auth/open-chat`
       : libreChatUrl && `${libreChatUrl}/c/new`,

@@ -13,8 +13,8 @@ interface ConfigSearchParams {
 }
 
 export const Route = createFileRoute('/_app/configuration/')({
-  loader: ({ context }) =>
-    context.pilotEnabled ? { tree: [] } : getConfigSchemaFields(),
+  head: () => ({ meta: [{ title: 'AIMO · Chat Admin Panel · Configuration' }] }),
+  loader: ({ context }) => (context.pilotEnabled ? { tree: [] } : getConfigSchemaFields()),
   validateSearch: (search: Record<string, unknown>): ConfigSearchParams => ({
     tab: typeof search.tab === 'string' ? search.tab : undefined,
     field: typeof search.field === 'string' ? search.field : undefined,

@@ -1,4 +1,5 @@
 import '../locales/i18n';
+import { useEffect } from 'react';
 import { ClickUIProvider } from '@clickhouse/click-ui';
 import { TanStackDevtools } from '@tanstack/react-devtools';
 import { ReactQueryDevtoolsPanel } from '@tanstack/react-query-devtools';
@@ -12,6 +13,7 @@ import {
   createRootRoute,
 } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
+import { BrandControlsTheme } from '../contexts/BrandControlsTheme';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import appCss from '../styles.css?url';
 import { useLocalize } from '@/hooks';
@@ -36,7 +38,7 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'LibreChat Admin Panel',
+        title: 'AIMO · Chat Admin Panel',
       },
     ],
     links: [
@@ -46,7 +48,12 @@ export const Route = createRootRoute({
       },
       {
         rel: 'icon',
-        href: `${(import.meta.env.VITE_BASE_PATH || '').replace(/\/$/, '')}/favicon.ico`,
+        href: `${(import.meta.env.VITE_BASE_PATH || '').replace(/\/$/, '')}/logo_small.svg`,
+        type: 'image/svg+xml',
+      },
+      {
+        rel: 'apple-touch-icon',
+        href: `${(import.meta.env.VITE_BASE_PATH || '').replace(/\/$/, '')}/apple-touch-icon.png`,
       },
     ],
   }),
@@ -67,11 +74,21 @@ function RootComponent() {
 
 function ThemedApp() {
   const { resolvedTheme } = useTheme();
+  useEffect(() => {
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"][type="image/svg+xml"]');
+    if (!icon) return;
+    const basePath = (import.meta.env.VITE_BASE_PATH || '').replace(/\/$/, '');
+    const href = `${basePath}/${resolvedTheme === 'dark' ? 'logo_small_light.svg' : 'logo_small.svg'}`;
+    if (icon.getAttribute('href') !== href) icon.setAttribute('href', href);
+  }, [resolvedTheme]);
+
   return (
     <ClickUIProvider theme={resolvedTheme}>
-      <div className="isolate">
-        <Outlet />
-      </div>
+      <BrandControlsTheme mode={resolvedTheme}>
+        <div className="isolate">
+          <Outlet />
+        </div>
+      </BrandControlsTheme>
     </ClickUIProvider>
   );
 }

@@ -16,7 +16,8 @@ const config = defineConfig({
   ],
   resolve: {
     tsconfigPaths: true,
-    dedupe: ['react', 'react-dom', '@radix-ui/react-dialog'],
+    // Click UI ships its own styled-components copy; both theme providers must share one context.
+    dedupe: ['react', 'react-dom', 'styled-components', '@radix-ui/react-dialog'],
     alias: {
       url: path.resolve(__dirname, 'src/shims/url.ts'),
     },

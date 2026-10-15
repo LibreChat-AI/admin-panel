@@ -269,7 +269,7 @@ export function ConfigTabContent({
     <form
       aria-label={localize('com_nav_configuration')}
       onSubmit={(e) => e.preventDefault()}
-      className="flex flex-col gap-6 py-4"
+      className="flex flex-col gap-6 py-6"
     >
       {groups.map((group) => {
         if (group.kind === 'flat') {

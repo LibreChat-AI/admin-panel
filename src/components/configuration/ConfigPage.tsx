@@ -917,8 +917,8 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
   })();
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
-      <div className="shrink-0 px-4">
+    <div className="admin-content-page flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="shrink-0">
         {banner && <div className="pt-4 pb-2">{banner}</div>}
         <HeaderActions
           showImport
@@ -960,10 +960,7 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               />
             </div>
           )}
-          <div
-            className="h-full scrollbar-gutter-stable overflow-auto pl-4"
-            ref={scrollCallbackRef}
-          >
+          <div className="h-full scrollbar-gutter-stable overflow-auto" ref={scrollCallbackRef}>
             <ConfigTabContent
               sections={sectionsForActiveTab}
               configValues={activeConfigValues}

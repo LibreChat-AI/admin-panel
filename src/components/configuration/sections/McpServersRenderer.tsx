@@ -631,7 +631,8 @@ function CreateMcpServerDialog({
             htmlFor="mcp-server-name"
             className="text-sm font-medium text-(--cui-color-text-default)"
           >
-            {localize('com_config_server_name')} <span className="text-red-500">*</span>
+            {localize('com_config_server_name')}{' '}
+            <span className="text-(--cui-color-text-danger)">*</span>
           </label>
           <input
             id="mcp-server-name"
@@ -917,11 +918,7 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     <div className="flex flex-col gap-2">
       {!disabled && (
         <div className="flex items-center gap-3 py-2">
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="config-add-btn"
-          >
+          <button type="button" onClick={() => setCreateOpen(true)} className="config-add-btn">
             <Icon name="plus" size="sm" />
             <span>{localize('com_config_create_mcp_server')}</span>
           </button>

@@ -30,7 +30,7 @@ export function ResetBaseConfigDialog({
           </p>
           {error && (
             <div
-              className="rounded-lg bg-[rgba(220,38,38,0.1)] px-3 py-2 text-sm font-medium text-(--cui-color-text-danger)"
+              className="rounded-lg bg-(--cui-color-feedback-danger-bg) px-3 py-2 text-sm font-medium text-(--cui-color-feedback-danger-fg)"
               role="alert"
             >
               {error}
