@@ -1,3 +1,4 @@
+import yaml from 'js-yaml';
 import { createPortal } from 'react-dom';
 import { Icon } from '@clickhouse/click-ui';
 import { PrincipalType } from 'librechat-data-provider';
@@ -882,6 +883,20 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
     ],
   );
 
+  const handleExport = useCallback(() => {
+    const source = dbOverrides && Object.keys(dbOverrides).length > 0 ? dbOverrides : configValues;
+    const yamlStr = yaml.dump(source ?? {}, { lineWidth: -1, noRefs: true });
+    const blob = new Blob([yamlStr], { type: 'application/x-yaml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'librechat.yaml';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  }, [dbOverrides, configValues]);
+
   const highlightRef = useHighlightRef(highlightField);
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const [tocEl, setTocEl] = useState<HTMLElement | null>(null);
@@ -1086,6 +1101,8 @@ export function ConfigPage({ initialTab, highlightField, initialScope }: t.Confi
               : undefined
           }
           onImportClick={() => setImportOpen(true)}
+          exportDisabled={!configValues}
+          onExportClick={handleExport}
           showReset={!isEditingScope && dbOverridePaths.size > 0}
           resetDisabled={isDirty || !canManageConfig}
           resetTitle={resetBaseTitle}
@@ -1232,6 +1249,8 @@ function HeaderActions({
   importDisabled,
   importTitle,
   onImportClick,
+  exportDisabled,
+  onExportClick,
   showReset,
   resetDisabled,
   resetTitle,
@@ -1244,6 +1263,8 @@ function HeaderActions({
   importDisabled: boolean;
   importTitle?: string;
   onImportClick: () => void;
+  exportDisabled: boolean;
+  onExportClick: () => void;
   showReset: boolean;
   resetDisabled: boolean;
   resetTitle?: string;
@@ -1259,22 +1280,33 @@ function HeaderActions({
     setPortalTarget(document.getElementById('header-actions-portal'));
   }, []);
 
+  const btnClass =
+    'flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-3 py-1.5 text-sm text-(--cui-color-text-default) transition-colors hover:bg-(--cui-color-background-hover) disabled:cursor-not-allowed disabled:opacity-50';
+
   const content = (
     <>
       {showImport && (
-        <button
-          type="button"
-          onClick={onImportClick}
-          disabled={importDisabled}
-          aria-disabled={importDisabled || undefined}
-          title={importTitle}
-          className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-3 py-1.5 text-sm text-(--cui-color-text-default) transition-colors hover:bg-(--cui-color-background-hover) disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <span aria-hidden="true">
-            <Icon name="upload" size="xs" />
-          </span>
-          {localize('com_config_import_yaml')}
-        </button>
+        <>
+          <button type="button" onClick={onExportClick} disabled={exportDisabled} aria-disabled={exportDisabled || undefined} className={btnClass}>
+            <span aria-hidden="true">
+              <Icon name="download" size="xs" />
+            </span>
+            {localize('com_config_export_yaml')}
+          </button>
+          <button
+            type="button"
+            onClick={onImportClick}
+            disabled={importDisabled}
+            aria-disabled={importDisabled || undefined}
+            title={importTitle}
+            className={btnClass}
+          >
+            <span aria-hidden="true">
+              <Icon name="upload" size="xs" />
+            </span>
+            {localize('com_config_import_yaml')}
+          </button>
+        </>
       )}
       {showReset && (
         <button

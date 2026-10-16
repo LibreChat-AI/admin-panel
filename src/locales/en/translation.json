@@ -152,6 +152,7 @@
   "com_config_unknown_settings": "Other settings (read-only)",
   "com_config_unknown_settings_desc": "These settings come from a newer LibreChat than this admin panel supports. They are shown for reference and left unchanged when you save.",
   "com_config_save_error": "Failed to save",
+  "com_config_export_yaml": "Export YAML",
   "com_toast_group_created": "Group \"{{name}}\" created",
   "com_toast_group_updated": "Group \"{{name}}\" updated",
   "com_toast_group_deleted": "Group \"{{name}}\" deleted",
