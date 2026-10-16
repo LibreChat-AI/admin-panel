@@ -13,6 +13,11 @@ export type LocalizeFn = (key: string, options?: Record<string, string | number>
 
 export type TranslationKeys = string;
 
+export interface CapabilitiesData {
+  available: boolean;
+  capabilities: string[];
+}
+
 export interface UseProfileMutationsOptions {
   fieldPath: string;
   onProfileChange?: () => void;

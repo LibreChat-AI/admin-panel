@@ -9,9 +9,10 @@ import {
   Outlet,
   ScriptOnce,
   Scripts,
-  createRootRoute,
+  createRootRouteWithContext,
 } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
+import type { QueryClient } from '@tanstack/react-query';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import appCss from '../styles.css?url';
 import { useLocalize } from '@/hooks';
@@ -24,7 +25,7 @@ const themeScript = `(function(){
   } catch(e) {}
 })();`;
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   ssr: false,
   head: () => ({
     meta: [

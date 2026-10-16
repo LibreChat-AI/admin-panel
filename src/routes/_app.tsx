@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Icon } from '@clickhouse/click-ui';
+import { useSuspenseQuery } from '@tanstack/react-query';
 import { createFileRoute, Outlet, useRouter, Link, redirect } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
-import { useCapabilities, useCommandMenu, useLocalize } from '@/hooks';
-import { CommandMenu } from '@/components/CommandMenu';
-import { AccessDenied } from '@/components/shared';
-import { SystemCapabilities } from '@/constants';
-import { Sidebar } from '@/components/Sidebar';
+import { capabilitiesQueryOptions, useCommandMenu, useLocalize } from '@/hooks';
 import { verifyAdminTokenFn } from '@/server';
+import { SystemCapabilities, hasImpliedCapability } from '@/constants';
+import { AccessDenied, LoadingState } from '@/components/shared';
+import { CommandMenu } from '@/components/CommandMenu';
+import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
 
 const ROUTE_TITLE_KEYS: Record<string, string> = {
@@ -18,7 +19,6 @@ const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/grants': 'com_grants_title',
   '/help': 'com_help_title',
 };
-
 
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ location }) => {
@@ -33,14 +33,26 @@ export const Route = createFileRoute('/_app')({
 
     return { user: result.user };
   },
+  loader: async ({ context }) => {
+    await context.queryClient.ensureQueryData(capabilitiesQueryOptions(context.user.id));
+  },
+  pendingComponent: AppPending,
   component: AppLayout,
   errorComponent: AppError,
   notFoundComponent: AppNotFound,
 });
 
+function AppPending() {
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <LoadingState />
+    </div>
+  );
+}
+
 function AppLayout() {
   const { user } = Route.useRouteContext();
-  const { hasCapability, isLoading, isError } = useCapabilities();
+  const { available, capabilities } = useSuspenseQuery(capabilitiesQueryOptions(user.id)).data;
   const router = useRouter();
   const localize = useLocalize();
   const { open, setOpen } = useCommandMenu();
@@ -68,7 +80,7 @@ function AppLayout() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  if (!isLoading && !isError && !hasCapability(SystemCapabilities.ACCESS_ADMIN)) {
+  if (!available || !hasImpliedCapability(capabilities, SystemCapabilities.ACCESS_ADMIN)) {
     return <AccessDenied />;
   }
 
