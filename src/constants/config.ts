@@ -8,6 +8,10 @@ import type * as t from '@/types';
  */
 export const BLOCK_UNSAFE_CONFIG_KEYS = true;
 
+/** Why a key blocked by `BLOCK_UNSAFE_CONFIG_KEYS` cannot be saved or imported. */
+export const UNSAFE_CONFIG_KEY_MESSAGE =
+  "keys containing '.' or starting with '$' can't be saved through the admin API yet; set this in librechat.yaml";
+
 /**
  * Base-only sections of newer LibreChat releases than the bundled
  * `librechat-data-provider` knows about; the admin API strips them all the same.

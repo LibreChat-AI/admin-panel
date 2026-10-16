@@ -9,7 +9,7 @@ import { useProfileMutations, useLocalize } from '@/hooks';
 import { availableScopesOptions } from '@/server';
 import { getScopeTypeConfig } from '@/constants';
 import { serializeKVPairs, cn } from '@/utils';
-import { getControlType } from './utils';
+import { getControlType } from './controls';
 
 export function FieldProfilePopover({
   fieldPath,

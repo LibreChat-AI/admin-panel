@@ -4,7 +4,7 @@ import { DeleteProfileValueModal } from './DeleteProfileValueModal';
 import { EditButton, TrashButton } from '@/components/shared';
 import { useProfileMutations, useLocalize } from '@/hooks';
 import { ProfileValueModal } from './ProfileValueModal';
-import { getControlType } from './utils';
+import { getControlType } from './controls';
 
 export function PreviewProfileActions({
   fieldPath,

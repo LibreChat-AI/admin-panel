@@ -1,9 +1,7 @@
 import { Icon } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { SectionControls } from './SectionControls';
-import { SectionHeader } from './SectionHeader';
+import { SettingsRow } from './SettingsRow';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 export function ConfigRow({
   title,
@@ -73,30 +71,26 @@ export function ConfigRow({
       </span>
     ) : null;
 
-  const hasSubContent = description || resetAction || pendingResetHint || badge;
-
-  return (
-    <div
-      className={cn(
-        'config-row flex w-full gap-6 rounded-md px-2.5 py-2 transition-opacity',
-        hasSubContent ? 'items-start' : 'items-center',
-        isPendingReset && 'opacity-50',
-        !isPendingReset && !isConfigured && !isTouched && 'opacity-50',
-      )}
-    >
-      <SectionHeader
-        title={title}
-        description={description}
-        learnMoreUrl={learnMoreUrl}
-        htmlFor={fieldId}
-        titleAdornment={configuredDot}
-        subtitle={defaultHintEl}
-      >
+  const actions =
+    resetAction || pendingResetHint || badge ? (
+      <>
         {resetAction}
         {pendingResetHint}
         {badge}
-      </SectionHeader>
-      <SectionControls>{children}</SectionControls>
-    </div>
+      </>
+    ) : undefined;
+
+  return (
+    <SettingsRow
+      label={title}
+      htmlFor={fieldId}
+      description={description}
+      learnMoreUrl={learnMoreUrl}
+      control={children}
+      chips={configuredDot}
+      hint={defaultHintEl}
+      actions={actions}
+      dimmed={isPendingReset || (!isConfigured && !isTouched)}
+    />
   );
 }

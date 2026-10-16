@@ -3,13 +3,14 @@ import { MultiAccordion } from '@clickhouse/click-ui';
 import type { KeyboardEvent } from 'react';
 import type * as t from '@/types';
 import { SECTION_RENDERERS, SELF_CONTAINED_SECTION_RENDERERS } from './sections';
-import { FieldRenderer, SingleFieldRenderer } from './FieldRenderer';
-import { hasDescendant, resolveFieldValue } from './utils';
+import { ConfigValuesProvider } from '@/contexts/ConfigValuesContext';
+import { FieldRenderer, SingleFieldRenderer } from './renderer';
+import { isSectionDisabled, resolveFieldValue } from '@/utils';
 import { UnknownSettings } from './UnknownSettings';
 import { ConfigSection } from './ConfigSection';
 import { CodeField } from './fields/CodeField';
-import { isSectionDisabled } from '@/utils';
 import { InfoBanner } from './InfoBanner';
+import { hasDescendant } from './counts';
 import { useLocalize } from '@/hooks';
 
 /** Sections where the configured count should reflect record entries rather
@@ -130,6 +131,29 @@ export function ConfigTabContent({
     }
     return map;
   }, [sectionCounts]);
+
+  const valuesData = useMemo<t.ConfigValuesData>(
+    () => ({
+      configValues,
+      editedValues,
+      resolvedValues,
+      schemaDefaults,
+      configuredPaths,
+      overridePaths: dbOverridePaths,
+      pendingResets,
+      isEditingScope,
+    }),
+    [
+      configValues,
+      editedValues,
+      resolvedValues,
+      schemaDefaults,
+      configuredPaths,
+      dbOverridePaths,
+      pendingResets,
+      isEditingScope,
+    ],
+  );
 
   if (sections.length === 0) {
     return (
@@ -282,68 +306,70 @@ export function ConfigTabContent({
   }, []);
 
   return (
-    <form
-      aria-label={localize('com_nav_configuration')}
-      onSubmit={(e) => e.preventDefault()}
-      onKeyDown={preventImplicitSubmit}
-      className="flex flex-col gap-6 py-4"
-    >
-      <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
-      {groups.map((group) => {
-        if (group.kind === 'flat') {
-          return (
-            <div key={group.section.id} id={`section-${group.section.id}`}>
-              {renderSectionContent(group.section)}
-            </div>
-          );
-        }
-        if (group.kind === 'inline') {
-          const { section } = group;
-          const counts = countsById[section.id];
-          return (
-            <ConfigSection
-              key={section.id}
-              sectionId={section.id}
-              title={section.title ?? localize(section.titleKey)}
-              description={section.descriptionKey ? localize(section.descriptionKey) : undefined}
-              learnMoreUrl={section.learnMoreUrl}
-              configuredCount={counts?.configured ?? 0}
-              totalCount={counts?.total ?? 0}
-              inline
-              showConfiguredOnly={showConfiguredOnly}
-            >
-              {renderSectionContent(section)}
-            </ConfigSection>
-          );
-        }
-        return (
-          <MultiAccordion
-            key={group.sections[0].id}
-            type="multiple"
-            showBorder
-            showCheck={false}
-            fillWidth
-            defaultValue={group.sections.map((s) => s.id)}
-            data-top-level-accordion
-          >
-            {group.sections.map((section) => (
-              <MultiAccordion.Item
+    <ConfigValuesProvider value={valuesData}>
+      <form
+        aria-label={localize('com_nav_configuration')}
+        onSubmit={(e) => e.preventDefault()}
+        onKeyDown={preventImplicitSubmit}
+        className="flex flex-col gap-6 py-4"
+      >
+        <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
+        {groups.map((group) => {
+          if (group.kind === 'flat') {
+            return (
+              <div key={group.section.id} id={`section-${group.section.id}`}>
+                {renderSectionContent(group.section)}
+              </div>
+            );
+          }
+          if (group.kind === 'inline') {
+            const { section } = group;
+            const counts = countsById[section.id];
+            return (
+              <ConfigSection
                 key={section.id}
-                id={`section-${section.id}`}
-                data-section-id={`section-${section.id}`}
-                value={section.id}
+                sectionId={section.id}
                 title={section.title ?? localize(section.titleKey)}
+                description={section.descriptionKey ? localize(section.descriptionKey) : undefined}
+                learnMoreUrl={section.learnMoreUrl}
+                configuredCount={counts?.configured ?? 0}
+                totalCount={counts?.total ?? 0}
+                inline
+                showConfiguredOnly={showConfiguredOnly}
               >
                 {renderSectionContent(section)}
-              </MultiAccordion.Item>
-            ))}
-          </MultiAccordion>
-        );
-      })}
-      {unknownSettings && (
-        <UnknownSettings fields={unknownSettings.fields} value={unknownSettings.value} path="" />
-      )}
-    </form>
+              </ConfigSection>
+            );
+          }
+          return (
+            <MultiAccordion
+              key={group.sections[0].id}
+              type="multiple"
+              showBorder
+              showCheck={false}
+              fillWidth
+              defaultValue={group.sections.map((s) => s.id)}
+              data-top-level-accordion
+            >
+              {group.sections.map((section) => (
+                <MultiAccordion.Item
+                  key={section.id}
+                  id={`section-${section.id}`}
+                  data-section-id={`section-${section.id}`}
+                  value={section.id}
+                  title={section.title ?? localize(section.titleKey)}
+                >
+                  {renderSectionContent(section)}
+                </MultiAccordion.Item>
+              ))}
+            </MultiAccordion>
+          );
+        })}
+        {unknownSettings && (
+          <UnknownSettings fields={unknownSettings.fields} value={unknownSettings.value} path="" />
+        )}
+      </form>
+    </ConfigValuesProvider>
   );
 }
 

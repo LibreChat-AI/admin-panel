@@ -109,3 +109,77 @@ export interface UnsafeConfigKey {
   path: string;
   key: string;
 }
+
+/** Control vocabulary for `FieldMeta.control` (WS2 maps kinds; WS3 adds one per control it ships). */
+export type ControlKind =
+  | ControlType
+  | 'textarea'
+  | 'secret'
+  | 'tristate'
+  | 'bool-or-list'
+  | 'variant'
+  | 'scalar-union'
+  | 'literal'
+  | 'multi-enum'
+  | 'ref-select'
+  | 'model-list';
+
+/** Display unit for numeric fields (WS2). */
+export type FieldUnit = 'MB' | 'ms' | 's' | 'px' | 'hours' | 'credits';
+
+/** Control width token (WS6 applies it through `FieldMeta.width`). */
+export type ControlWidth = 'S' | 'M' | 'L';
+
+/** A named group of sibling fields, optionally collapsed behind a toggle field (WS2). */
+export interface FieldMetaGroup {
+  key: string;
+  fields: string[];
+  toggle?: string;
+}
+
+/** Where a reference select gets its options (WS9 implements `useOptionSources`; WS3 consumes it). */
+export type OptionSource = 'endpoints' | `models:${string}` | 'mcpServers' | 'specGroups' | 'tools';
+
+/** Options of an `OptionSource` (WS9). */
+export interface OptionSourceResult {
+  options: SelectOption[];
+  isLoading: boolean;
+}
+
+/** Per-field metadata the schema cannot express (WS2 registry; area workstreams contribute entries). */
+export interface FieldMeta {
+  labelKey?: string;
+  descriptionKey?: string;
+  docsUrl?: string;
+  unit?: FieldUnit;
+  /** Effective value LibreChat applies when the field is unset and the schema has no default. */
+  runtimeDefault?: ConfigValue;
+  /** Enum value → display label. */
+  enumLabels?: Record<string, string>;
+  /** Child keys in display order. */
+  order?: string[];
+  groups?: FieldMetaGroup[];
+  control?: ControlKind;
+  optionSource?: OptionSource;
+  multiline?: boolean;
+  width?: ControlWidth;
+  secret?: boolean;
+  hidden?: boolean;
+  baseOnly?: boolean;
+  yamlOnly?: boolean;
+  permission?: boolean;
+  confirmChange?: boolean;
+}
+
+/**
+ * Field metadata keyed by index-free path. `[]` stands for any array element
+ * and `{}` for any record key; both `endpoints.custom[].name` and
+ * `endpoints.custom.[].name` are accepted (WS2).
+ */
+export type FieldMetaRegistry = Record<string, FieldMeta>;
+
+/** A node of the compiled metadata registry: one path segment (WS2). */
+export interface FieldMetaNode {
+  meta?: FieldMeta;
+  children: Map<string, FieldMetaNode>;
+}

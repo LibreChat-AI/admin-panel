@@ -1,5 +1,6 @@
 export type * from './access';
 export type * from './auth';
+export type * from './changes';
 export type * from './config';
 export type * from './config-ui';
 export type * from './fields';
@@ -12,3 +13,4 @@ export type * from './server';
 export type * from './shared';
 export type * from './theme';
 export type * from './user';
+export type * from './values';

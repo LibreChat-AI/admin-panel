@@ -11,9 +11,10 @@
 
 import type React from 'react';
 import type * as t from '@/types';
-import { CustomEndpointsRenderer, ProvidersRenderer } from './EndpointsRenderer';
 import { McpServersRenderer } from './McpServersRenderer';
+import { CustomEndpointsRenderer } from './endpoints';
 import { LangfuseRenderer } from './LangfuseRenderer';
+import { ProvidersRenderer } from './providers';
 
 export const SECTION_RENDERERS: Partial<Record<string, React.ComponentType<t.FieldRendererProps>>> =
   {

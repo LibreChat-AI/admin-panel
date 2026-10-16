@@ -1,6 +1,6 @@
 import { memo, useCallback, useRef } from 'react';
 import type * as t from '@/types';
-import { controlSortKey } from './utils';
+import { controlSortKey } from './controls';
 import { useLocalize } from '@/hooks';
 
 const EXPAND_SETTLE_MS = 280;

@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { PrincipalType } from 'librechat-data-provider';
 import { Icon, Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { getEnumOptions, getArrayItemType, toKVPair } from './utils';
+import { getEnumOptions, getArrayItemType } from './controls';
 import { KeyValueField } from './fields/KeyValueField';
 import { TrashButton } from '@/components/shared';
 import { getScopeTypeConfig } from '@/constants';
 import { formatJson, cn } from '@/utils';
+import { toKVPair } from './fields/kv';
 import { useLocalize } from '@/hooks';
 
 export function ProfileValueModal({

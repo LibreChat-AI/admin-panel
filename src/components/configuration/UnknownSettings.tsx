@@ -1,6 +1,6 @@
 import yaml from 'js-yaml';
 import type * as t from '@/types';
-import { getUnknownConfigEntries } from './utils';
+import { getUnknownConfigEntries } from '@/utils';
 import { useLocalize } from '@/hooks';
 
 function formatUnknownValue(value: t.ConfigValue): string {

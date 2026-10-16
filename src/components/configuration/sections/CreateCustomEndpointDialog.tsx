@@ -2,7 +2,7 @@
  * Dialog for creating a new custom endpoint entry.
  *
  * Uses the same grouped field layout as expanded custom endpoint cards —
- * both are driven by the `FIELD_GROUPS` config in EndpointsRenderer via
+ * both are driven by the `FIELD_GROUPS` config in endpoints/groups.ts via
  * the `renderFields` prop injected from the parent.
  */
 

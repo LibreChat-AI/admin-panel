@@ -71,6 +71,9 @@ export interface ConfigTabBarProps {
   children?: ReactNode;
 }
 
+/** Section key → whether the viewer can read and manage that section. */
+export type SectionPermissionMap = Record<string, Pick<ScopePermissions, 'canView' | 'canEdit'>>;
+
 export interface ConfigTabContentProps {
   sections: ConfigSectionConfig[];
   configValues: Record<string, ConfigValue> | null;
@@ -138,6 +141,30 @@ export interface ConfigRowProps {
   defaultHint?: string | null;
 }
 
+/**
+ * Layout slots of one settings row (WS6 owns the layout; WS3 fills the slots).
+ * Renders label | control, with chips next to the label, a hint under it, and
+ * actions under the description.
+ */
+export interface SettingsRowProps {
+  label: string;
+  /** Id of the control the label is for. */
+  htmlFor?: string;
+  description?: string;
+  learnMoreUrl?: string;
+  control: ReactNode;
+  /** State markers next to the label (configured dot today; provenance chips from WS4/WS6). */
+  chips?: ReactNode;
+  /** Secondary line under the label (e.g. the default-value hint). */
+  hint?: ReactNode;
+  /** Row actions under the description (reset, pending-reset notice, badges). */
+  actions?: ReactNode;
+  /** Inline validation message, rendered under the control (errors map from WS1). */
+  error?: ReactNode;
+  /** Renders the row at reduced opacity (today's unconfigured/pending-reset look; VS-1 removes it). */
+  dimmed?: boolean;
+}
+
 export interface ConfigSectionProps {
   sectionId?: string;
   title: string;
@@ -183,6 +210,20 @@ export interface DeleteProfileValueModalProps {
   saving: boolean;
   onConfirm: (scope: ConfigScope) => void;
   onCancel: () => void;
+}
+
+export interface HeaderActionsProps {
+  showImport: boolean;
+  importDisabled: boolean;
+  importTitle?: string;
+  onImportClick: () => void;
+  showReset: boolean;
+  resetDisabled: boolean;
+  resetTitle?: string;
+  onResetClick: () => void;
+  showScope: boolean;
+  scopeSelection: ScopeSelection;
+  onScopeClick: () => void;
 }
 
 export interface ResetBaseConfigDialogProps {
@@ -472,6 +513,17 @@ export interface ManagedNoticeProps {
   pendingRemoval: boolean;
   onRemoveOverride?: () => void;
 }
+
+/** A collapsible group of entry fields (custom endpoint cards, MCP server cards). */
+export interface FieldGroupDef {
+  labelKey: string;
+  fields: string[];
+  defaultExpanded: boolean;
+  children?: FieldGroupDef[];
+}
+
+/** One named provider (openAI, anthropic, …) on the AI Providers tab. */
+export type ProviderSectionProps = Omit<FieldRendererProps, 'fields'> & { field: SchemaField };
 
 export interface UnknownSettingsProps {
   /** Every schema field of the object (the full list, not a filtered subset). */

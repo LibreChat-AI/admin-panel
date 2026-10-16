@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import type * as t from '@/types';
-import { SingleFieldRenderer, FieldRenderer, renderInlineField } from './FieldRenderer';
+import { SingleFieldRenderer, FieldRenderer, renderInlineField } from '.';
 import { createField } from '@/test/fixtures';
 
 vi.mock('@/hooks/useLocalize', () => ({

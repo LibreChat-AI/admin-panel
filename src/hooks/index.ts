@@ -1,3 +1,4 @@
+export * from './config';
 export * from './useActiveSection';
 export * from './useAnnouncement';
 export * from './useCapabilities';
