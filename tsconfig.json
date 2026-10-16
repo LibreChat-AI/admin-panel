@@ -1,6 +1,6 @@
 {
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["scripts", "server.ts", "tools"],
+  "exclude": ["scripts", "server.ts", "lambda.ts", "tools"],
   "compilerOptions": {
     "target": "ES2022",
     "jsx": "react-jsx",
