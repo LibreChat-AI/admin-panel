@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { serializeKVPairs, deepSerializeKVPairs } from './format';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { serializeKVPairs, deepSerializeKVPairs, formatRelativeTime } from './format';
 
 describe('serializeKVPairs', () => {
   it('converts KV pairs to a record', () => {
@@ -141,5 +141,44 @@ describe('deepSerializeKVPairs', () => {
     expect(result.headers).toEqual({ Authorization: 'Bearer ${TOKEN}' });
     expect(result.addParams).toEqual({ stream: true, config: { key: 'value' } });
     expect(result.dropParams).toEqual(['stop', 'presence_penalty']);
+  });
+});
+
+describe('formatRelativeTime', () => {
+  const NOW = new Date('2026-06-15T12:00:00.000Z');
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns "just now" for under a minute', () => {
+    expect(formatRelativeTime(new Date(NOW.getTime() - 30 * 1000))).toBe('just now');
+  });
+
+  it('formats minutes', () => {
+    expect(formatRelativeTime(new Date(NOW.getTime() - 5 * 60 * 1000))).toBe('5m ago');
+  });
+
+  it('formats hours', () => {
+    expect(formatRelativeTime(new Date(NOW.getTime() - 3 * 60 * 60 * 1000))).toBe('3h ago');
+  });
+
+  it('formats days', () => {
+    expect(formatRelativeTime(new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000))).toBe('2d ago');
+  });
+
+  it('falls back to a locale date beyond 7 days', () => {
+    const eightDaysAgo = new Date(NOW.getTime() - 8 * 24 * 60 * 60 * 1000);
+    expect(formatRelativeTime(eightDaysAgo)).toBe(eightDaysAgo.toLocaleDateString());
+  });
+
+  it('accepts an ISO string as well as a Date', () => {
+    const fiveMinutesAgo = new Date(NOW.getTime() - 5 * 60 * 1000).toISOString();
+    expect(formatRelativeTime(fiveMinutesAgo)).toBe('5m ago');
   });
 });

@@ -13,7 +13,11 @@ export interface SidebarProps {
 export interface NavItem {
   labelKey: string;
   path: string;
-  icon: IconName;
+  /** One of click-ui's built-in icons. Ignored when `customIcon` is set. */
+  icon?: IconName;
+  /** A custom icon, for cases click-ui's built-in set has no good match for
+   *  (e.g. a coin/token glyph for Balance) — rendered in place of `icon`. */
+  customIcon?: ReactNode;
   capability?: string | string[];
 }
 
