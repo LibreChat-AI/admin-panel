@@ -16,8 +16,10 @@ import { Route as AppUsersRouteImport } from './routes/_app/users'
 import { Route as AppHelpRouteImport } from './routes/_app/help'
 import { Route as AppGrantsRouteImport } from './routes/_app/grants'
 import { Route as AppAccessRouteImport } from './routes/_app/access'
+import { Route as AppQuestionnairesIndexRouteImport } from './routes/_app/questionnaires/index'
 import { Route as AppConfigurationIndexRouteImport } from './routes/_app/configuration/index'
 import { Route as AuthOpenidCallbackRouteImport } from './routes/auth/openid/callback'
+import { Route as AppQuestionnairesQuestionnaireIdRouteImport } from './routes/_app/questionnaires/$questionnaireId'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -53,6 +55,11 @@ const AppAccessRoute = AppAccessRouteImport.update({
   path: '/access',
   getParentRoute: () => AppRoute,
 } as any)
+const AppQuestionnairesIndexRoute = AppQuestionnairesIndexRouteImport.update({
+  id: '/questionnaires/',
+  path: '/questionnaires/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppConfigurationIndexRoute = AppConfigurationIndexRouteImport.update({
   id: '/configuration/',
   path: '/configuration/',
@@ -63,6 +70,12 @@ const AuthOpenidCallbackRoute = AuthOpenidCallbackRouteImport.update({
   path: '/auth/openid/callback',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppQuestionnairesQuestionnaireIdRoute =
+  AppQuestionnairesQuestionnaireIdRouteImport.update({
+    id: '/questionnaires/$questionnaireId',
+    path: '/questionnaires/$questionnaireId',
+    getParentRoute: () => AppRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -71,8 +84,10 @@ export interface FileRoutesByFullPath {
   '/grants': typeof AppGrantsRoute
   '/help': typeof AppHelpRoute
   '/users': typeof AppUsersRoute
+  '/questionnaires/$questionnaireId': typeof AppQuestionnairesQuestionnaireIdRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/configuration/': typeof AppConfigurationIndexRoute
+  '/questionnaires/': typeof AppQuestionnairesIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -81,8 +96,10 @@ export interface FileRoutesByTo {
   '/help': typeof AppHelpRoute
   '/users': typeof AppUsersRoute
   '/': typeof AppIndexRoute
+  '/questionnaires/$questionnaireId': typeof AppQuestionnairesQuestionnaireIdRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/configuration': typeof AppConfigurationIndexRoute
+  '/questionnaires': typeof AppQuestionnairesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -93,8 +110,10 @@ export interface FileRoutesById {
   '/_app/help': typeof AppHelpRoute
   '/_app/users': typeof AppUsersRoute
   '/_app/': typeof AppIndexRoute
+  '/_app/questionnaires/$questionnaireId': typeof AppQuestionnairesQuestionnaireIdRoute
   '/auth/openid/callback': typeof AuthOpenidCallbackRoute
   '/_app/configuration/': typeof AppConfigurationIndexRoute
+  '/_app/questionnaires/': typeof AppQuestionnairesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -105,8 +124,10 @@ export interface FileRouteTypes {
     | '/grants'
     | '/help'
     | '/users'
+    | '/questionnaires/$questionnaireId'
     | '/auth/openid/callback'
     | '/configuration/'
+    | '/questionnaires/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -115,8 +136,10 @@ export interface FileRouteTypes {
     | '/help'
     | '/users'
     | '/'
+    | '/questionnaires/$questionnaireId'
     | '/auth/openid/callback'
     | '/configuration'
+    | '/questionnaires'
   id:
     | '__root__'
     | '/_app'
@@ -126,8 +149,10 @@ export interface FileRouteTypes {
     | '/_app/help'
     | '/_app/users'
     | '/_app/'
+    | '/_app/questionnaires/$questionnaireId'
     | '/auth/openid/callback'
     | '/_app/configuration/'
+    | '/_app/questionnaires/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -187,6 +212,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAccessRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/questionnaires/': {
+      id: '/_app/questionnaires/'
+      path: '/questionnaires'
+      fullPath: '/questionnaires/'
+      preLoaderRoute: typeof AppQuestionnairesIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/configuration/': {
       id: '/_app/configuration/'
       path: '/configuration'
@@ -201,6 +233,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthOpenidCallbackRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app/questionnaires/$questionnaireId': {
+      id: '/_app/questionnaires/$questionnaireId'
+      path: '/questionnaires/$questionnaireId'
+      fullPath: '/questionnaires/$questionnaireId'
+      preLoaderRoute: typeof AppQuestionnairesQuestionnaireIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -210,7 +249,9 @@ interface AppRouteChildren {
   AppHelpRoute: typeof AppHelpRoute
   AppUsersRoute: typeof AppUsersRoute
   AppIndexRoute: typeof AppIndexRoute
+  AppQuestionnairesQuestionnaireIdRoute: typeof AppQuestionnairesQuestionnaireIdRoute
   AppConfigurationIndexRoute: typeof AppConfigurationIndexRoute
+  AppQuestionnairesIndexRoute: typeof AppQuestionnairesIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -219,7 +260,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppHelpRoute: AppHelpRoute,
   AppUsersRoute: AppUsersRoute,
   AppIndexRoute: AppIndexRoute,
+  AppQuestionnairesQuestionnaireIdRoute: AppQuestionnairesQuestionnaireIdRoute,
   AppConfigurationIndexRoute: AppConfigurationIndexRoute,
+  AppQuestionnairesIndexRoute: AppQuestionnairesIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

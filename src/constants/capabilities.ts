@@ -20,6 +20,14 @@ export {
 export const READ_AUDIT_LOG_CAPABILITY = 'read:audit_log' as const;
 
 /**
+ * Same forward-compat shim as above, for the questionnaire admin API
+ * (`/api/admin/questionnaires`). Drop once the data-schemas pin includes them in
+ * `SystemCapabilities`.
+ */
+export const READ_QUESTIONNAIRES_CAPABILITY = 'read:questionnaires' as const;
+export const MANAGE_QUESTIONNAIRES_CAPABILITY = 'manage:questionnaires' as const;
+
+/**
  * Local override of the upstream `CAPABILITY_CATEGORIES` so the System
  * category surfaces `READ_AUDIT_LOG` in the grants editing UI even while the
  * dep is pinned to `data-schemas@0.0.52` (which predates the category entry).
@@ -32,11 +40,23 @@ export const READ_AUDIT_LOG_CAPABILITY = 'read:audit_log' as const;
  */
 export const CAPABILITY_CATEGORIES: typeof UPSTREAM_CAPABILITY_CATEGORIES =
   UPSTREAM_CAPABILITY_CATEGORIES.map((cat) => {
-    if (cat.key !== 'system') return cat;
     const caps = cat.capabilities as readonly string[];
-    if (caps.includes(READ_AUDIT_LOG_CAPABILITY)) return cat;
-    return {
-      ...cat,
-      capabilities: [...cat.capabilities, READ_AUDIT_LOG_CAPABILITY],
-    } as typeof cat;
+
+    if (cat.key === 'system') {
+      if (caps.includes(READ_AUDIT_LOG_CAPABILITY)) return cat;
+      return {
+        ...cat,
+        capabilities: [...cat.capabilities, READ_AUDIT_LOG_CAPABILITY],
+      } as typeof cat;
+    }
+
+    if (cat.key === 'content') {
+      const missing = [MANAGE_QUESTIONNAIRES_CAPABILITY, READ_QUESTIONNAIRES_CAPABILITY].filter(
+        (cap) => !caps.includes(cap),
+      );
+      if (missing.length === 0) return cat;
+      return { ...cat, capabilities: [...cat.capabilities, ...missing] } as typeof cat;
+    }
+
+    return cat;
   });
