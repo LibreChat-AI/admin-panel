@@ -14,6 +14,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
+    "test:lint-rules": "node --test tools/eslint-plugin-click-ui/tests/guardrails.test.mjs",
     "test:e2e:ui": "playwright test --ui",
     "sort-imports": "bun run scripts/sort-imports.ts",
     "lint": "eslint src/",

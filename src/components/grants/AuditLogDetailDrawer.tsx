@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
+import { Badge, Button, Icon } from '@clickhouse/click-ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Badge, Button, Icon, IconButton } from '@clickhouse/click-ui';
 import type { ReactElement } from 'react';
 import type * as t from '@/types';
 import {
@@ -13,7 +13,7 @@ import {
   capabilityLabel,
   formatTimestamp,
 } from './auditLogUtils';
-import { LoadingState } from '@/components/shared';
+import { CloseButton, DecorativeIcon, LoadingState } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -91,7 +91,7 @@ function CopyableMono({
       )}
     >
       <span>{value}</span>
-      <Icon name={copied ? 'check' : 'copy'} size="xs" />
+      <DecorativeIcon name={copied ? 'check' : 'copy'} size="xs" />
     </button>
   );
 }
@@ -238,14 +238,7 @@ export function AuditLogDetailDrawer({
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
               </span>
-              <IconButton
-                htmlType="button"
-                icon="cross"
-                type="ghost"
-                size="sm"
-                aria-label={localize('com_audit_detail_close')}
-                onClick={onClose}
-              />
+              <CloseButton label={localize('com_audit_detail_close')} onClick={onClose} />
             </header>
             <div className="flex flex-1 items-center justify-center px-4 py-8">
               <LoadingState />
@@ -286,14 +279,7 @@ export function AuditLogDetailDrawer({
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
               </span>
-              <IconButton
-                htmlType="button"
-                icon="cross"
-                type="ghost"
-                size="sm"
-                aria-label={localize('com_audit_detail_close')}
-                onClick={onClose}
-              />
+              <CloseButton label={localize('com_audit_detail_close')} onClick={onClose} />
             </header>
             <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
               <p className="text-sm text-(--cui-color-text-muted)">
@@ -344,14 +330,7 @@ export function AuditLogDetailDrawer({
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
               </span>
-              <IconButton
-                htmlType="button"
-                icon="cross"
-                type="ghost"
-                size="sm"
-                aria-label={localize('com_audit_detail_close')}
-                onClick={onClose}
-              />
+              <CloseButton label={localize('com_audit_detail_close')} onClick={onClose} />
             </header>
             <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
               <p className="text-sm text-(--cui-color-text-muted)">
@@ -419,14 +398,7 @@ export function AuditLogDetailDrawer({
                 {localize('com_audit_detail_title')}
               </span>
             </div>
-            <IconButton
-              htmlType="button"
-              icon="cross"
-              type="ghost"
-              size="sm"
-              aria-label={localize('com_audit_detail_close')}
-              onClick={onClose}
-            />
+            <CloseButton label={localize('com_audit_detail_close')} onClick={onClose} />
           </header>
 
           <div className="flex-1 overflow-y-auto">

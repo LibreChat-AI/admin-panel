@@ -1,24 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import type * as t from '@/types';
 import {
+  applyConfigEdit,
+  buildSavePayload,
+  normalizeForSave,
+  isConfigValueEqual,
+  mergeIndexedArrayEdits,
+} from './edits';
+import {
+  flattenObject,
+  getValueAtPath,
+  unflattenObject,
+  resolveFieldValue,
+  getUnknownConfigEntries,
+} from '@/utils';
+import {
   getControlType,
   getEnumOptions,
-  getArrayItemType,
-  splitUnionTypes,
-  partitionScopeResetPaths,
-  mergeIndexedArrayEdits,
-  buildSavePayload,
-  applyConfigEdit,
-  withLangfuseConfiguredPath,
-  normalizeForSave,
   findSchemaField,
-  hasPathOverlap,
-  resolveFieldValue,
-  isConfigValueEqual,
-  collectImportEntries,
-  getUnknownConfigEntries,
-} from './utils';
-import { flattenObject, getValueAtPath, unflattenObject } from '@/utils';
+  splitUnionTypes,
+  getArrayItemType,
+} from './controls';
+import { hasPathOverlap, withLangfuseConfiguredPath } from './counts';
+import { collectImportEntries } from './import';
 import { createField } from '@/test/fixtures';
 
 describe('getControlType', () => {
@@ -58,21 +62,18 @@ describe('getControlType', () => {
     expect(getControlType(createField({ key: 'headers', type: 'record' }))).toBe('record');
   });
 
-  it('maps union containing string and number to text (string is more general)', () => {
+  it('maps union(number | string) (coerced numbers) to number', () => {
     expect(getControlType(createField({ key: 'limit', type: 'union(number | string)' }))).toBe(
-      'text',
-    );
-  });
-
-  it('maps union containing only number (no string) to number', () => {
-    expect(getControlType(createField({ key: 'limit', type: 'union(number | boolean)' }))).toBe(
       'number',
     );
   });
 
-  it('maps union containing string (no number) to text', () => {
+  it('maps a union of different scalars to scalar-union', () => {
+    expect(getControlType(createField({ key: 'limit', type: 'union(number | boolean)' }))).toBe(
+      'scalar-union',
+    );
     expect(getControlType(createField({ key: 'val', type: 'union(string | boolean)' }))).toBe(
-      'text',
+      'scalar-union',
     );
   });
 
@@ -82,11 +83,11 @@ describe('getControlType', () => {
     ).toBe('toggle');
   });
 
-  it('falls back to record for unknown types', () => {
-    expect(getControlType(createField({ key: 'data', type: 'ZodAny' }))).toBe('record');
+  it('falls back to the YAML editor for unknown types', () => {
+    expect(getControlType(createField({ key: 'data', type: 'ZodAny' }))).toBe('code');
   });
 
-  it('maps wide union with primitives and complex types to record', () => {
+  it('maps wide union with primitives and complex types to the YAML editor', () => {
     expect(
       getControlType(
         createField({
@@ -94,7 +95,7 @@ describe('getControlType', () => {
           type: 'union(null | boolean | number | string | array<unknown> | record)',
         }),
       ),
-    ).toBe('record');
+    ).toBe('code');
   });
 
   it('maps union(boolean | object) with children to switch-object', () => {
@@ -393,6 +394,21 @@ describe('applyConfigEdit', () => {
     });
   });
 
+  it('keeps a switch turned on when one of its settings is edited', () => {
+    const on = applyConfigEdit({}, 'interface.schedules', true, {}, new Set(), new Set());
+    const result = applyConfigEdit(
+      on,
+      'interface.schedules.maxPerUser',
+      5,
+      {},
+      new Set(),
+      new Set(),
+    );
+    expect(result).toEqual({ 'interface.schedules': true, 'interface.schedules.maxPerUser': 5 });
+    const off = applyConfigEdit(result, 'interface.schedules', false, {}, new Set(), new Set());
+    expect(off).toEqual({ 'interface.schedules': false });
+  });
+
   it('drops stale indexed edits when a whole-array edit is queued', () => {
     const result = applyConfigEdit(
       { 'modelSpecs.list.0': { name: 'old' } },
@@ -404,44 +420,6 @@ describe('applyConfigEdit', () => {
     );
     expect(result).toEqual({
       'modelSpecs.list': [{ name: 'new' }],
-    });
-  });
-});
-
-describe('partitionScopeResetPaths', () => {
-  it('routes whole MCP entry resets to tombstones', () => {
-    expect(
-      partitionScopeResetPaths(
-        ['mcpServers.github', 'mcpServers.github.url', 'interface.modelSelect'],
-        new Set(['github']),
-      ),
-    ).toEqual({
-      resetPaths: ['mcpServers.github.url', 'interface.modelSelect'],
-      tombstonePaths: ['mcpServers.github'],
-    });
-  });
-
-  it('routes whole MCP entry resets to unsets when the entry is scope-local', () => {
-    expect(
-      partitionScopeResetPaths(
-        ['mcpServers.scopeOnly', 'mcpServers.inherited'],
-        new Set(['inherited']),
-      ),
-    ).toEqual({
-      resetPaths: ['mcpServers.scopeOnly'],
-      tombstonePaths: ['mcpServers.inherited'],
-    });
-  });
-
-  it('preserves input order within reset and tombstone groups', () => {
-    expect(
-      partitionScopeResetPaths(
-        ['mcpServers.alpha', 'registration.enabled', 'mcpServers.beta', 'endpoints.custom.0'],
-        new Set(['alpha', 'beta']),
-      ),
-    ).toEqual({
-      resetPaths: ['registration.enabled', 'endpoints.custom.0'],
-      tombstonePaths: ['mcpServers.alpha', 'mcpServers.beta'],
     });
   });
 });

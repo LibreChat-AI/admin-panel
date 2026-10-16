@@ -1,6 +1,7 @@
-import { Icon, Dropdown } from '@clickhouse/click-ui';
+import { Dropdown } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { useStripAriaExpanded, useLocalize } from '@/hooks';
+import { DecorativeIcon } from './DecorativeIcon';
 
 export function KebabMenu({ items, ariaLabel }: t.KebabMenuProps) {
   const localize = useLocalize();
@@ -12,10 +13,11 @@ export function KebabMenu({ items, ariaLabel }: t.KebabMenuProps) {
         <button
           ref={triggerRef}
           type="button"
+          aria-haspopup="menu"
           aria-label={ariaLabel ?? localize('com_ui_actions')}
           className="rounded p-1 text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover)"
         >
-          <Icon name="dots-horizontal" size="sm" />
+          <DecorativeIcon name="dots-horizontal" size="sm" />
         </button>
       </Dropdown.Trigger>
       <Dropdown.Content>
@@ -24,6 +26,8 @@ export function KebabMenu({ items, ariaLabel }: t.KebabMenuProps) {
             key={item.label}
             icon={item.icon}
             onClick={item.onClick}
+            disabled={item.disabled}
+            title={item.title}
             className={item.danger ? 'text-(--cui-color-accent-danger)' : undefined}
           >
             {item.label}

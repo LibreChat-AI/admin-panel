@@ -1,8 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import type * as t from '@/types';
 import { SingleFieldRenderer, FieldRenderer, renderInlineField } from '.';
+import type * as t from '@/types';
+import { ConfigValuesProvider } from '@/contexts/ConfigValuesContext';
+import { RowFilterContext } from '@/contexts/RowFilterContext';
 import { createField } from '@/test/fixtures';
+import { createPathIndex } from '@/utils';
 
 vi.mock('@/hooks/useLocalize', () => ({
   default: () => (key: string) => key,
@@ -122,6 +125,11 @@ vi.mock('@clickhouse/click-ui', () => ({
 }));
 
 const noop = () => {};
+const getSecretInput = () => {
+  const input = document.querySelector<HTMLInputElement>('input[type="password"]');
+  if (!input) throw new Error('no secret input');
+  return input;
+};
 const getValue = (_path: string, fallback: t.ConfigValue) => fallback;
 
 describe('SingleFieldRenderer', () => {
@@ -151,7 +159,9 @@ describe('SingleFieldRenderer', () => {
         onChange={noop}
       />,
     );
-    const items = screen.getAllByTestId('select-item');
+    const select = screen.getByRole('combobox');
+    expect(select).toHaveValue('dark');
+    const items = screen.getAllByRole('option');
     expect(items).toHaveLength(3);
     expect(items[0]).toHaveTextContent('Dark');
     expect(items[1]).toHaveTextContent('Light');
@@ -201,6 +211,29 @@ describe('SingleFieldRenderer', () => {
     expect(screen.getByDisplayValue('test.org')).toBeInTheDocument();
   });
 
+  it('keeps earlier pending removals when the last item of a librechat.yaml list is removed', () => {
+    const field = createField({ key: 'voices', type: 'array<string>', isArray: true });
+    const onChange = vi.fn();
+    const onDiscardField = vi.fn();
+    render(
+      <SingleFieldRenderer
+        field={field}
+        value={['shimmer']}
+        path="speech.voices"
+        getValue={getValue}
+        onChange={onChange}
+        onDiscardField={onDiscardField}
+        editedValues={{ 'speech.voices': ['shimmer'] }}
+        configuredPaths={new Set(['speech.voices'])}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'com_ui_delete shimmer' }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onDiscardField).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('shimmer')).toBeInTheDocument();
+    expect(screen.getByText('com_config_ctl_clear_unavailable')).toBeInTheDocument();
+  });
+
   it('renders key-value pairs for record fields', () => {
     const field = createField({ key: 'headers', type: 'record' });
     render(
@@ -214,6 +247,51 @@ describe('SingleFieldRenderer', () => {
     );
     expect(screen.getByDisplayValue('Authorization')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Bearer token')).toBeInTheDocument();
+  });
+});
+
+describe('FieldRenderer under the tab filter', () => {
+  const fields = [
+    createField({ key: 'title', type: 'string', path: 'interface.title' }),
+    createField({
+      key: 'privacyPolicy',
+      type: 'object',
+      isObject: true,
+      path: 'interface.privacyPolicy',
+      children: [
+        createField({
+          key: 'externalUrl',
+          type: 'string',
+          path: 'interface.privacyPolicy.externalUrl',
+        }),
+        createField({ key: 'label', type: 'string', path: 'interface.privacyPolicy.label' }),
+      ],
+    }),
+  ];
+  const renderFiltered = (paths: string[]) =>
+    render(
+      <RowFilterContext.Provider value={createPathIndex(paths)}>
+        <FieldRenderer
+          fields={fields}
+          parentValue={{}}
+          parentPath="interface"
+          getValue={getValue}
+          onChange={noop}
+        />
+      </RowFilterContext.Provider>,
+    );
+
+  it('shows only matching rows, opening the group that holds one', () => {
+    renderFiltered(['interface.privacyPolicy.externalUrl']);
+    expect(document.getElementById('interface-title')).toBeNull();
+    expect(document.getElementById('interface-privacyPolicy-externalUrl')).not.toBeNull();
+    expect(document.getElementById('interface-privacyPolicy-label')).toBeNull();
+  });
+
+  it('shows every row of a group whose own label matched', () => {
+    renderFiltered(['interface.privacyPolicy']);
+    expect(document.getElementById('interface-privacyPolicy-externalUrl')).not.toBeNull();
+    expect(document.getElementById('interface-privacyPolicy-label')).not.toBeNull();
   });
 });
 
@@ -334,7 +412,7 @@ describe('schema evolution: new fields render dynamically', () => {
         onChange={noop}
       />,
     );
-    const items = screen.getAllByTestId('select-item');
+    const items = screen.getAllByRole('option');
     expect(items).toHaveLength(3);
     expect(items[0]).toHaveTextContent('Fast');
     expect(items[1]).toHaveTextContent('Balanced');
@@ -460,7 +538,7 @@ describe('masked secret fields', () => {
         onChange={noop}
       />,
     );
-    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(getSecretInput()).not.toBeDisabled();
     expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
 
@@ -468,7 +546,7 @@ describe('masked secret fields', () => {
     const onChange = vi.fn();
     renderMasked(onChange);
     fireEvent.click(screen.getByText('com_config_secret_replace'));
-    const input = screen.getByRole('textbox');
+    const input = getSecretInput();
     expect(input).not.toBeDisabled();
     expect(input).toHaveValue('');
     fireEvent.change(input, { target: { value: 'brand-new-secret' } });
@@ -491,7 +569,7 @@ describe('masked secret fields', () => {
   it('shows the normal input while a reset is pending', () => {
     renderMasked(noop, { pendingResets: new Set(['ocr.apiKey']) });
     expect(screen.queryByDisplayValue('sk-mist...4321')).not.toBeInTheDocument();
-    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(getSecretInput()).not.toBeDisabled();
   });
 
   it('keeps the reset affordance for a masked db-overridden secret', () => {
@@ -506,16 +584,17 @@ describe('masked secret fields', () => {
     expect(onResetField).toHaveBeenCalledWith('ocr.apiKey');
   });
 
-  it('hides the replace button when the field is disabled', () => {
+  it('shows the masked value as text, with no replace button, when the field is disabled', () => {
     renderMasked(noop, { disabled: true });
-    expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
+    expect(screen.getByText('sk-mist...4321')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
 
   it('keeps a cleared replacement visible after remount instead of showing the stale mask', () => {
     renderMasked(noop, { editedValues: { 'ocr.apiKey': '' } });
     expect(screen.queryByDisplayValue('sk-mist...4321')).not.toBeInTheDocument();
-    const input = screen.getByRole('textbox');
+    const input = getSecretInput();
     expect(input).not.toBeDisabled();
     expect(input).toHaveValue('');
   });
@@ -529,7 +608,7 @@ describe('masked secret fields', () => {
   it('an untyped Replace click does not survive a bumped editSessionId', () => {
     const { rerender } = renderMasked(noop, { editSessionId: 0 });
     fireEvent.click(screen.getByText('com_config_secret_replace'));
-    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(getSecretInput()).not.toBeDisabled();
 
     rerender(
       <FieldRenderer
@@ -576,7 +655,7 @@ describe('renderInlineField masked secrets (collection entries)', () => {
         {renderInlineField(apiKeyField, { name: 'first' }, 'endpoints.custom.0', vi.fn(), localize)}
       </>,
     );
-    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(getSecretInput()).not.toBeDisabled();
     expect(screen.queryByText('com_config_secret_replace')).not.toBeInTheDocument();
   });
 
@@ -628,7 +707,7 @@ describe('renderInlineField masked secrets (collection entries)', () => {
       </>,
     );
     expect(screen.queryByDisplayValue('sk-mist...4321')).not.toBeInTheDocument();
-    const input = screen.getByRole('textbox');
+    const input = getSecretInput();
     expect(input).not.toBeDisabled();
     expect(input).toHaveValue('');
   });
@@ -651,7 +730,7 @@ describe('renderInlineField masked secrets (collection entries)', () => {
       </>,
     );
     fireEvent.click(screen.getByText('com_config_secret_replace'));
-    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(getSecretInput()).not.toBeDisabled();
 
     rerender(
       <>
@@ -691,9 +770,9 @@ describe('renderInlineField masked secrets (collection entries)', () => {
         )}
       </>,
     );
-    fireEvent.click(screen.getByText('com_config_field_connection'));
+    fireEvent.click(screen.getByText('connection'));
     fireEvent.click(screen.getByText('com_config_secret_replace'));
-    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(getSecretInput()).not.toBeDisabled();
 
     rerender(
       <>
@@ -710,9 +789,94 @@ describe('renderInlineField masked secrets (collection entries)', () => {
         )}
       </>,
     );
-    fireEvent.click(screen.getByText('com_config_field_connection'));
+    fireEvent.click(screen.getByText('connection'));
 
     expect(screen.getByDisplayValue('sk-mist...4321')).toBeDisabled();
     expect(screen.getByText('com_config_secret_replace')).toBeInTheDocument();
+  });
+});
+
+describe('renderInlineField nested lists from the layer beneath', () => {
+  const definitions = createField({
+    key: 'paramDefinitions',
+    path: 'endpoints.custom.[].customParams.paramDefinitions',
+    type: 'array<object>',
+    isArray: true,
+    isOptional: true,
+    children: [
+      createField({ key: 'key', path: 'endpoints.custom.[].customParams.paramDefinitions.[].key' }),
+    ],
+  });
+  const yamlDefinition = { key: 'useResponsesApi', type: 'boolean' };
+  const values: t.ConfigValuesData = {
+    configValues: {
+      endpoints: {
+        custom: [{ name: 'Foundry', customParams: { paramDefinitions: [yamlDefinition] } }],
+      },
+    },
+    editedValues: {},
+    configuredPaths: new Set(['endpoints.custom.0.customParams.paramDefinitions']),
+    overridePaths: new Set(),
+    pendingResets: new Set(),
+  };
+
+  it('offers no Delete for a librechat.yaml parameter definition, only for one added here (D3)', () => {
+    render(
+      <ConfigValuesProvider value={values}>
+        {renderInlineField(
+          definitions,
+          { paramDefinitions: [yamlDefinition, { key: 'mine' }] },
+          'endpoints.custom.0.customParams',
+          vi.fn(),
+          (key: string) => key,
+        )}
+      </ConfigValuesProvider>,
+    );
+    expect(screen.queryByRole('button', { name: 'com_ui_delete useResponsesApi' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'com_ui_delete mine' })).toBeInTheDocument();
+  });
+});
+
+describe('renderInlineField required values from the layer beneath', () => {
+  const baseURL = createField({
+    key: 'baseURL',
+    path: 'endpoints.custom.[].baseURL',
+    type: 'string',
+    isOptional: false,
+  });
+  const entry = { name: 'Moonshot', baseURL: 'https://api.moonshot.ai/v1' };
+  const values: t.ConfigValuesData = {
+    configValues: { endpoints: { custom: [entry] } },
+    editedValues: {},
+    configuredPaths: new Set(['endpoints.custom.0.baseURL']),
+    overridePaths: new Set(),
+    pendingResets: new Set(),
+  };
+
+  it.each([
+    ['cleared', ''],
+    ['set to spaces', '   '],
+  ])('stages nothing when a librechat.yaml-only value is %s (D3)', (_case, typed) => {
+    const onChange = vi.fn();
+    render(
+      <ConfigValuesProvider value={values}>
+        {renderInlineField(
+          baseURL,
+          entry,
+          'endpoints.custom.0',
+          onChange,
+          (key: string) => key,
+          undefined,
+          undefined,
+          true,
+        )}
+      </ConfigValuesProvider>,
+    );
+    const input = screen.getByDisplayValue('https://api.moonshot.ai/v1');
+    fireEvent.change(input, { target: { value: typed } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByText('com_config_ctl_clear_unavailable')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('https://api.moonshot.ai/v1')).toBeInTheDocument();
   });
 });

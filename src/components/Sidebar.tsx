@@ -3,6 +3,7 @@ import { Icon, Dropdown } from '@clickhouse/click-ui';
 import { Link, useRouter } from '@tanstack/react-router';
 import type * as t from '@/types';
 import { useStripAriaExpanded, useCapabilities, useLocalize } from '@/hooks';
+import { DecorativeIcon } from '@/components/shared';
 import libreChatLogo from '@/assets/librechat.svg';
 import { SettingsDialog } from './SettingsDialog';
 import { SystemCapabilities } from '@/constants';
@@ -88,7 +89,11 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
       >
         <div className="flex h-14 shrink-0 items-center px-2">
           <div className="flex items-center gap-2.5 overflow-hidden px-1.5">
-            <img src={libreChatLogo} alt={localize('com_a11y_logo_alt')} className="h-6 w-6 shrink-0" />
+            <img
+              src={libreChatLogo}
+              alt={localize('com_a11y_logo_alt')}
+              className="h-6 w-6 shrink-0"
+            />
             <span className="truncate text-sm font-semibold text-(--cui-color-text-default)">
               {localize('com_auth_title')}
             </span>
@@ -188,7 +193,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
           title={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
           className="flex w-full shrink-0 cursor-pointer items-center justify-center border-t border-(--cui-color-stroke-default) bg-transparent py-3 text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)"
         >
-          <Icon name={collapsed ? 'slide-in' : 'slide-out'} size="sm" />
+          <DecorativeIcon name={collapsed ? 'slide-in' : 'slide-out'} size="sm" />
         </button>
       </aside>
 

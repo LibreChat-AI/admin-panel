@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Icon } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { CreateCustomEndpointDialog } from '../CreateCustomEndpointDialog';
 import { ArrayObjectField } from '../../fields/ArrayObjectField';
 import { renderParamDefinitionFields } from './ParamDefinitions';
+import { useLocalize, useLowerEntryKeys } from '@/hooks';
 import { GroupedFieldRenderer } from './GroupedFields';
-import { useLocalize } from '@/hooks';
+import { DecorativeIcon } from '@/components/shared';
+import { isConfigRecord } from '@/utils';
 
 /** Collection render overrides for custom endpoint nested fields. */
 const COLLECTION_RENDER_OVERRIDES: Record<string, t.CollectionRenderFields> = {
@@ -18,7 +19,17 @@ const COLLECTION_RENDER_OVERRIDES: Record<string, t.CollectionRenderFields> = {
  * Matches the `CollectionRenderFields` signature so it can be injected
  * into `ArrayObjectField` and `ObjectEntryCard`.
  */
-function makeGroupedEndpointFields(disabled?: boolean): t.CollectionRenderFields {
+const LOCKED_NAME: ReadonlySet<string> = new Set(['name']);
+
+/**
+ * `lockedNames`: endpoints the layer beneath defines (D1), whose name is
+ * shown read-only; a name two entries share is left editable so the
+ * duplicate can be fixed.
+ */
+function makeGroupedEndpointFields(
+  disabled: boolean | undefined,
+  lockedNames: ReadonlySet<string>,
+): t.CollectionRenderFields {
   return (fields, parentValue, parentPath, onChange, _addFieldTriggerRef, editSessionId) => (
     <GroupedFieldRenderer
       groupKey="custom"
@@ -29,33 +40,67 @@ function makeGroupedEndpointFields(disabled?: boolean): t.CollectionRenderFields
       disabled={disabled}
       collectionRenderOverrides={COLLECTION_RENDER_OVERRIDES}
       editSessionId={editSessionId}
+      lockedKeys={
+        isConfigRecord(parentValue) && lockedNames.has(String(parentValue.name))
+          ? LOCKED_NAME
+          : undefined
+      }
     />
   );
+}
+
+const NAME_SEPARATOR = '\u0000';
+
+/** A draft in the create dialog is a new entry: nothing in it is locked, so a taken name can be corrected. */
+const NO_LOCKED_NAMES: ReadonlySet<string> = new Set();
+
+/** Names the layer beneath defines that exactly one current entry carries, joined (a stable memo key). */
+function uniqueLowerNames(items: t.ConfigValue[], lowerNames: ReadonlySet<string>): string {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    if (!isConfigRecord(item) || typeof item.name !== 'string') continue;
+    counts.set(item.name, (counts.get(item.name) ?? 0) + 1);
+  }
+  return [...lowerNames].filter((name) => counts.get(name) === 1).join(NAME_SEPARATOR);
 }
 
 export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
   const { fields, parentPath, parentValue, getValue, onChange, disabled, editSessionId } = props;
   const localize = useLocalize();
   const [createOpen, setCreateOpen] = useState(false);
-  const renderGroupedEndpointFields = useMemo(
-    () => makeGroupedEndpointFields(disabled),
-    [disabled],
-  );
-
+  const lowerNames = useLowerEntryKeys(`${parentPath}.custom`, 'name');
   const customField = fields.find((f) => f.key === 'custom');
-  if (!customField) return null;
-
-  const path = `${parentPath}.${customField.key}`;
+  const path = `${parentPath}.custom`;
   const parentObj =
     parentValue && typeof parentValue === 'object' && !Array.isArray(parentValue)
       ? (parentValue as Record<string, t.ConfigValue>)
       : {};
-  const value = getValue(path, parentObj[customField.key] ?? []);
+  const value = getValue(path, parentObj.custom ?? []);
   const items = Array.isArray(value) ? value : [];
+  const lockedNames = uniqueLowerNames(items, lowerNames);
+  const renderGroupedEndpointFields = useMemo(
+    () =>
+      makeGroupedEndpointFields(
+        disabled,
+        lockedNames ? new Set(lockedNames.split(NAME_SEPARATOR)) : NO_LOCKED_NAMES,
+      ),
+    [disabled, lockedNames],
+  );
+  const renderDraftFields = useMemo(
+    () => makeGroupedEndpointFields(disabled, NO_LOCKED_NAMES),
+    [disabled],
+  );
 
-  const handleCreate = (entry: Record<string, t.ConfigValue>) => {
+  if (!customField) return null;
+
+  const handleCreate = (entry: t.ConfigRecord) => {
     onChange(path, [...items, entry]);
   };
+  const existingNames = new Set(
+    items.flatMap((item) =>
+      isConfigRecord(item) && typeof item.name === 'string' ? [item.name.trim()] : [],
+    ),
+  );
 
   const isEmpty = items.length === 0;
 
@@ -64,7 +109,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
       {!disabled && (
         <div className="flex items-center gap-3 py-2">
           <button type="button" onClick={() => setCreateOpen(true)} className="config-add-btn">
-            <Icon name="plus" size="sm" />
+            <DecorativeIcon name="plus" size="sm" />
             <span>{localize('com_config_create_endpoint')}</span>
           </button>
         </div>
@@ -76,6 +121,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
       ) : (
         <ArrayObjectField
           id={`${path.replace(/\./g, '-')}`}
+          path={path}
           value={value}
           fields={customField.children ?? []}
           onChange={(v) => onChange(path, v)}
@@ -84,6 +130,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
           hideAddButton
           renderFields={renderGroupedEndpointFields}
           entryIdPrefix={`section-${path.split('.')[0]}-custom`}
+          isEntryLocked={(item) => isConfigRecord(item) && lowerNames.has(String(item.name))}
           editSessionId={editSessionId}
         />
       )}
@@ -92,7 +139,8 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
         onClose={() => setCreateOpen(false)}
         onSave={handleCreate}
         fields={customField.children ?? []}
-        renderFields={renderGroupedEndpointFields}
+        existingNames={existingNames}
+        renderFields={renderDraftFields}
       />
     </div>
   );

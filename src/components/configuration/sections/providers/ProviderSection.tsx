@@ -1,10 +1,13 @@
-import { MultiAccordion } from '@clickhouse/click-ui';
+import { useContext } from 'react';
 import type * as t from '@/types';
+import { RowFilterContext } from '@/contexts/RowFilterContext';
 import { countConfigured, hasDescendant } from '../../counts';
 import { FieldRenderer, NestedGroup } from '../../renderer';
 import { UnknownSettings } from '../../UnknownSettings';
+import { ConfigSection } from '../../ConfigSection';
+import { InfoBanner } from '../../InfoBanner';
+import { isConfigRecord } from '@/utils';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 /** Shown at the top of every named-provider section, in this order. */
 const PRIORITY_ORDER = ['disabled', 'apiKey', 'baseURL', 'models', 'name'] as const;
@@ -19,7 +22,6 @@ export function ProviderSection({
   onDiscardField,
   editedValues,
   disabled,
-  profileMap,
   permissions,
   configuredPaths,
   dbOverridePaths,
@@ -31,11 +33,11 @@ export function ProviderSection({
   previewScope,
   previewChangedPaths,
   resolvedValues,
-  onProfileChange,
   showChangedOnly,
   editSessionId,
 }: t.ProviderSectionProps) {
   const localize = useLocalize();
+  const rowFilter = useContext(RowFilterContext);
 
   const path = `${parentPath}.${field.key}`;
   const children = field.children ?? [];
@@ -63,6 +65,9 @@ export function ProviderSection({
   }, 0);
 
   const label = localize(`com_config_field_${field.key}`);
+  /** D11: while `endpoints.all` exists, LibreChat reads title settings only from it. */
+  const hasGlobalBlock =
+    field.key !== 'all' && isConfigRecord(getValue(`${parentPath}.all`, parentObj.all));
 
   const rendererProps: Omit<t.FieldRendererProps, 'fields'> = {
     parentValue: providerValue,
@@ -73,7 +78,6 @@ export function ProviderSection({
     onDiscardField,
     editedValues,
     disabled,
-    profileMap,
     permissions,
     configuredPaths,
     dbOverridePaths,
@@ -85,29 +89,23 @@ export function ProviderSection({
     previewScope,
     previewChangedPaths,
     resolvedValues,
-    onProfileChange,
     showChangedOnly,
     editSessionId,
   };
 
-  const title = (
-    <span className="flex items-center gap-2">
-      {label}
-      {total > 0 && (
-        <span
-          className={cn(
-            'config-count-badge',
-            configured > 0 ? 'config-count-badge-active' : 'config-count-badge-muted',
-          )}
-        >
-          {configured}/{total}
-        </span>
-      )}
-    </span>
-  );
-
   return (
-    <MultiAccordion.Item id={`section-${path}`} value={path} title={title}>
+    <ConfigSection
+      sectionId={path}
+      title={label}
+      configuredCount={configured}
+      totalCount={total}
+      showConfiguredOnly={showConfiguredOnly}
+    >
+      {hasGlobalBlock && (
+        <div className="mb-3">
+          <InfoBanner text={localize('com_config_global_titles_banner')} dismissible={false} />
+        </div>
+      )}
       {hasPrioritySplit ? (
         <>
           <FieldRenderer fields={priorityChildren} {...rendererProps} />
@@ -118,6 +116,7 @@ export function ProviderSection({
               configuredCount={restConfigured}
               depth={2}
               disabled={rendererProps.disabled}
+              revealPaths={restChildren.map((child) => `${path}.${child.key}`)}
             >
               <FieldRenderer fields={restChildren} {...rendererProps} />
             </NestedGroup>
@@ -126,7 +125,7 @@ export function ProviderSection({
       ) : (
         <FieldRenderer fields={children} {...rendererProps} />
       )}
-      <UnknownSettings fields={children} value={providerValue} path={path} />
-    </MultiAccordion.Item>
+      {!rowFilter && <UnknownSettings fields={children} value={providerValue} path={path} />}
+    </ConfigSection>
   );
 }

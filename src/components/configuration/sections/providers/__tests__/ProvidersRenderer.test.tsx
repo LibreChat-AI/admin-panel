@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type * as t from '@/types';
 import { ProvidersRenderer } from '../ProvidersRenderer';
 import { createField } from '@/test/fixtures';
@@ -38,6 +38,9 @@ vi.mock('@clickhouse/click-ui', () => ({
 
 const noop = () => {};
 const getValue = (_path: string, fallback: t.ConfigValue) => fallback;
+/** Provider sections are collapsible cards that start closed when nothing is configured. */
+const expandOpenAI = () =>
+  fireEvent.click(screen.getByRole('button', { name: /com_config_field_openAI/ }));
 
 describe('ProvidersRenderer', () => {
   const providerFields: t.SchemaField[] = [
@@ -57,6 +60,7 @@ describe('ProvidersRenderer', () => {
         onChange={noop}
       />,
     );
+    expandOpenAI();
     expect(screen.getByDisplayValue('sk-test...1234')).toBeDisabled();
   });
 
@@ -71,8 +75,9 @@ describe('ProvidersRenderer', () => {
         pendingResets={new Set(['endpoints.openAI.apiKey'])}
       />,
     );
+    expandOpenAI();
     expect(screen.queryByDisplayValue('sk-test...1234')).not.toBeInTheDocument();
-    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(screen.getByLabelText('apiKey')).not.toBeDisabled();
   });
 
   it('forwards editedValues so a cleared-but-queued provider secret stays visible after remount', () => {
@@ -87,7 +92,8 @@ describe('ProvidersRenderer', () => {
         editedValues={{ 'endpoints.openAI.apiKey': '' }}
       />,
     );
+    expandOpenAI();
     expect(screen.queryByDisplayValue('sk-test...1234')).not.toBeInTheDocument();
-    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(screen.getByLabelText('apiKey')).not.toBeDisabled();
   });
 });

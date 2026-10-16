@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { findUnsafeKeys, isUnsafeConfigKey } from './keys';
+import {
+  findBlankText,
+  findUnsafeKeys,
+  isUnsafeConfigKey,
+  isWhitespaceSignificantPath,
+} from './keys';
 
 describe('isUnsafeConfigKey', () => {
   it('flags keys with a dot or a leading $', () => {
@@ -44,5 +49,43 @@ describe('findUnsafeKeys', () => {
   it('ignores dots in values and returns nothing for safe input', () => {
     expect(findUnsafeKeys({ url: 'https://a.b.c', models: ['gpt-4.1'] }, 'x')).toEqual([]);
     expect(findUnsafeKeys('a.b', 'x')).toEqual([]);
+  });
+});
+
+describe('findBlankText', () => {
+  it('finds whitespace-only strings and keys, not empty or non-blank text', () => {
+    expect(
+      findBlankText(
+        { a: '   ', b: '', c: ' x ', headers: { '  ': 'v', ok: '\t' }, list: ['ok', ' '] },
+        'root',
+      ),
+    ).toEqual([
+      { path: 'root.a' },
+      { path: 'root.headers', key: '  ' },
+      { path: 'root.headers.ok' },
+      { path: 'root.list.1' },
+    ]);
+  });
+
+  it('finds blank keys and values in key/value pairs', () => {
+    expect(
+      findBlankText(
+        [
+          { key: ' ', value: 'v' },
+          { key: 'X', value: '  ' },
+        ],
+        'h',
+      ),
+    ).toEqual([{ path: 'h', key: ' ' }, { path: 'h.X' }]);
+  });
+
+  it('lets stop sequences keep their whitespace', () => {
+    expect(findBlankText({ addParams: { stop: ['\n', '\n\n'] } }, 'endpoints.custom.0')).toEqual(
+      [],
+    );
+    expect(findBlankText({ stop: '\n' }, 'x.addParams')).toEqual([]);
+    expect(isWhitespaceSignificantPath('modelSpecs.list.2.preset.stop.0')).toBe(true);
+    expect(isWhitespaceSignificantPath('modelSpecs.list.2.preset.stop')).toBe(true);
+    expect(isWhitespaceSignificantPath('endpoints.openAI.titleModel')).toBe(false);
   });
 });

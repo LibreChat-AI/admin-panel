@@ -1,6 +1,6 @@
 import yaml from 'js-yaml';
 import type * as t from '@/types';
-import { getUnknownConfigEntries } from '@/utils';
+import { getUnknownConfigEntries, maskSecretValues } from '@/utils';
 import { useLocalize } from '@/hooks';
 
 function formatUnknownValue(value: t.ConfigValue): string {
@@ -34,7 +34,7 @@ export function UnknownSettings({ fields, value, path }: t.UnknownSettingsProps)
       </div>
       <dl className="m-0 flex flex-col gap-1.5">
         {entries.map(([key, entryValue]) => {
-          const formatted = formatUnknownValue(entryValue);
+          const formatted = formatUnknownValue(maskSecretValues(entryValue, key));
           return (
             <div key={key} className="flex flex-col gap-0.5 sm:flex-row sm:gap-4">
               <dt className="shrink-0 font-mono text-xs break-all text-(--cui-color-text-default) sm:w-64">

@@ -1,7 +1,14 @@
 import type * as t from '@/types';
 import { SECRET_CONFIG_KEYS } from '@/constants';
+import { getValueAtPath } from './format';
 
 const PREVIEW_KEY_RE = /^(.+)Preview$/;
+const SECRET_LIKE_KEY_RE = /(api_?key|secret_?key|secret)$/i;
+
+/** Whether a key names a secret: a known one (`apiKey`, `client_secret`) or one that reads like it (`tavilyApiKey`). */
+export function isSecretKey(key: string): boolean {
+  return SECRET_CONFIG_KEYS.has(key) || SECRET_LIKE_KEY_RE.test(key);
+}
 const ARRAY_INDEX_SEGMENT_RE = /\.\d+(?=\.|$)/g;
 
 function secretKeyForPreviewKey(key: string): string | null {
@@ -35,6 +42,19 @@ export function getSecretPreviewValue(parentValue: t.ConfigValue, key: string): 
   }
   const sibling = (parentValue as Record<string, t.ConfigValue>)[toSecretPreviewKey(key)];
   return typeof sibling === 'string' && sibling !== '' ? sibling : undefined;
+}
+
+/**
+ * The value at `path`, else the masked preview of a secret the admin API
+ * redacts there (`webSearch.tavilyApiKey` → `tavilyApiKeyPreview`), so a
+ * stored secret reads as set: removing it is a real change.
+ */
+export function valueOrSecretPreview(root: t.ConfigValue, path: string): t.ConfigValue {
+  const value = getValueAtPath(root, path);
+  if (value !== undefined) return value;
+  const dot = path.lastIndexOf('.');
+  const parent = dot === -1 ? root : getValueAtPath(root, path.slice(0, dot));
+  return getSecretPreviewValue(parent, path.slice(dot + 1));
 }
 
 /**
@@ -109,6 +129,13 @@ export function filterSecretPreviewFields(fields: t.SchemaField[]): t.SchemaFiel
 
 /** Shown instead of a secret value in read-only views, so it never reaches the DOM. */
 export const MASKED_SECRET = '••••••••';
+
+const ENV_REFERENCE_RE = /^\$\{[A-Za-z0-9_]+\}$/;
+
+/** An environment reference such as `${OPENAI_API_KEY}` is not a secret and may be shown. */
+export function isEnvReference(value: t.ConfigValue): boolean {
+  return typeof value === 'string' && ENV_REFERENCE_RE.test(value);
+}
 
 /**
  * Copy of `value` with every non-empty string stored under a secret key

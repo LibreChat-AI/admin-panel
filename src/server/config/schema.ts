@@ -4,6 +4,9 @@ import { createServerFn } from '@tanstack/react-start';
 import type * as t from '@/types';
 import {
   unwrapSchema,
+  innerSchemaOf,
+  isUnionSchema,
+  isConfigRecord,
   ZOD_WRAPPER_TYPES,
   resolveIntersection,
   filterSecretPreviewFields,
@@ -23,294 +26,437 @@ export function applyLangfuseSchemaVisibility(
   return tree;
 }
 
-/** Detects union(boolean | object{...}) — a feature toggle pattern where
- *  `false` disables and an object gives fine-grained control.
- *  Handles boolean variants wrapped in ZodOptional/ZodDefault. */
-function hasBooleanObjectUnion(schema: t.ZodSchemaLike): boolean {
-  if (!schema?._def || schema._def.typeName !== 'ZodUnion') return false;
-  const options = schema._def.options || [];
-  if (options.length < 2) return false;
-  let hasBool = false;
-  let hasObj = false;
-  for (const opt of options) {
-    const unwrapped = unwrapSchema(opt);
-    if (!hasBool && unwrapped?._def?.typeName === 'ZodBoolean') hasBool = true;
-    if (!hasObj && unwrapped && typeof unwrapped === 'object' && 'shape' in unwrapped)
-      hasObj = true;
-    if (hasBool && hasObj) return true;
-  }
-  return false;
+/** A Zod node with its wrappers removed, and what the wrappers said about it. */
+interface UnwrappedNode {
+  schema: t.ZodSchemaLike;
+  isOptional: boolean;
+  isNullable: boolean;
+  description?: string;
 }
 
-function isUnionOfObjects(schema: t.ZodSchemaLike): boolean {
-  if (!schema?._def || schema._def.typeName !== 'ZodUnion') return false;
-  const options = schema._def.options || [];
-  return (
-    options.length > 0 &&
-    options.every((opt: t.ZodSchemaLike) => opt && typeof opt === 'object' && 'shape' in opt)
-  );
+/** The parts of a field before unset properties and `false` flags are dropped. */
+interface FieldParts {
+  path: string;
+  key: string;
+  type: string;
+  isOptional: boolean;
+  isNullable?: boolean;
+  isArray?: boolean;
+  isObject?: boolean;
+  description?: string;
+  children?: t.SchemaField[];
+  depth: number;
+  recordValueType?: 'primitive' | 'complex';
+  recordValueAllowsPrimitive?: boolean;
+  recordValueKVTypes?: t.KVValueType[];
+  itemType?: string;
+  variants?: t.SchemaVariant[];
+  discriminator?: string;
+  constraints?: t.FieldConstraints;
 }
 
-function hasUnionObjectVariant(schema: t.ZodSchemaLike): boolean {
-  if (!schema?._def || schema._def.typeName !== 'ZodUnion') return false;
-  const options = schema._def.options || [];
-  return options.some((opt: t.ZodSchemaLike) => opt && typeof opt === 'object' && 'shape' in opt);
-}
+const ABSENT_TYPES: ReadonlySet<string> = new Set(['ZodUndefined', 'ZodNull', 'ZodVoid']);
+
+/** Record value types worth sending to the client: choices a value select can offer. */
+const CHOICE_TYPE = /^(enum|literal)\(|^union\((enum|literal)\(/;
 
 const ZOD_TO_KV: Record<string, t.KVValueType> = {
   ZodString: 'string',
   ZodNumber: 'number',
   ZodBoolean: 'boolean',
+  ZodEnum: 'string',
+  ZodLiteral: 'string',
 };
 
+function unwrapNode(value: t.ZodSchemaLike): UnwrappedNode {
+  const seen = new Set<t.ZodSchemaLike>();
+  let schema = value;
+  let isOptional = false;
+  let isNullable = false;
+  let description: string | undefined;
+  while (schema?._def?.typeName && ZOD_WRAPPER_TYPES.has(schema._def.typeName)) {
+    if (seen.has(schema)) break;
+    seen.add(schema);
+    const def = schema._def;
+    description ??= def.description;
+    if (def.typeName === 'ZodOptional' || def.typeName === 'ZodDefault') isOptional = true;
+    if (def.typeName === 'ZodNullable') isNullable = true;
+    const next = innerSchemaOf(def);
+    if (!next) break;
+    schema = next;
+  }
+  description ??= schema?._def?.description;
+  return { schema: resolveIntersection(schema) ?? schema, isOptional, isNullable, description };
+}
+
+function isObjectNode(schema: t.ZodSchemaLike | undefined): boolean {
+  return !!schema && typeof schema === 'object' && 'shape' in schema && !!schema.shape;
+}
+
+function isAbsentNode(schema: t.ZodSchemaLike): boolean {
+  return ABSENT_TYPES.has(schema?._def?.typeName ?? '');
+}
+
+/** Union members with their wrappers removed, leaving out `undefined`/`null` members. */
+function presentMembers(schema: t.ZodSchemaLike): t.ZodSchemaLike[] {
+  if (!isUnionSchema(schema)) return [];
+  return (schema._def?.options ?? [])
+    .map((option) => unwrapNode(option).schema)
+    .filter((option) => !isAbsentNode(option));
+}
+
+/** The object members of a union whose members are all objects (`memory.agent`, `summarization.trigger`). */
+function objectVariants(schema: t.ZodSchemaLike): t.ZodSchemaLike[] | undefined {
+  const members = presentMembers(schema);
+  return members.length > 0 && members.every(isObjectNode) ? members : undefined;
+}
+
+/** `boolean | object`: a feature switch whose object form gives fine-grained control. */
+function isBooleanObjectUnion(schema: t.ZodSchemaLike): boolean {
+  const members = presentMembers(schema);
+  return (
+    members.some((member) => member._def?.typeName === 'ZodBoolean') && members.some(isObjectNode)
+  );
+}
+
 function inferRecordKVTypes(schema: t.ZodSchemaLike): t.KVValueType[] | undefined {
-  if (!schema?._def) return undefined;
-  const tn = schema._def.typeName;
-  if (tn && tn in ZOD_TO_KV) return [ZOD_TO_KV[tn]];
-  if (tn !== 'ZodUnion') return undefined;
+  const typeName = schema?._def?.typeName;
+  if (typeName === 'ZodNativeEnum') {
+    return [getZodTypeName(schema).includes('=') ? 'number' : 'string'];
+  }
+  if (typeName && typeName in ZOD_TO_KV) return [ZOD_TO_KV[typeName]];
+  if (!isUnionSchema(schema)) return undefined;
   const types = new Set<t.KVValueType>();
-  for (const opt of schema._def.options ?? []) {
-    const optTn = opt?._def?.typeName;
-    if (optTn && optTn in ZOD_TO_KV) {
-      types.add(ZOD_TO_KV[optTn]);
-    } else if (
-      optTn === 'ZodRecord' ||
-      optTn === 'ZodArray' ||
-      optTn === 'ZodObject' ||
-      (opt && typeof opt === 'object' && 'shape' in opt)
-    ) {
+  for (const member of presentMembers(schema)) {
+    const memberType = member._def?.typeName;
+    if (memberType && memberType in ZOD_TO_KV) {
+      types.add(ZOD_TO_KV[memberType]);
+    } else if (memberType === 'ZodRecord' || memberType === 'ZodArray' || isObjectNode(member)) {
       types.add('json');
     }
   }
   return types.size > 0 ? [...types] : undefined;
 }
 
-/** Merges fields from union object variants into a single list.
- *  When the same key appears in multiple variants with different literal
- *  types, the literals are combined into a union(literal(...) | literal(...))
- *  so discriminator fields like `type` render as selects. */
-function mergeVariantFields(
-  schema: t.ZodSchemaLike,
-  parentPath: string[],
-  depth: number,
-  objectsOnly: boolean,
-): t.SchemaField[] {
-  const options = schema._def?.options ?? [];
-  const byKey = new Map<string, t.SchemaField>();
+/** Input step implied by the bounds: whole numbers step by 1, ratios by 0.01. */
+function stepFor(constraints: t.FieldConstraints): number | undefined {
+  if (constraints.int) return 1;
+  if (constraints.max === undefined) return undefined;
+  if (constraints.max <= 1) return 0.01;
+  if (constraints.max <= 10) return 0.1;
+  return undefined;
+}
 
-  for (const opt of options) {
-    if (objectsOnly && !(opt && typeof opt === 'object' && 'shape' in opt)) continue;
-    for (const field of extractSchemaTree(opt, parentPath, depth)) {
+function withStep(constraints: t.FieldConstraints): t.FieldConstraints | undefined {
+  const step = stepFor(constraints);
+  const result = step === undefined ? constraints : { ...constraints, step };
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function numberConstraints(checks: t.ZodCheck[]): t.FieldConstraints {
+  const constraints: t.FieldConstraints = {};
+  for (const check of checks) {
+    if (check.kind === 'int') constraints.int = true;
+    if (check.kind === 'min' && typeof check.value === 'number') {
+      constraints.min = check.value;
+      if (check.inclusive === false) constraints.minExclusive = true;
+    }
+    if (check.kind === 'max' && typeof check.value === 'number') {
+      constraints.max = check.value;
+      if (check.inclusive === false) constraints.maxExclusive = true;
+    }
+  }
+  return constraints;
+}
+
+function stringConstraints(checks: t.ZodCheck[]): t.FieldConstraints {
+  const constraints: t.FieldConstraints = {};
+  for (const check of checks) {
+    if (check.kind === 'url') constraints.url = true;
+    if (check.kind === 'email') constraints.email = true;
+    if (check.kind === 'regex' && check.regex) constraints.regex = check.regex.source;
+    if ((check.kind === 'min' || check.kind === 'length') && typeof check.value === 'number') {
+      constraints.minLength = check.value;
+    }
+    if ((check.kind === 'max' || check.kind === 'length') && typeof check.value === 'number') {
+      constraints.maxLength = check.value;
+    }
+  }
+  return constraints;
+}
+
+/** Validation limits from a scalar's Zod checks (`min`, `max`, `int`, `url`, `regex`, …). */
+export function extractConstraints(schema: t.ZodSchemaLike): t.FieldConstraints | undefined {
+  const def = schema?._def;
+  const checks = def?.checks;
+  if (!def || !checks?.length) return undefined;
+  if (def.typeName === 'ZodNumber') return withStep(numberConstraints(checks));
+  if (def.typeName === 'ZodString') return withStep(stringConstraints(checks));
+  return undefined;
+}
+
+function lowerBound(a: t.FieldConstraints, b: t.FieldConstraints): t.FieldConstraints {
+  if (a.min === undefined || b.min === undefined) return {};
+  const min = Math.min(a.min, b.min);
+  const exclusive =
+    (a.min !== min || a.minExclusive === true) && (b.min !== min || b.minExclusive === true);
+  return exclusive ? { min, minExclusive: true } : { min };
+}
+
+function upperBound(a: t.FieldConstraints, b: t.FieldConstraints): t.FieldConstraints {
+  if (a.max === undefined || b.max === undefined) return {};
+  const max = Math.max(a.max, b.max);
+  const exclusive =
+    (a.max !== max || a.maxExclusive === true) && (b.max !== max || b.maxExclusive === true);
+  return exclusive ? { max, maxExclusive: true } : { max };
+}
+
+/** Limits that hold for a key shared by several union variants: the loosest of each bound. */
+function hullConstraints(
+  a: t.FieldConstraints | undefined,
+  b: t.FieldConstraints | undefined,
+): t.FieldConstraints | undefined {
+  if (!a || !b) return undefined;
+  const hull: t.FieldConstraints = {
+    ...lowerBound(a, b),
+    ...upperBound(a, b),
+    ...(a.int && b.int ? { int: true } : {}),
+  };
+  return withStep(hull);
+}
+
+function isLiteralLike(type: string): boolean {
+  if (type.startsWith('literal(')) return true;
+  return type.startsWith('union(') && type.includes('literal(');
+}
+
+function extractLiterals(type: string): string[] {
+  if (type.startsWith('literal(')) return [type];
+  if (!type.startsWith('union(')) return [];
+  return type
+    .slice(6, -1)
+    .split(' | ')
+    .filter((s) => s.startsWith('literal('));
+}
+
+function mergeLiteralTypes(a: string, b: string): string {
+  const literals = extractLiterals(a);
+  for (const literal of extractLiterals(b)) {
+    if (!literals.includes(literal)) literals.push(literal);
+  }
+  return literals.length === 1 ? literals[0] : `union(${literals.join(' | ')})`;
+}
+
+function mergeSharedField(existing: t.SchemaField, field: t.SchemaField): t.SchemaField {
+  const type =
+    existing.type !== field.type && isLiteralLike(existing.type) && isLiteralLike(field.type)
+      ? mergeLiteralTypes(existing.type, field.type)
+      : existing.type;
+  const { constraints: _dropped, ...rest } = existing;
+  const constraints = hullConstraints(existing.constraints, field.constraints);
+  return constraints ? { ...rest, type, constraints } : { ...rest, type };
+}
+
+/**
+ * Merges the fields of several union variants into one optional list. A key
+ * that is `undefined` in some variants (MCP `obo` on stdio) takes its real
+ * definition from another; discriminator literals combine into one select;
+ * shared keys keep only the limits every variant accepts.
+ */
+function mergeFieldLists(lists: t.SchemaField[][]): t.SchemaField[] {
+  const byKey = new Map<string, t.SchemaField>();
+  for (const fields of lists) {
+    for (const field of fields) {
       const existing = byKey.get(field.key);
-      if (!existing) {
+      if (!existing || existing.type === 'undefined') {
         byKey.set(field.key, { ...field, isOptional: true });
-      } else if (
-        existing.type !== field.type &&
-        isLiteralLike(existing.type) &&
-        isLiteralLike(field.type)
-      ) {
-        existing.type = mergeLiteralTypes(existing.type, field.type);
+      } else if (field.type !== 'undefined') {
+        byKey.set(field.key, mergeSharedField(existing, field));
       }
     }
   }
   return [...byKey.values()];
 }
 
-function isLiteralLike(type: string): boolean {
-  if (type.startsWith('literal(')) return true;
-  if (type.startsWith('union(') && type.includes('literal(')) return true;
-  return false;
-}
-
-function extractLiterals(type: string): string[] {
-  if (type.startsWith('literal(')) return [type];
-  if (type.startsWith('union(')) {
-    const inner = type.slice(6, -1);
-    return inner.split(' | ').filter((s) => s.startsWith('literal('));
-  }
-  return [];
-}
-
-function mergeLiteralTypes(a: string, b: string): string {
-  const existing = extractLiterals(a);
-  for (const lit of extractLiterals(b)) {
-    if (!existing.includes(lit)) existing.push(lit);
-  }
-  return existing.length === 1 ? existing[0] : `union(${existing.join(' | ')})`;
-}
-
-function extractUnionObjectVariants(
-  schema: t.ZodSchemaLike,
+function mergeVariantFields(
+  members: t.ZodSchemaLike[],
   parentPath: string[],
   depth: number,
 ): t.SchemaField[] {
-  return mergeVariantFields(schema, parentPath, depth, true);
+  return mergeFieldLists(members.map((member) => extractSchemaTree(member, parentPath, depth)));
 }
 
-function mergeUnionVariantFields(
+function discriminatorValue(member: t.ZodSchemaLike, discriminator: string): string | undefined {
+  const node = member.shape?.[discriminator];
+  const value = node ? unwrapSchema(node)._def?.value : undefined;
+  return value === undefined ? undefined : String(value);
+}
+
+/** Names a variant by its discriminator value, else by the first key no other variant has. */
+function variantKey(
+  member: t.ZodSchemaLike,
+  fields: t.SchemaField[],
+  lists: t.SchemaField[][],
+  index: number,
+  discriminator: string | undefined,
+): string {
+  const tagged = discriminator ? discriminatorValue(member, discriminator) : undefined;
+  if (tagged !== undefined) return tagged;
+  const unique = fields.find((field) =>
+    lists.every((list, i) => i === index || !list.some((f) => f.key === field.key)),
+  );
+  return unique?.key ?? String(index);
+}
+
+function finalizeField(parts: FieldParts): t.SchemaField {
+  const field: t.SchemaField = {
+    path: parts.path,
+    key: parts.key,
+    type: parts.type,
+    isOptional: parts.isOptional,
+    depth: parts.depth,
+  };
+  if (parts.isNullable) field.isNullable = true;
+  if (parts.isArray) field.isArray = true;
+  if (parts.isObject) field.isObject = true;
+  if (parts.description) field.description = parts.description;
+  if (parts.children) field.children = parts.children;
+  if (parts.recordValueType) field.recordValueType = parts.recordValueType;
+  if (parts.recordValueAllowsPrimitive) field.recordValueAllowsPrimitive = true;
+  if (parts.recordValueKVTypes) field.recordValueKVTypes = parts.recordValueKVTypes;
+  if (parts.itemType) field.itemType = parts.itemType;
+  if (parts.variants) field.variants = parts.variants;
+  if (parts.discriminator) field.discriminator = parts.discriminator;
+  if (parts.constraints) field.constraints = parts.constraints;
+  return field;
+}
+
+function variantField(
+  base: FieldParts,
   schema: t.ZodSchemaLike,
+  members: t.ZodSchemaLike[],
+  path: string[],
+): t.SchemaField {
+  const lists = members.map((member) => extractSchemaTree(member, path, base.depth + 1));
+  const discriminator = schema._def?.discriminator;
+  const variants = lists.map((fields, index) => ({
+    key: variantKey(members[index], fields, lists, index, discriminator),
+    fields,
+  }));
+  return finalizeField({
+    ...base,
+    type: 'object',
+    isObject: true,
+    children: mergeFieldLists(lists),
+    variants,
+    discriminator,
+  });
+}
+
+function arrayField(base: FieldParts, schema: t.ZodSchemaLike, path: string[]): t.SchemaField {
+  const element = schema._def?.type ? unwrapNode(schema._def.type).schema : undefined;
+  const elementPath = [...path, '[]'];
+  const depth = base.depth + 1;
+  const type = getZodTypeName(schema);
+  if (element && isObjectNode(element)) {
+    const children = extractSchemaTree(element, elementPath, depth);
+    return finalizeField({ ...base, type, isArray: true, children });
+  }
+  const members = element ? objectVariants(element) : undefined;
+  const children = members ? mergeVariantFields(members, elementPath, depth) : undefined;
+  return finalizeField({ ...base, type, isArray: true, children });
+}
+
+function recordField(base: FieldParts, schema: t.ZodSchemaLike, path: string[]): t.SchemaField {
+  const type = getZodTypeName(schema);
+  const valueSchema = schema._def?.valueType;
+  if (!valueSchema) return finalizeField({ ...base, type });
+  const value = unwrapNode(valueSchema).schema;
+  const valuePath = [...path, '{}'];
+  const depth = base.depth + 1;
+  if (isObjectNode(value)) {
+    const children = extractSchemaTree(value, valuePath, depth);
+    return finalizeField({ ...base, type, children, recordValueType: 'complex' });
+  }
+  const members = objectVariants(value);
+  if (members) {
+    const children = mergeVariantFields(members, valuePath, depth);
+    return finalizeField({ ...base, type, children, recordValueType: 'complex' });
+  }
+  const objects = presentMembers(value).filter(isObjectNode);
+  if (objects.length > 0) {
+    return finalizeField({
+      ...base,
+      type,
+      children: mergeVariantFields(objects, valuePath, depth),
+      recordValueType: 'complex',
+      recordValueAllowsPrimitive: true,
+    });
+  }
+  const valueType = getZodTypeName(value);
+  return finalizeField({
+    ...base,
+    type,
+    recordValueType: 'primitive',
+    recordValueKVTypes: inferRecordKVTypes(value),
+    itemType: CHOICE_TYPE.test(valueType) ? valueType : undefined,
+  });
+}
+
+function buildField(
+  key: string,
+  value: t.ZodSchemaLike,
   parentPath: string[],
   depth: number,
-): t.SchemaField[] {
-  return mergeVariantFields(schema, parentPath, depth, false);
+): t.SchemaField {
+  const path = [...parentPath, key];
+  const node = unwrapNode(value);
+  const { schema } = node;
+  const base: FieldParts = {
+    path: path.join('.'),
+    key,
+    type: '',
+    isOptional: node.isOptional,
+    isNullable: node.isNullable,
+    description: node.description,
+    depth,
+  };
+  if (isObjectNode(schema)) {
+    const children = extractSchemaTree(schema, path, depth + 1);
+    return finalizeField({ ...base, type: 'object', isObject: true, children });
+  }
+  const members = objectVariants(schema);
+  if (members) return variantField(base, schema, members, path);
+  if (isBooleanObjectUnion(schema)) {
+    const objects = presentMembers(schema).filter(isObjectNode);
+    const children = mergeVariantFields(objects, path, depth + 1);
+    return finalizeField({ ...base, type: getZodTypeName(schema), children });
+  }
+  const typeName = schema?._def?.typeName;
+  if (typeName === 'ZodArray') return arrayField(base, schema, path);
+  if (typeName === 'ZodRecord') return recordField(base, schema, path);
+  return finalizeField({
+    ...base,
+    type: getZodTypeName(schema),
+    constraints: extractConstraints(schema),
+  });
 }
 
+/**
+ * Walks an object schema into `SchemaField`s (WS2). Unions of objects and
+ * discriminated unions become variant fields, refined array elements are
+ * unwrapped, and fields keep a compact `type` string plus `variants`,
+ * `discriminator` and `constraints` where the schema has them.
+ */
 export function extractSchemaTree(
   schema: t.ZodSchemaLike,
   path: string[] = [],
   depth: number = 0,
 ): t.SchemaField[] {
-  const fields: t.SchemaField[] = [];
-
-  if (schema && typeof schema === 'object' && 'shape' in schema) {
-    const shape = schema.shape;
-    if (shape && typeof shape === 'object') {
-      for (const [key, value] of Object.entries(shape)) {
-        const currentPath = [...path, key];
-        const fieldPath = currentPath.join('.');
-
-        let isOptional = false;
-        let isNullable = false;
-        let innerSchema: t.ZodSchemaLike = value;
-        let description: string | undefined;
-
-        while (innerSchema?._def?.typeName && ZOD_WRAPPER_TYPES.has(innerSchema._def.typeName)) {
-          const def = innerSchema._def;
-          if (def.description && !description) {
-            description = def.description;
-          }
-          if (def.typeName === 'ZodOptional' || def.typeName === 'ZodDefault') {
-            isOptional = true;
-          }
-          if (def.typeName === 'ZodNullable') {
-            isNullable = true;
-          }
-          let next: t.ZodSchemaLike | undefined;
-          if (def.typeName === 'ZodLazy') {
-            next = def.getter?.();
-          } else if (def.typeName === 'ZodPipeline') {
-            next = def.out;
-          } else if (def.typeName === 'ZodEffects') {
-            next = def.schema;
-          } else {
-            next = def.innerType;
-          }
-          if (!next) break;
-          innerSchema = next;
-        }
-
-        if (innerSchema?._def?.description && !description) {
-          description = innerSchema._def.description;
-        }
-
-        const resolved = resolveIntersection(innerSchema);
-        if (resolved) innerSchema = resolved;
-
-        if (innerSchema && typeof innerSchema === 'object' && 'shape' in innerSchema) {
-          const children = extractSchemaTree(innerSchema, currentPath, depth + 1);
-          fields.push({
-            path: fieldPath,
-            key,
-            type: 'object',
-            isOptional,
-            isNullable,
-            isArray: false,
-            isObject: true,
-            description,
-            children,
-            depth,
-          });
-        } else if (isUnionOfObjects(innerSchema)) {
-          const children = mergeUnionVariantFields(innerSchema, currentPath, depth + 1);
-          fields.push({
-            path: fieldPath,
-            key,
-            type: 'object',
-            isOptional,
-            isNullable,
-            isArray: false,
-            isObject: true,
-            description,
-            children,
-            depth,
-          });
-        } else if (hasBooleanObjectUnion(innerSchema)) {
-          const children = extractUnionObjectVariants(innerSchema, currentPath, depth + 1);
-          fields.push({
-            path: fieldPath,
-            key,
-            type: getZodTypeName(innerSchema),
-            isOptional,
-            isNullable,
-            isArray: false,
-            isObject: false,
-            description,
-            children,
-            depth,
-          });
-        } else {
-          const typeName = getZodTypeName(innerSchema);
-          const isArray = checkIsArray(innerSchema);
-          const isObject = checkIsObject(innerSchema);
-
-          let children: t.SchemaField[] | undefined;
-          let recordValueType: 'primitive' | 'complex' | undefined;
-          let recordValueAllowsPrimitive: boolean | undefined;
-          let recordValueKVTypes: t.KVValueType[] | undefined;
-
-          if (isArray && innerSchema?._def?.type) {
-            let elementSchema: t.ZodSchemaLike = innerSchema._def.type;
-            const resolvedElement = resolveIntersection(elementSchema);
-            if (resolvedElement) elementSchema = resolvedElement;
-            if (elementSchema && typeof elementSchema === 'object' && 'shape' in elementSchema) {
-              children = extractSchemaTree(elementSchema, [...currentPath, '[]'], depth + 1);
-            } else if (isUnionOfObjects(elementSchema)) {
-              children = mergeUnionVariantFields(elementSchema, [...currentPath, '[]'], depth + 1);
-            }
-          }
-
-          if (typeName === 'record' && innerSchema?._def) {
-            const valueSchema = (innerSchema._def as t.ZodDef & { valueType?: t.ZodSchemaLike })
-              .valueType;
-            if (valueSchema) {
-              const unwrapped = unwrapSchema(valueSchema);
-              if (unwrapped && typeof unwrapped === 'object' && 'shape' in unwrapped) {
-                children = extractSchemaTree(unwrapped, [...currentPath, '{}'], depth + 1);
-                recordValueType = 'complex';
-              } else if (isUnionOfObjects(unwrapped)) {
-                children = mergeUnionVariantFields(unwrapped, [...currentPath, '{}'], depth + 1);
-                recordValueType = 'complex';
-              } else if (hasUnionObjectVariant(unwrapped)) {
-                children = extractUnionObjectVariants(unwrapped, [...currentPath, '{}'], depth + 1);
-                recordValueType = 'complex';
-                recordValueAllowsPrimitive = true;
-              } else {
-                recordValueType = 'primitive';
-                recordValueKVTypes = inferRecordKVTypes(unwrapped);
-              }
-            }
-          }
-
-          fields.push({
-            path: fieldPath,
-            key,
-            type: typeName,
-            isOptional,
-            isNullable,
-            isArray,
-            isObject,
-            children,
-            description,
-            depth,
-            recordValueType,
-            recordValueAllowsPrimitive,
-            recordValueKVTypes,
-          });
-        }
-      }
-    }
-  }
-
+  if (!isObjectNode(schema)) return [];
+  const fields = Object.entries(schema.shape ?? {}).map(([key, value]) =>
+    buildField(key, value, path, depth),
+  );
   return filterSecretPreviewFields(fields);
 }
 
@@ -325,20 +471,21 @@ export function flattenTree(fields: t.SchemaField[]): t.SchemaField[] {
   return result;
 }
 
-function checkIsArray(schema: t.ZodSchemaLike): boolean {
-  if (!schema || typeof schema !== 'object') return false;
-  if ('_def' in schema) {
-    return schema._def?.typeName === 'ZodArray';
-  }
-  return false;
-}
-
-function checkIsObject(schema: t.ZodSchemaLike): boolean {
-  if (!schema || typeof schema !== 'object') return false;
-  return 'shape' in schema;
-}
-
 const MAX_ZOD_TYPE_DEPTH = 10;
+
+function nativeEnumTypeName(raw: string[] | Record<string, string | number>): string {
+  const entries = Array.isArray(raw)
+    ? raw.map((v): [string, string] => [v, v])
+    : Object.entries(raw);
+  const numeric = entries.filter(
+    (entry): entry is [string, number] => typeof entry[1] === 'number',
+  );
+  if (numeric.length > 0) {
+    return `enum(${numeric.map(([label, val]) => `${label}=${val}`).join(' | ')})`;
+  }
+  const strings = entries.map(([, v]) => v).filter((v): v is string => typeof v === 'string');
+  return strings.length > 0 ? `enum(${strings.join(' | ')})` : 'enum';
+}
 
 export function getZodTypeName(
   schema: t.ZodSchemaLike,
@@ -371,6 +518,7 @@ export function getZodTypeName(
   if (typeName === 'ZodNumber') return 'number';
   if (typeName === 'ZodBoolean') return 'boolean';
   if (typeName === 'ZodNull') return 'null';
+  if (typeName === 'ZodUndefined') return 'undefined';
   if (typeName === 'ZodArray') {
     const elementType = innerSchema._def.type;
     if (!elementType) return 'array<unknown>';
@@ -378,23 +526,15 @@ export function getZodTypeName(
     return `array<${elementTypeName}>`;
   }
   if (typeName === 'ZodObject') return 'object';
+  if (typeName === 'ZodIntersection') {
+    return resolveIntersection(innerSchema) ? 'object' : 'unknown';
+  }
   if (typeName === 'ZodEnum') {
     const values = innerSchema._def?.values ?? [];
     return `enum(${Array.isArray(values) ? values.join(' | ') : Object.values(values).join(' | ')})`;
   }
-  if (typeName === 'ZodNativeEnum') {
-    const raw = innerSchema._def?.values ?? {};
-    const numericValues = Object.entries(raw).filter(([, v]) => typeof v === 'number') as Array<
-      [string, number]
-    >;
-    if (numericValues.length > 0) {
-      return `enum(${numericValues.map(([label, val]) => `${label}=${val}`).join(' | ')})`;
-    }
-    const stringValues = Object.values(raw).filter((v): v is string => typeof v === 'string');
-    if (stringValues.length > 0) return `enum(${stringValues.join(' | ')})`;
-    return 'enum';
-  }
-  if (typeName === 'ZodUnion') {
+  if (typeName === 'ZodNativeEnum') return nativeEnumTypeName(innerSchema._def?.values ?? {});
+  if (isUnionSchema(innerSchema)) {
     const options = innerSchema._def.options || [];
     const types = options.map((opt: t.ZodSchemaLike) => getZodTypeName(opt, seen, depth + 1));
     return `union(${types.join(' | ')})`;
@@ -412,7 +552,11 @@ export function getZodTypeName(
 /** Shared queryOptions for the schema tree used by command palette search. */
 export const configSchemaTreeOptions = queryOptions({
   queryKey: ['configSchemaTree'],
-  queryFn: () => getConfigSchemaFields().then((r) => r.tree),
+  queryFn: async () => {
+    const result = await getConfigSchemaFields();
+    if (!result?.tree) throw new Error('The configuration schema could not be loaded');
+    return result.tree;
+  },
   staleTime: Infinity,
 });
 
@@ -441,42 +585,54 @@ export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(a
   }
 });
 
-function getFieldDefault(schema: t.ZodSchemaLike): { hasDefault: boolean; value: unknown } {
+function getFieldDefault(schema: t.ZodSchemaLike): { hasDefault: boolean; value?: t.ConfigValue } {
+  const seen = new Set<t.ZodSchemaLike>();
   let current = schema;
-  while (current?._def) {
+  while (current?._def && !seen.has(current)) {
+    seen.add(current);
     if (current._def.typeName === 'ZodDefault') {
-      const defVal = (current._def as unknown as { defaultValue: () => unknown }).defaultValue;
-      return { hasDefault: true, value: typeof defVal === 'function' ? defVal() : defVal };
+      return { hasDefault: true, value: current._def.defaultValue?.() as t.ConfigValue };
     }
-    const next =
-      current._def.typeName === 'ZodEffects' ? current._def.schema : current._def.innerType;
+    if (!ZOD_WRAPPER_TYPES.has(current._def.typeName ?? '')) break;
+    const next = innerSchemaOf(current._def);
     if (!next) break;
     current = next;
   }
-  return { hasDefault: false, value: undefined };
+  return { hasDefault: false };
 }
 
-/** Nested object of every `.default()` value in `schema` (stops at the first default on a path). */
-export function extractSchemaDefaults(schema: t.ZodSchemaLike): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  if (!schema || typeof schema !== 'object' || !('shape' in schema) || !schema.shape) return result;
+/** Deep-merges nested field defaults under an explicit object default; the explicit values win. */
+function mergeDefaults(nested: t.ConfigRecord, explicit: t.ConfigRecord): t.ConfigRecord {
+  const merged: t.ConfigRecord = { ...nested };
+  for (const [key, value] of Object.entries(explicit)) {
+    const inner = merged[key];
+    merged[key] =
+      isConfigRecord(value) && isConfigRecord(inner) ? mergeDefaults(inner, value) : value;
+  }
+  return merged;
+}
 
-  for (const [key, fieldSchema] of Object.entries(
-    schema.shape as Record<string, t.ZodSchemaLike>,
-  )) {
+/**
+ * Nested object of every `.default()` value in `schema`. A field whose object
+ * default leaves out some keys still contributes those keys' own defaults
+ * (`interface.retentionMode`, `endpoints.agents.maxProviderErrorChars`); the
+ * object default wins where both set a key.
+ */
+export function extractSchemaDefaults(schema: t.ZodSchemaLike): t.ConfigRecord {
+  const result: t.ConfigRecord = {};
+  if (!isObjectNode(schema)) return result;
+
+  for (const [key, fieldSchema] of Object.entries(schema.shape ?? {})) {
     const { hasDefault, value } = getFieldDefault(fieldSchema);
-    if (hasDefault) {
+    const inner = unwrapNode(fieldSchema).schema;
+    const nested = isObjectNode(inner) ? extractSchemaDefaults(inner) : {};
+    const hasNested = Object.keys(nested).length > 0;
+    if (hasDefault && hasNested && isConfigRecord(value)) {
+      result[key] = mergeDefaults(nested, value);
+    } else if (hasDefault) {
       result[key] = value;
-      continue;
-    }
-
-    const inner = unwrapSchema(fieldSchema);
-
-    if (inner && typeof inner === 'object' && 'shape' in inner) {
-      const nested = extractSchemaDefaults(inner);
-      if (Object.keys(nested).length > 0) {
-        result[key] = nested;
-      }
+    } else if (hasNested) {
+      result[key] = nested;
     }
   }
   return result;

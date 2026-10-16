@@ -1,6 +1,22 @@
 import { useState, useMemo, useCallback, startTransition } from 'react';
 import type * as t from '@/types';
-import { applyConfigEdit } from '@/components/configuration/edits';
+import {
+  applyConfigEdit,
+  hasEffectiveEdits,
+  normalizeEditValue,
+  trackCollectionEdit,
+} from '@/components/configuration/edits';
+import { findSchemaField } from '@/components/configuration/controls';
+import { getValueAtPath } from '@/utils';
+
+const NO_EDITS: t.PendingEdits = { values: {}, collections: {}, baselines: {}, visibility: {} };
+
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
 
 /** Pending edits of the open target (base or a profile) and the handlers that change them (WS1). */
 export function useConfigEdits({
@@ -8,11 +24,14 @@ export function useConfigEdits({
   flatBaseline,
   scopeResolvedValues,
   baseActiveConfigValues,
+  schemaTree,
+  schemaPathSet,
 }: t.ConfigEditsOptions): t.ConfigEditsState {
-  const [editedValues, setEditedValues] = useState<t.FlatConfigMap>({});
+  const [pending, setPending] = useState<t.PendingEdits>(NO_EDITS);
   const [touchedPaths, setTouchedPaths] = useState<Set<string>>(() => new Set());
   const [editSessionId, setEditSessionId] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const editedValues = pending.values;
 
   const scopeBaseline = useMemo(() => {
     if (!isEditingScope) return flatBaseline;
@@ -49,42 +68,79 @@ export function useConfigEdits({
     return set;
   }, [baseActiveConfigValues]);
 
+  /** Compares edits with the saved value as Save would store it (SV-6). */
+  const structuredBaseline = useMemo<t.EditBaseline | undefined>(() => {
+    if (!schemaTree || !schemaPathSet) return undefined;
+    return {
+      root: baseActiveConfigValues,
+      isArrayPath: (path) => findSchemaField(schemaTree, path)?.isArray === true,
+      normalize: (path, value) => normalizeEditValue(path, value, schemaTree, schemaPathSet),
+    };
+  }, [baseActiveConfigValues, schemaTree, schemaPathSet]);
+
+  const touch = useCallback((path: string) => {
+    setTouchedPaths((prev) => {
+      if (prev.has(path)) return prev;
+      const next = new Set(prev);
+      next.add(path);
+      return next;
+    });
+  }, []);
+
   const handleFieldChange = useCallback(
     (path: string, value: t.ConfigValue) => {
       setSaveError(null);
-      setTouchedPaths((prev) => {
-        if (prev.has(path)) return prev;
-        const next = new Set(prev);
-        next.add(path);
-        return next;
-      });
-      setEditedValues((prev) => {
-        return applyConfigEdit(
-          prev,
+      touch(path);
+      setPending((prev) => ({
+        ...prev,
+        collections: trackCollectionEdit(
+          prev.collections,
+          prev.values,
+          path,
+          value,
+          baseActiveConfigValues,
+        ),
+        baselines:
+          path in prev.baselines
+            ? prev.baselines
+            : { ...prev.baselines, [path]: getValueAtPath(baseActiveConfigValues, path) },
+        values: applyConfigEdit(
+          prev.values,
           path,
           value,
           scopeBaseline,
           baselineIntermediates,
           baselineContainerPaths,
-        );
-      });
+          structuredBaseline,
+        ),
+      }));
     },
-    [scopeBaseline, baselineIntermediates, baselineContainerPaths],
+    [
+      touch,
+      baseActiveConfigValues,
+      scopeBaseline,
+      baselineIntermediates,
+      baselineContainerPaths,
+      structuredBaseline,
+    ],
   );
 
   /**
-   * Removes `path` from `editedValues`/`touchedPaths` directly, bypassing
+   * Removes `path` from `editedValues`/`touchedPaths` (and a pending
+   * Hide/Unhide of it, so a row's Undo covers both) directly, bypassing
    * `applyConfigEdit`'s baseline-match diffing. Abandoning an in-progress
    * SecretField replacement (Cancel) is never a real edit — representing it
    * as `onChange(path, undefined)` would mean the same thing as a real reset
    * whenever a scope-resolved baseline happens to also read as empty.
    */
   const handleDiscardField = useCallback((path: string) => {
-    setEditedValues((prev) => {
-      if (!(path in prev)) return prev;
-      const next = { ...prev };
-      delete next[path];
-      return next;
+    setPending((prev) => {
+      if (!(path in prev.values) && !(path in prev.visibility)) return prev;
+      return {
+        ...prev,
+        values: withoutKey(prev.values, path),
+        visibility: withoutKey(prev.visibility, path),
+      };
     });
     setTouchedPaths((prev) => {
       if (!prev.has(path)) return prev;
@@ -94,7 +150,12 @@ export function useConfigEdits({
     });
   }, []);
 
-  const isDirty = Object.keys(editedValues).length > 0;
+  const isDirty = useMemo(
+    () =>
+      Object.keys(pending.visibility).length > 0 ||
+      hasEffectiveEdits(editedValues, structuredBaseline),
+    [pending.visibility, editedValues, structuredBaseline],
+  );
 
   const pendingResets = useMemo(() => {
     const resets = new Set<string>();
@@ -104,30 +165,59 @@ export function useConfigEdits({
     return resets;
   }, [editedValues]);
 
-  const handleResetField = useCallback((fieldPath: string) => {
-    setSaveError(null);
-    startTransition(() => {
-      setTouchedPaths((prev) => {
-        if (prev.has(fieldPath)) return prev;
-        const next = new Set(prev);
-        next.add(fieldPath);
-        return next;
+  const handleResetField = useCallback(
+    (fieldPath: string) => {
+      setSaveError(null);
+      startTransition(() => {
+        touch(fieldPath);
+        setPending((prev) => ({
+          ...prev,
+          baselines:
+            fieldPath in prev.baselines
+              ? prev.baselines
+              : {
+                  ...prev.baselines,
+                  [fieldPath]: getValueAtPath(baseActiveConfigValues, fieldPath),
+                },
+          values: { ...prev.values, [fieldPath]: undefined },
+        }));
       });
-      setEditedValues((prev) => ({ ...prev, [fieldPath]: undefined }));
+    },
+    [touch, baseActiveConfigValues],
+  );
+
+  const setVisibility = useCallback((path: string, edit: t.VisibilityEdit) => {
+    setSaveError(null);
+    setPending((prev) => {
+      const visibility =
+        prev.visibility[path] !== undefined && prev.visibility[path] !== edit
+          ? withoutKey(prev.visibility, path)
+          : { ...prev.visibility, [path]: edit };
+      return { ...prev, visibility };
     });
   }, []);
 
+  const handleHideField = useCallback(
+    (path: string) => setVisibility(path, 'hide'),
+    [setVisibility],
+  );
+  const handleUnhideField = useCallback(
+    (path: string) => setVisibility(path, 'unhide'),
+    [setVisibility],
+  );
+
   const discardEdits = useCallback(() => {
-    setEditedValues({});
+    setPending(NO_EDITS);
     setTouchedPaths(new Set());
   }, []);
 
-  const startNewSession = useCallback(() => setEditSessionId((id) => id + 1), []);
-
-  const resetEdits = useCallback(() => {
+  /** A new edit session (another scope opened) never carries pending edits over, not even blank drafts. */
+  const startNewSession = useCallback(() => {
     discardEdits();
-    startNewSession();
-  }, [discardEdits, startNewSession]);
+    setEditSessionId((id) => id + 1);
+  }, [discardEdits]);
+
+  const resetEdits = startNewSession;
 
   const handleDiscard = useCallback(() => {
     resetEdits();
@@ -142,8 +232,13 @@ export function useConfigEdits({
     isDirty,
     saveError,
     setSaveError,
+    collectionEdits: pending.collections,
+    editBaselines: pending.baselines,
+    visibilityEdits: pending.visibility,
     handleFieldChange,
     handleResetField,
+    handleHideField,
+    handleUnhideField,
     handleDiscardField,
     discardEdits,
     startNewSession,

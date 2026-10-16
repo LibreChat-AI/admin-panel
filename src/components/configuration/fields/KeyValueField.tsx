@@ -1,63 +1,74 @@
-import { Select } from '@clickhouse/click-ui';
-import TextareaAutosize from 'react-textarea-autosize';
-import { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import { useRef, useState, useLayoutEffect } from 'react';
+import type { ReactNode } from 'react';
 import type * as t from '@/types';
+import { useDraftValue, useListKeys, useLocalize } from '@/hooks';
 import { AddItemButton, TrashButton } from '@/components/shared';
 import { BLOCK_UNSAFE_CONFIG_KEYS } from '@/constants';
-import { isUnsafeConfigKey } from '@/utils';
-import { useLocalize } from '@/hooks';
+import { cn, isBlankText, isUnsafeConfigKey } from '@/utils';
+import { TextareaField } from './TextareaField';
+import { SelectField } from './SelectField';
+import { INPUT_CLASSES } from './display';
+import { FieldNotice } from './Notice';
 
 const DEFAULT_TYPES: t.KVValueType[] = ['string', 'number', 'boolean'];
 const TYPE_LABEL_KEYS: Record<t.KVValueType, string> = {
-  string: 'com_kv_type_string',
-  number: 'com_kv_type_number',
-  boolean: 'com_kv_type_boolean',
-  json: 'com_kv_type_json',
+  string: 'com_config_ctl_kv_type_text',
+  number: 'com_config_ctl_kv_type_number',
+  boolean: 'com_config_ctl_kv_type_boolean',
+  json: 'com_config_ctl_kv_type_json',
 };
+const NUMERIC = /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/;
+const pairKey = (pair: t.KeyValuePair) => pair.key;
 
-function LocalInput({
+/** Value type for typed text: numbers, true/false and JSON objects/arrays are recognized. */
+export function inferTypeFromText(raw: string, allowed: readonly t.KVValueType[]): t.KVValueType {
+  const trimmed = raw.trim();
+  if (allowed.includes('number') && NUMERIC.test(trimmed)) return 'number';
+  if (allowed.includes('boolean') && (trimmed === 'true' || trimmed === 'false')) return 'boolean';
+  if (allowed.includes('json') && /^[[{]/.test(trimmed)) {
+    try {
+      JSON.parse(trimmed);
+      return 'json';
+    } catch {
+      return allowed.includes('string') ? 'string' : allowed[0];
+    }
+  }
+  return allowed.includes('string') ? 'string' : allowed[0];
+}
+
+function KVInput({
   value,
   onCommit,
-  type = 'text',
+  delay,
   placeholder,
   disabled,
-  className,
+  type = 'text',
+  title,
   'aria-label': ariaLabel,
   'aria-invalid': ariaInvalid,
   'aria-describedby': ariaDescribedBy,
+  className,
 }: {
   value: string;
   onCommit: (value: string) => void;
-  type?: string;
+  /** Commit delay while typing; `0` commits only on blur or Enter. */
+  delay?: number;
   placeholder?: string;
   disabled?: boolean;
-  className?: string;
+  type?: 'text' | 'number';
+  title?: string;
   'aria-label'?: string;
   'aria-invalid'?: boolean;
   'aria-describedby'?: string;
+  className?: string;
 }) {
-  const [local, setLocal] = useState(value);
-  const externalRef = useRef(value);
-
-  useEffect(() => {
-    if (value !== externalRef.current) {
-      externalRef.current = value;
-      setLocal(value);
-    }
-  }, [value]);
-
-  const commit = () => {
-    if (local !== externalRef.current) {
-      externalRef.current = local;
-      onCommit(local);
-    }
-  };
-
+  const { draft, setDraft, commit } = useDraftValue<string>({ value, onCommit, delay });
   return (
     <input
       type={type}
-      value={local}
-      onChange={(e) => setLocal(e.target.value)}
+      title={title}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') commit();
@@ -72,212 +83,301 @@ function LocalInput({
   );
 }
 
-function LocalTextarea({
-  value,
-  onCommit,
-  placeholder,
-  disabled,
-  'aria-label': ariaLabel,
-}: {
-  value: string;
-  onCommit: (value: string) => void;
-  placeholder?: string;
-  disabled?: boolean;
-  'aria-label'?: string;
-}) {
-  const [local, setLocal] = useState(value);
-  const externalRef = useRef(value);
-
-  useEffect(() => {
-    if (value !== externalRef.current) {
-      externalRef.current = value;
-      setLocal(value);
-    }
-  }, [value]);
-
-  const commit = () => {
-    if (local !== externalRef.current) {
-      externalRef.current = local;
-      onCommit(local);
-    }
-  };
-
-  return (
-    <TextareaAutosize
-      value={local}
-      onChange={(e) => setLocal(e.target.value)}
-      onBlur={commit}
-      placeholder={placeholder}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      minRows={1}
-      className="config-input w-full resize-none font-mono text-xs"
-    />
-  );
-}
-
+/**
+ * Key/value record editor. A new row stays a local draft until it has a key
+ * (a blank one is flagged, never committed); clearing a key removes its row;
+ * removing the last row calls `onClear` (when given) instead of emitting an
+ * empty list. Unless the admin picks a type, a committed value's type is
+ * inferred (numbers, true/false, JSON). `valueTypes` of one type gives a
+ * string-only (or number-only) editor; `valueOptions` gives a value select.
+ */
 export function KeyValueField({
   id,
   pairs,
   onChange,
+  onClear,
   disabled,
   valueTypes,
+  valueOptions,
   keyPlaceholder,
   valuePlaceholder,
+  lockedKeys,
   'aria-label': ariaLabel,
 }: t.KeyValueFieldProps) {
   const localize = useLocalize();
   const availableTypes = valueTypes ?? DEFAULT_TYPES;
+  const keys = useListKeys({ items: pairs, identity: pairKey, prefix: `${id}-row` });
+  const [drafts, setDrafts] = useState<Array<{ id: number; pair: t.KeyValuePair }>>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
+  const draftCounter = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
-  const focusLastKeyRef = useRef(false);
+  const focusDraftRef = useRef<number | null>(null);
+  const adoptedRef = useRef(new Map<string, string>());
+  const pendingAdoptionRef = useRef<{ index: number; rowId: string } | null>(null);
+  const pending = pendingAdoptionRef.current;
+  if (pending && keys[pending.index] != null) {
+    adoptedRef.current.set(keys[pending.index], pending.rowId);
+    pendingAdoptionRef.current = null;
+  }
+  const rowIdAt = (index: number) => adoptedRef.current.get(keys[index]) ?? keys[index];
+  const safeId = id.replace(/[^\w-]/g, '-');
 
   useLayoutEffect(() => {
-    if (focusLastKeyRef.current) {
-      focusLastKeyRef.current = false;
-      const rows = listRef.current?.querySelectorAll<HTMLElement>('[role="listitem"]');
-      const lastRow = rows?.[rows.length - 1];
-      lastRow?.querySelector<HTMLInputElement>('input')?.focus();
-    }
+    if (focusDraftRef.current == null) return;
+    const draftId = focusDraftRef.current;
+    focusDraftRef.current = null;
+    listRef.current?.querySelector<HTMLInputElement>(`[data-kv-draft="${draftId}"] input`)?.focus();
   });
 
-  const handleAdd = () => {
-    onChange([...pairs, { key: '', value: '', valueType: availableTypes[0] }]);
-    focusLastKeyRef.current = true;
-  };
-  const handleRemove = (index: number) => onChange(pairs.filter((_, i) => i !== index));
-  const handleChange = (index: number, field: 'key' | 'value', newValue: string) => {
-    const next = [...pairs];
-    next[index] = { ...next[index], [field]: newValue };
-    onChange(next);
-  };
-  const handleTypeChange = (index: number, newType: t.KVValueType) => {
-    const next = [...pairs];
-    const pair = next[index];
-    let coerced = pair.value;
-    if (newType === 'boolean') {
-      coerced = pair.value === 'true' || pair.value === '1' ? 'true' : 'false';
+  const emit = (next: t.KeyValuePair[]) => {
+    setNotice(null);
+    if (next.length > 0 || drafts.length > 0 || !onClear) {
+      onChange(next);
+      return;
     }
-    next[index] = { ...pair, value: coerced, valueType: newType };
-    onChange(next);
+    if (onClear() === false) setNotice(localize('com_config_ctl_clear_unavailable'));
   };
 
-  const keyErrorId = (index: number) => `${id.replace(/[^\w-]/g, '-')}-key-${index}-error`;
-  const hasKeyError = (pair: t.KeyValuePair) =>
-    BLOCK_UNSAFE_CONFIG_KEYS && isUnsafeConfigKey(pair.key);
-  const deleteLabel = (pair: t.KeyValuePair, index: number) =>
-    `${localize('com_ui_delete')} ${pair.key || `${localize('com_ui_entry')} ${index + 1}`}`;
-  const keyError = (pair: t.KeyValuePair, index: number) =>
-    hasKeyError(pair) ? (
-      <p id={keyErrorId(index)} role="alert" className="m-0 text-xs text-(--cui-color-text-danger)">
-        {localize('com_config_unsafe_key_error')}
-      </p>
-    ) : null;
+  const typed = (pair: t.KeyValuePair, raw: string): t.KeyValuePair => {
+    if (valueOptions || pinned.has(pair.key)) return { ...pair, value: raw };
+    return { ...pair, value: raw, valueType: inferTypeFromText(raw, availableTypes) };
+  };
 
-  const renderPrimitiveRow = (vType: t.KVValueType, pair: t.KeyValuePair, index: number) => {
-    const valueLabel = `${localize('com_ui_value')} ${index + 1}`;
-    const invalid = hasKeyError(pair);
+  const updatePair = (index: number, patch: Partial<t.KeyValuePair>) => {
+    const next = [...pairs];
+    next[index] = { ...next[index], ...patch };
+    onChange(next);
+  };
+  const removePair = (index: number) => emit(pairs.filter((_, i) => i !== index));
+  const renameKey = (index: number, key: string) => {
+    if (isBlankText(key)) {
+      removePair(index);
+      return;
+    }
+    if (key === pairs[index].key) return;
+    if (pairs.some((pair, i) => i !== index && pair.key === key)) return;
+    updatePair(index, { key });
+  };
+  const changeType = (index: number, valueType: t.KVValueType) => {
+    const pair = pairs[index];
+    setPinned((prev) => new Set(prev).add(pair.key));
+    const truthy = pair.value === 'true' || pair.value === '1';
+    const value = valueType === 'boolean' ? String(truthy) : pair.value;
+    updatePair(index, { value, valueType });
+  };
+
+  const addDraft = () => {
+    const draftId = draftCounter.current++;
+    setDrafts((prev) => [
+      ...prev,
+      { id: draftId, pair: { key: '', value: '', valueType: availableTypes[0] } },
+    ]);
+    focusDraftRef.current = draftId;
+  };
+  const updateDraft = (draftId: number, patch: Partial<t.KeyValuePair>) => {
+    const draft = drafts.find((d) => d.id === draftId);
+    if (!draft) return;
+    const pair = { ...draft.pair, ...patch };
+    if (isBlankText(pair.key) || pairs.some((existing) => existing.key === pair.key)) {
+      setDrafts((prev) => prev.map((d) => (d.id === draftId ? { ...d, pair } : d)));
+      return;
+    }
+    setDrafts((prev) => prev.filter((d) => d.id !== draftId));
+    pendingAdoptionRef.current = { index: pairs.length, rowId: `draft-${draftId}` };
+    onChange([...pairs, pair]);
+  };
+  const removeDraft = (draftId: number) => {
+    setDrafts((prev) => prev.filter((d) => d.id !== draftId));
+  };
+
+  const keyErrorId = (rowId: string) => `${safeId}-${rowId}-key-error`;
+  const keyProblem = (pair: t.KeyValuePair, isDraft: boolean): string | null => {
+    if (pair.key !== '' && isBlankText(pair.key)) return localize('com_config_ctl_kv_blank_key');
+    if (BLOCK_UNSAFE_CONFIG_KEYS && isUnsafeConfigKey(pair.key)) {
+      return localize('com_config_unsafe_key_error');
+    }
+    if (isDraft && pair.key !== '' && pairs.some((existing) => existing.key === pair.key)) {
+      return localize('com_config_ctl_kv_duplicate');
+    }
+    return null;
+  };
+
+  const renderValueControl = (
+    pair: t.KeyValuePair,
+    rowId: string,
+    label: string,
+    onValue: (raw: string) => void,
+    onType: (type: t.KVValueType) => void,
+  ) => {
+    const vType = pair.valueType ?? 'string';
+    const controlId = `${safeId}-${rowId.replace(/[^\w-]/g, '-')}`;
+    let control: ReactNode;
+    if (valueOptions) {
+      control = (
+        <SelectField
+          id={`${controlId}-select`}
+          value={pair.value || undefined}
+          options={valueOptions}
+          onChange={onValue}
+          disabled={disabled}
+          aria-label={label}
+        />
+      );
+    } else if (vType === 'boolean') {
+      control = (
+        <SelectField
+          id={`${controlId}-bool`}
+          value={pair.value === 'true' ? 'true' : 'false'}
+          options={[
+            { value: 'true', label: localize('com_ui_true') },
+            { value: 'false', label: localize('com_ui_false') },
+          ]}
+          onChange={onValue}
+          disabled={disabled}
+          aria-label={label}
+        />
+      );
+    } else if (vType === 'json') {
+      control = (
+        <TextareaField
+          id={`${controlId}-json`}
+          value={pair.value}
+          onChange={onValue}
+          onClear={() => onValue('')}
+          placeholder='{"key": "value"}'
+          disabled={disabled}
+          monospace
+          aria-label={label}
+        />
+      );
+    } else {
+      control = (
+        <KVInput
+          type={vType === 'number' && pinned.has(pair.key) ? 'number' : 'text'}
+          value={pair.value}
+          onCommit={onValue}
+          placeholder={valuePlaceholder ?? localize('com_ui_value')}
+          disabled={disabled}
+          aria-label={label}
+          className={INPUT_CLASSES}
+        />
+      );
+    }
     return (
-      <div className="flex flex-col gap-1" role="listitem">
-        <div className="flex items-center gap-2">
-          <LocalInput
-            value={pair.key}
-            onCommit={(v) => handleChange(index, 'key', v)}
-            placeholder={keyPlaceholder ?? localize('com_ui_key')}
-            disabled={disabled}
-            aria-label={`${localize('com_ui_key')} ${index + 1}`}
-            aria-invalid={invalid}
-            aria-describedby={invalid ? keyErrorId(index) : undefined}
-            className="config-input max-w-37.5 flex-1"
-          />
-          {vType === 'boolean' ? (
-            <div className="select-field-a11y flex-2">
-              <Select
-                value={pair.value === 'true' ? 'true' : 'false'}
-                onSelect={(v) => handleChange(index, 'value', v)}
-                disabled={disabled}
-                aria-label={valueLabel}
-              >
-                <Select.Item value="true">{localize('com_ui_true')}</Select.Item>
-                <Select.Item value="false">{localize('com_ui_false')}</Select.Item>
-              </Select>
-            </div>
-          ) : (
-            <LocalInput
-              type={vType === 'number' ? 'number' : 'text'}
-              value={pair.value}
-              onCommit={(v) => handleChange(index, 'value', v)}
-              placeholder={valuePlaceholder ?? localize('com_ui_value')}
-              disabled={disabled}
-              aria-label={valueLabel}
-              className="config-input flex-2"
+      <div className="flex min-w-0 flex-2 items-start gap-2">
+        <div className="min-w-0 flex-1">{control}</div>
+        {!disabled && !valueOptions && availableTypes.length > 1 && (
+          <div className="w-28 shrink-0">
+            <SelectField
+              id={`${controlId}-type`}
+              value={vType}
+              options={availableTypes.map((type) => ({
+                value: type,
+                label: localize(TYPE_LABEL_KEYS[type]),
+              }))}
+              onChange={(type) => onType(type as t.KVValueType)}
+              aria-label={`${label} ${localize('com_config_field_type')}`}
             />
-          )}
-          {!disabled && availableTypes.length > 1 && (
-            <div className="select-field-a11y w-20 shrink-0">
-              <Select
-                value={vType}
-                onSelect={(v) => handleTypeChange(index, v as t.KVValueType)}
-                aria-label={`${localize('com_config_field_type')} ${index + 1}`}
-              >
-                {availableTypes.map((vt) => (
-                  <Select.Item key={vt} value={vt}>
-                    {localize(TYPE_LABEL_KEYS[vt])}
-                  </Select.Item>
-                ))}
-              </Select>
-            </div>
-          )}
-          {!disabled && (
-            <TrashButton onClick={() => handleRemove(index)} ariaLabel={deleteLabel(pair, index)} />
-          )}
-        </div>
-        {keyError(pair, index)}
+          </div>
+        )}
       </div>
     );
   };
 
-  const renderJsonRow = (pair: t.KeyValuePair, index: number) => (
-    <div className="flex flex-col gap-1" role="listitem">
-      <div className="flex items-center gap-2">
-        <LocalInput
-          value={pair.key}
-          onCommit={(v) => handleChange(index, 'key', v)}
-          placeholder={keyPlaceholder ?? localize('com_ui_key')}
-          disabled={disabled}
-          aria-label={`${localize('com_ui_key')} ${index + 1}`}
-          aria-invalid={hasKeyError(pair)}
-          aria-describedby={hasKeyError(pair) ? keyErrorId(index) : undefined}
-          className="config-input min-w-0 flex-1"
-        />
-        {!disabled && availableTypes.length > 1 && (
-          <div className="select-field-a11y w-20 shrink-0">
-            <Select
-              value="json"
-              onSelect={(v) => handleTypeChange(index, v as t.KVValueType)}
-              aria-label={`${localize('com_config_field_type')} ${index + 1}`}
-            >
-              {availableTypes.map((vt) => (
-                <Select.Item key={vt} value={vt}>
-                  {localize(TYPE_LABEL_KEYS[vt])}
-                </Select.Item>
-              ))}
-            </Select>
-          </div>
-        )}
-        {!disabled && (
-          <TrashButton onClick={() => handleRemove(index)} ariaLabel={deleteLabel(pair, index)} />
+  const renderRow = (
+    rowId: string,
+    pair: t.KeyValuePair,
+    index: number,
+    handlers: {
+      onKey: (key: string) => void;
+      onValue: (raw: string) => void;
+      onType: (type: t.KVValueType) => void;
+      onRemove: () => void;
+    },
+    isDraft: boolean,
+  ) => {
+    const problem = keyProblem(pair, isDraft);
+    const rowLabel = pair.key || `${localize('com_ui_entry')} ${index + 1}`;
+    const isLocked = !isDraft && (lockedKeys?.has(pair.key) ?? false);
+    return (
+      <div
+        key={rowId}
+        className="flex flex-col gap-1"
+        role="listitem"
+        data-kv-draft={isDraft ? rowId.replace('draft-', '') : undefined}
+      >
+        <div className="flex flex-wrap items-start gap-2 sm:flex-nowrap">
+          <KVInput
+            value={pair.key}
+            onCommit={handlers.onKey}
+            delay={isDraft ? 0 : undefined}
+            placeholder={keyPlaceholder ?? localize('com_ui_key')}
+            disabled={disabled || isLocked}
+            title={isLocked ? localize('com_config_ctl_kv_locked') : undefined}
+            aria-label={`${localize('com_ui_key')} ${index + 1}`}
+            aria-invalid={problem != null}
+            aria-describedby={problem ? keyErrorId(rowId) : undefined}
+            className={cn(INPUT_CLASSES, 'sm:w-auto sm:flex-1')}
+          />
+          {renderValueControl(
+            pair,
+            rowId,
+            `${localize('com_ui_value')} ${index + 1}`,
+            handlers.onValue,
+            handlers.onType,
+          )}
+          {!disabled && !isLocked && (
+            <TrashButton
+              onClick={handlers.onRemove}
+              ariaLabel={`${localize('com_ui_delete')} ${rowLabel}`}
+            />
+          )}
+        </div>
+        {problem && (
+          <p
+            id={keyErrorId(rowId)}
+            role="alert"
+            className="m-0 text-xs text-(--cui-color-text-danger)"
+          >
+            {problem}
+          </p>
         )}
       </div>
-      {keyError(pair, index)}
-      <LocalTextarea
-        value={pair.value}
-        onCommit={(v) => handleChange(index, 'value', v)}
-        placeholder='{"key": "value"}'
-        disabled={disabled}
-        aria-label={`${localize('com_ui_value')} ${index + 1}`}
-      />
-    </div>
-  );
+    );
+  };
+
+  /** One array, so a draft row that becomes a pair keeps its React key (and the focused input). */
+  const rows = [
+    ...pairs.map((pair, index) =>
+      renderRow(
+        rowIdAt(index),
+        pair,
+        index,
+        {
+          onKey: (key) => renameKey(index, key),
+          onValue: (raw) => updatePair(index, typed(pair, raw)),
+          onType: (type) => changeType(index, type),
+          onRemove: () => removePair(index),
+        },
+        false,
+      ),
+    ),
+    ...drafts.map((draft, i) =>
+      renderRow(
+        `draft-${draft.id}`,
+        draft.pair,
+        pairs.length + i,
+        {
+          onKey: (key) => updateDraft(draft.id, { key }),
+          onValue: (raw) => updateDraft(draft.id, typed(draft.pair, raw)),
+          onType: (valueType) => updateDraft(draft.id, { valueType }),
+          onRemove: () => removeDraft(draft.id),
+        },
+        true,
+      ),
+    ),
+  ];
 
   return (
     <div
@@ -287,18 +387,24 @@ export function KeyValueField({
       role="list"
       aria-label={ariaLabel}
     >
-      {pairs.map((pair, index) => {
-        const vType = pair.valueType ?? 'string';
-        return vType === 'json'
-          ? renderJsonRow(pair, index)
-          : renderPrimitiveRow(vType, pair, index);
-      })}
-
+      {rows}
+      {pairs.length === 0 && drafts.length === 0 && disabled && (
+        <span role="listitem" className="text-sm text-(--cui-color-text-muted)">
+          {localize('com_config_ctl_list_empty')}
+        </span>
+      )}
+      {notice && (
+        <div role="listitem">
+          <FieldNotice>{notice}</FieldNotice>
+        </div>
+      )}
       {!disabled && (
-        <AddItemButton
-          label={localize('com_ui_add_item', { item: localize('com_ui_entry') })}
-          onClick={handleAdd}
-        />
+        <div className="self-start" role="listitem" data-add-item>
+          <AddItemButton
+            label={localize('com_ui_add_item', { item: localize('com_ui_entry') })}
+            onClick={addDraft}
+          />
+        </div>
       )}
     </div>
   );

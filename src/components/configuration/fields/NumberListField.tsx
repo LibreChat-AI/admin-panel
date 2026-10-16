@@ -60,10 +60,12 @@ export function NumberListField({
       ))}
 
       {!disabled && (
-        <AddItemButton
-          label={localize('com_ui_add_item', { item: resolvedItemLabel })}
-          onClick={handleAdd}
-        />
+        <div role="listitem">
+          <AddItemButton
+            label={localize('com_ui_add_item', { item: resolvedItemLabel })}
+            onClick={handleAdd}
+          />
+        </div>
       )}
     </div>
   );

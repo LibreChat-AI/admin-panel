@@ -35,6 +35,8 @@ export const READ_ONLY_CONFIG_SECTIONS: ReadonlyMap<string, t.ReadOnlyReason> = 
   ['cloudfront', 'yamlOnly'],
   ['rateLimits', 'yamlOnly'],
   ['turnstile', 'yamlOnly'],
+  /** Only librechat.yaml's own loader knows it; AppService never carries it into the app config. */
+  ['cache', 'yamlOnly'],
 ]);
 
 /**
@@ -80,6 +82,11 @@ export const SKIP_REASON_KEYS: Readonly<Record<t.SkipReason, string>> = {
   yamlValue: 'com_config_skip_yaml_value',
   empty: 'com_config_skip_empty',
   notStored: 'com_config_skip_not_stored',
+  notApplied: 'com_config_skip_not_applied',
+  yamlMerged: 'com_config_skip_yaml_merged',
+  baseScope: 'com_scope_skip_base_scope',
+  inheritedValue: 'com_scope_skip_inherited_value',
+  inheritedMerged: 'com_scope_skip_inherited_merged',
 };
 
 /** The top-level config section of a dot-path (`balance.startBalance` → `balance`). */

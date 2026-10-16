@@ -1,10 +1,15 @@
-import { Icon } from '@clickhouse/click-ui';
+import { useContext } from 'react';
 import type * as t from '@/types';
 import { useCollapsibleSection } from '../../useCollapsibleSection';
+import { RowFilterContext } from '@/contexts/RowFilterContext';
 import { renderCollapsible } from '../../renderCollapsible';
 import { FIELD_GROUPS, flattenGroupFields } from './groups';
-import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
+import { useLocalize, useGlobalTitleBlock } from '@/hooks';
+import { DecorativeIcon } from '@/components/shared';
+import { InfoBanner } from '../../InfoBanner';
+import { cn, isRowVisible } from '@/utils';
+
+const TITLE_GROUP_KEY = 'com_config_group_title_generation';
 
 function FieldGroup({
   labelKey,
@@ -16,6 +21,7 @@ function FieldGroup({
   defaultExpanded,
   collectionRenderOverrides,
   editSessionId,
+  lockedKeys,
 }: {
   labelKey: string;
   fields: t.SchemaField[];
@@ -26,13 +32,19 @@ function FieldGroup({
   defaultExpanded: boolean;
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>;
   editSessionId?: number;
+  lockedKeys?: ReadonlySet<string>;
 }) {
   const localize = useLocalize();
+  const rowFilter = useContext(RowFilterContext);
+  const globalTitles = useGlobalTitleBlock();
+  const showsGlobalNotice = globalTitles && labelKey === TITLE_GROUP_KEY;
+  const paths = fields.map((field) => `${parentPath}.${field.key}`);
   const { isExpanded, hasEverExpanded, sectionRef, toggle } = useCollapsibleSection({
     defaultExpanded,
+    revealPaths: paths,
   });
 
-  if (fields.length === 0) return null;
+  if (!paths.some((path) => isRowVisible(rowFilter, path))) return null;
 
   return (
     <section ref={sectionRef} className="flex flex-col">
@@ -49,7 +61,7 @@ function FieldGroup({
               isExpanded && 'rotate-90',
             )}
           >
-            <Icon name="chevron-right" size="xs" />
+            <DecorativeIcon name="chevron-right" size="xs" />
           </span>
           <span className="text-xs font-medium text-(--cui-color-text-muted)">
             {localize(labelKey)}
@@ -60,6 +72,12 @@ function FieldGroup({
         isExpanded,
         hasEverExpanded,
         <div className="flex flex-col gap-3 pt-1">
+          {showsGlobalNotice && (
+            <InfoBanner
+              text={localize('com_config_global_titles_endpoint_banner')}
+              dismissible={false}
+            />
+          )}
           {flattenGroupFields(
             fields,
             parentValue,
@@ -69,6 +87,7 @@ function FieldGroup({
             disabled,
             collectionRenderOverrides,
             editSessionId,
+            lockedKeys,
           )}
         </div>,
       )}
@@ -85,6 +104,7 @@ export function GroupedFieldRenderer({
   disabled,
   collectionRenderOverrides,
   editSessionId,
+  lockedKeys,
 }: {
   groupKey: string;
   fields: t.SchemaField[];
@@ -94,6 +114,8 @@ export function GroupedFieldRenderer({
   disabled?: boolean;
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>;
   editSessionId?: number;
+  /** Fields shown read-only (the name of a librechat.yaml endpoint, D1). */
+  lockedKeys?: ReadonlySet<string>;
 }) {
   const groups = FIELD_GROUPS[groupKey];
   if (!groups) return null;
@@ -120,6 +142,7 @@ export function GroupedFieldRenderer({
             defaultExpanded={group.defaultExpanded}
             collectionRenderOverrides={collectionRenderOverrides}
             editSessionId={editSessionId}
+            lockedKeys={lockedKeys}
           />
         );
       })}
@@ -134,6 +157,7 @@ export function GroupedFieldRenderer({
           defaultExpanded={false}
           collectionRenderOverrides={collectionRenderOverrides}
           editSessionId={editSessionId}
+          lockedKeys={lockedKeys}
         />
       )}
     </div>

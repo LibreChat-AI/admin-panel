@@ -1,105 +1,65 @@
-import { useCallback, useState } from 'react';
-import { Icon, Dialog } from '@clickhouse/click-ui';
-import { PrincipalType } from 'librechat-data-provider';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import { Dialog, Icon } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { FieldProfilePopover } from './FieldProfilePopover';
-import { fieldProfileValuesOptions } from '@/server';
+import { useLocalize, useScopeActions } from '@/hooks';
 import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
+import { formatScopeName } from '@/utils';
 
-export function ProfileIndicator({
-  fieldPath,
-  fieldLabel,
-  fieldSchema,
-  profileTypes,
-  permissions,
-  onProfileChange,
-  baseValue,
-  onBaseValueChange,
-}: t.ProfileIndicatorProps) {
+/**
+ * "Overridden for USER" / "Overridden in 3 profiles" on a settings row in
+ * Base; opens the field's cascade so admins see who gets a different value
+ * before they edit the base one (WS8: PR-8).
+ */
+export function ProfileIndicator({ fieldPath, fieldLabel, profiles }: t.ScopeCascadeProps) {
   const localize = useLocalize();
-  const queryClient = useQueryClient();
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const actions = useScopeActions();
+  const [open, setOpen] = useState(false);
+  const types = [...new Set(profiles.map((scope) => scope.principalType))];
+  const label =
+    profiles.length === 1
+      ? localize('com_scope_overridden_one', { name: formatScopeName(profiles[0]) })
+      : localize('com_scope_overridden_many', { count: profiles.length });
 
-  const hasProfiles = profileTypes && profileTypes.length > 0;
-
-  const { data: profileValues = [] } = useQuery({
-    ...fieldProfileValuesOptions(fieldPath),
-    enabled: dialogOpen,
-  }) as { data: t.FieldProfileValue[] };
-
-  const handleClose = useCallback(() => {
-    setDialogOpen(false);
-  }, []);
-
-  const handleProfileChange = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['fieldProfileValues', fieldPath] });
-    onProfileChange?.();
-  }, [queryClient, fieldPath, onProfileChange]);
-
-  if (!hasProfiles) return null;
-
-  const uniqueTypes = hasProfiles ? [...new Set(profileTypes)] : [];
+  const openProfile = (scope: t.ConfigScope) => {
+    setOpen(false);
+    actions?.selectScope({ type: 'SCOPE', scope });
+  };
 
   return (
     <>
       <button
         type="button"
-        className="profile-indicator-btn"
-        aria-label={`${localize('com_scope_field_profiles')}: ${fieldLabel}`}
         aria-haspopup="dialog"
-        aria-expanded={dialogOpen}
-        onClick={() => setDialogOpen(true)}
+        onClick={() => setOpen(true)}
+        className="inline-flex max-w-full cursor-pointer items-center gap-1 self-start text-xs text-(--cui-color-text-link) hover:underline"
       >
-        {uniqueTypes.length > 0 ? (
-          uniqueTypes.map((type) => {
-            const config = getScopeTypeConfig(type as PrincipalType);
-            return (
-              <span
-                key={type}
-                aria-hidden="true"
-                className="inline-flex shrink-0 items-center justify-center"
-                style={{ color: config.color, width: 18, height: 18 }}
-                title={localize(config.labelKey)}
-              >
-                <Icon name={config.icon} size="sm" />
-              </span>
-            );
-          })
-        ) : (
-          <span
-            aria-hidden="true"
-            className="inline-flex shrink-0 items-center justify-center text-(--cui-color-text-muted)"
-            style={{ width: 18, height: 18 }}
-            title={localize('com_scope_add_profile_value')}
-          >
-            <Icon name="plus" size="sm" />
-          </span>
-        )}
+        {types.map((type) => {
+          const config = getScopeTypeConfig(type);
+          return (
+            <span
+              key={type}
+              aria-hidden="true"
+              className="shrink-0"
+              style={{ color: config.color }}
+            >
+              <Icon name={config.icon} size="xs" />
+            </span>
+          );
+        })}
+        <span className="truncate">{label}</span>
       </button>
-
-      <Dialog
-        open={dialogOpen}
-        onOpenChange={(isOpen) => {
-          if (!isOpen) handleClose();
-        }}
-      >
+      <Dialog open={open} onOpenChange={setOpen}>
         <Dialog.Content
-          title={localize('com_scope_cascade_title')}
+          title={localize('com_scope_cascade_heading', { field: fieldLabel })}
           showClose
-          onClose={handleClose}
+          onClose={() => setOpen(false)}
           className="modal-frost"
         >
           <FieldProfilePopover
             fieldPath={fieldPath}
-            fieldLabel={fieldLabel}
-            fieldSchema={fieldSchema}
-            profileValues={profileValues}
-            permissions={permissions}
-            onProfileChange={handleProfileChange}
-            baseValue={baseValue}
-            onBaseValueChange={onBaseValueChange}
+            profiles={profiles}
+            onOpenProfile={openProfile}
           />
         </Dialog.Content>
       </Dialog>

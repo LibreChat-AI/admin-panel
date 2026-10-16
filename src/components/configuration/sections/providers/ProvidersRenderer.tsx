@@ -1,8 +1,10 @@
-import { MultiAccordion } from '@clickhouse/click-ui';
+import { useContext } from 'react';
 import type * as t from '@/types';
+import { RowFilterContext } from '@/contexts/RowFilterContext';
 import { ProviderSection } from './ProviderSection';
 import { FieldRenderer } from '../../renderer';
 import { countConfigured } from '../../counts';
+import { isRowVisible } from '@/utils';
 
 export function ProvidersRenderer(props: t.FieldRendererProps) {
   const {
@@ -15,7 +17,6 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     onDiscardField,
     editedValues,
     disabled,
-    profileMap,
     permissions,
     configuredPaths,
     dbOverridePaths,
@@ -27,17 +28,19 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     previewScope,
     previewChangedPaths,
     resolvedValues,
-    onProfileChange,
     showChangedOnly,
     editSessionId,
   } = props;
+  const rowFilter = useContext(RowFilterContext);
 
-  // Named provider objects (openAI, anthropic, …)
   const providerFields = fields.filter(
-    (f) => f.key !== 'custom' && f.children && f.children.length > 0,
+    (f) =>
+      f.key !== 'custom' &&
+      f.children &&
+      f.children.length > 0 &&
+      isRowVisible(rowFilter, `${parentPath}.${f.key}`),
   );
 
-  // Any remaining scalar/collection fields
   const otherFields = fields.filter(
     (f) => f.key !== 'custom' && (!f.children || f.children.length === 0),
   );
@@ -51,7 +54,6 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     onDiscardField,
     editedValues,
     disabled,
-    profileMap,
     permissions,
     configuredPaths,
     dbOverridePaths,
@@ -63,12 +65,10 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
     previewScope,
     previewChangedPaths,
     resolvedValues,
-    onProfileChange,
     showChangedOnly,
     editSessionId,
   };
 
-  // In showConfiguredOnly mode, hide providers with no configured descendants
   const visibleProviders = showConfiguredOnly
     ? providerFields.filter((f) => {
         const { configured } = countConfigured(
@@ -80,31 +80,11 @@ export function ProvidersRenderer(props: t.FieldRendererProps) {
       })
     : providerFields;
 
-  const defaultOpen = visibleProviders
-    .filter((f) => {
-      const { configured } = countConfigured(
-        f.children ?? [],
-        `${parentPath}.${f.key}`,
-        configuredPaths,
-      );
-      return configured > 0;
-    })
-    .map((f) => `${parentPath}.${f.key}`);
-
   return (
-    <div className="flex flex-col gap-2">
-      <MultiAccordion
-        type="multiple"
-        showBorder
-        showCheck={false}
-        fillWidth
-        defaultValue={defaultOpen}
-        data-top-level-accordion
-      >
-        {visibleProviders.map((field) => (
-          <ProviderSection key={field.key} field={field} {...sharedProps} />
-        ))}
-      </MultiAccordion>
+    <div className="flex flex-col gap-4">
+      {visibleProviders.map((field) => (
+        <ProviderSection key={field.key} field={field} {...sharedProps} />
+      ))}
 
       {otherFields.length > 0 && <FieldRenderer fields={otherFields} {...sharedProps} />}
     </div>

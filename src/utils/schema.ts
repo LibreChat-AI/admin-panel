@@ -11,6 +11,14 @@ export const ZOD_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   'ZodPipeline',
 ]);
 
+/** The schema one wrapper (`ZOD_WRAPPER_TYPES`) encloses. */
+export function innerSchemaOf(def: t.ZodDef): t.ZodSchemaLike | undefined {
+  if (def.typeName === 'ZodLazy') return def.getter?.();
+  if (def.typeName === 'ZodPipeline') return def.out;
+  if (def.typeName === 'ZodEffects') return def.schema;
+  return def.innerType;
+}
+
 /** Strips optional/default/nullable/effects/lazy/pipeline wrappers down to the inner schema. */
 export function unwrapSchema(schema: t.ZodSchemaLike): t.ZodSchemaLike {
   const seen = new Set<t.ZodSchemaLike>();
@@ -18,20 +26,17 @@ export function unwrapSchema(schema: t.ZodSchemaLike): t.ZodSchemaLike {
   while (current?._def?.typeName && ZOD_WRAPPER_TYPES.has(current._def.typeName)) {
     if (seen.has(current)) break;
     seen.add(current);
-    let next: t.ZodSchemaLike | undefined;
-    if (current._def.typeName === 'ZodLazy') {
-      next = current._def.getter?.();
-    } else if (current._def.typeName === 'ZodPipeline') {
-      next = current._def.out;
-    } else if (current._def.typeName === 'ZodEffects') {
-      next = current._def.schema;
-    } else {
-      next = current._def.innerType;
-    }
+    const next = innerSchemaOf(current._def);
     if (!next) break;
     current = next;
   }
   return current;
+}
+
+/** Whether a (unwrapped) schema is a union: `z.union` or `z.discriminatedUnion`. */
+export function isUnionSchema(schema: t.ZodSchemaLike): boolean {
+  const typeName = schema?._def?.typeName;
+  return typeName === 'ZodUnion' || typeName === 'ZodDiscriminatedUnion';
 }
 
 /** Merges the object shapes from both sides of a ZodIntersection. Non-object
@@ -119,10 +124,10 @@ export function resolveSubSchema(
       if (!elementType) return null;
       current = elementType;
     } else if (typeName === 'ZodRecord') {
-      const valueType = (unwrapped._def as t.ZodDef & { valueType?: t.ZodSchemaLike }).valueType;
+      const valueType = unwrapped._def.valueType;
       if (!valueType) return null;
       current = valueType;
-    } else if (typeName === 'ZodUnion') {
+    } else if (isUnionSchema(unwrapped)) {
       const options = unwrapped._def.options ?? [];
       const candidates: t.ZodSchemaLike[] = [];
       for (const opt of options) {
@@ -165,4 +170,86 @@ export function getUnknownConfigEntries(
       !known.has(key) &&
       !(key.endsWith('Preview') && known.has(key.slice(0, -'Preview'.length))),
   );
+}
+
+const ARRAY_MARKER = '[]';
+const RECORD_MARKER = '{}';
+const childIndexCache = new WeakMap<ReadonlySet<string>, Map<string, Set<string>>>();
+
+/** Schema paths of every field in a tree, keeping the `[]`/`{}` markers (`mcpServers.{}.url`). */
+export function collectSchemaPaths(tree: t.SchemaField[]): Set<string> {
+  const paths = new Set<string>();
+  const visit = (fields: t.SchemaField[]) => {
+    for (const field of fields) {
+      paths.add(field.path);
+      if (field.children) visit(field.children);
+    }
+  };
+  visit(tree);
+  return paths;
+}
+
+/** Parent schema path → the child segments the schema defines under it (`''` is the root). */
+function childIndex(schemaPaths: ReadonlySet<string>): Map<string, Set<string>> {
+  const cached = childIndexCache.get(schemaPaths);
+  if (cached) return cached;
+  const index = new Map<string, Set<string>>();
+  for (const path of schemaPaths) {
+    const segments = path.split('.');
+    for (let i = 0; i < segments.length; i++) {
+      const parent = segments.slice(0, i).join('.');
+      const children = index.get(parent) ?? new Set<string>();
+      children.add(segments[i]);
+      index.set(parent, children);
+    }
+  }
+  childIndexCache.set(schemaPaths, index);
+  return index;
+}
+
+function joinPath(prefix: string, key: string): string {
+  return prefix ? `${prefix}.${key}` : key;
+}
+
+function isPreviewCompanion(key: string, known: ReadonlySet<string>): boolean {
+  return key.endsWith('Preview') && known.has(key.slice(0, -'Preview'.length));
+}
+
+/**
+ * Dot-paths of config keys the schema does not describe (SCH-6), such as
+ * settings from a newer LibreChat: walks objects, array elements (`[]`) and
+ * record values (`{}`) of `config` against schema paths that keep their
+ * markers (`collectSchemaPaths`). Values under a leaf field (a primitive
+ * record, a list) are never reported; secret `*Preview` companions are skipped.
+ */
+export function getUnknownConfigKeys(
+  config: t.ConfigValue,
+  schemaPaths: ReadonlySet<string>,
+): string[] {
+  const index = childIndex(schemaPaths);
+  const unknown: string[] = [];
+  const walk = (value: t.ConfigValue, schemaPath: string, dataPath: string) => {
+    const known = index.get(schemaPath);
+    if (!known) return;
+    if (Array.isArray(value)) {
+      if (!known.has(ARRAY_MARKER)) return;
+      value.forEach((item, i) =>
+        walk(item, joinPath(schemaPath, ARRAY_MARKER), joinPath(dataPath, String(i))),
+      );
+      return;
+    }
+    if (!isConfigRecord(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      if (child === undefined) continue;
+      if (known.has(RECORD_MARKER)) {
+        walk(child, joinPath(schemaPath, RECORD_MARKER), joinPath(dataPath, key));
+      } else if (known.has(key)) {
+        walk(child, joinPath(schemaPath, key), joinPath(dataPath, key));
+      } else if (!isPreviewCompanion(key, known)) {
+        unknown.push(joinPath(dataPath, key));
+      }
+    }
+  };
+  walk(config, '', '');
+  return unknown;
 }

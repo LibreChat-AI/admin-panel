@@ -4,11 +4,18 @@ import importPlugin from 'eslint-plugin-import-x';
 import tailwindCanonicalClasses from 'eslint-plugin-tailwind-canonical-classes';
 import clickUiPlugin from 'eslint-plugin-click-ui';
 import requireButtonHtmlType from './tools/eslint-plugin-click-ui/rules/require-button-html-type.js';
+import noBareIconInInteractive from './tools/eslint-plugin-click-ui/rules/no-bare-icon-in-interactive.js';
+import noLegacyArbitraryVariable from './tools/eslint-plugin-click-ui/rules/no-legacy-arbitrary-variable.js';
 
 /** Loads rules from the in-repo plugin source so a stale installed copy cannot hide new rules. */
 const clickUi = {
   ...clickUiPlugin,
-  rules: { ...clickUiPlugin.rules, 'require-button-html-type': requireButtonHtmlType },
+  rules: {
+    ...clickUiPlugin.rules,
+    'require-button-html-type': requireButtonHtmlType,
+    'no-bare-icon-in-interactive': noBareIconInInteractive,
+    'no-legacy-arbitrary-variable': noLegacyArbitraryVariable,
+  },
 };
 
 export default [
@@ -61,6 +68,8 @@ export default [
       'click-ui/require-provider': 'off',
       'click-ui/select-requires-options': 'off',
       'click-ui/require-button-html-type': 'error',
+      'click-ui/no-bare-icon-in-interactive': 'error',
+      'click-ui/no-legacy-arbitrary-variable': 'error',
     },
   },
 ];

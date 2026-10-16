@@ -1,5 +1,5 @@
-import { Icon } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { DecorativeIcon } from './DecorativeIcon';
 import { useLocalize } from '@/hooks';
 import { Avatar } from './Avatar';
 import { cn } from '@/utils';
@@ -42,7 +42,7 @@ export function SelectedMemberList({ users, onRemove, disabled }: t.SelectedMemb
               aria-label={localize('com_ui_remove_item', { name: user.name })}
               className="trash-btn"
             >
-              <Icon name="cross" size="sm" />
+              <DecorativeIcon name="cross" size="sm" />
             </button>
           </div>
         ))}

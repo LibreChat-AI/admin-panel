@@ -7,12 +7,27 @@ import {
   getLangfuseConnectionFn,
   LANGFUSE_CONNECTION_QUERY_KEY,
 } from '@/server';
+import {
+  flattenObject,
+  getValueAtPath,
+  withScopeLayer,
+  createBaseLayers,
+  overlayPendingEdits,
+  overriddenEntryKeys,
+} from '@/utils';
+import { KEYED_COLLECTIONS } from '@/constants';
 import { collectFieldPaths, withLangfuseConfiguredPath } from '@/components/configuration/counts';
-import { flattenObject, unflattenObject, mapSecretPreviewPaths } from '@/utils';
 import { mergeIndexedArrayEdits } from '@/components/configuration/edits';
-import { READ_ONLY_CONFIG_SECTIONS } from '@/constants';
+import { getFieldMeta } from '@/components/configuration/meta';
 
-function resolvedConfigOptions(scope: t.ScopeSelection) {
+const INDEXED_EDIT_PATH = /\.\d+$/;
+
+/** The documented runtime default of a field, from its field meta (WS2 registry). */
+export function runtimeDefaultAt(path: string): t.ConfigValue {
+  return getFieldMeta(path)?.runtimeDefault;
+}
+
+export function resolvedConfigOptions(scope: t.ScopeSelection) {
   const principalType = scope.type === 'SCOPE' ? scope.scope.principalType : null;
   const principalId = scope.type === 'SCOPE' ? scope.scope.principalId : null;
   return queryOptions({
@@ -30,40 +45,47 @@ function resolvedConfigOptions(scope: t.ScopeSelection) {
 }
 
 /**
- * The config layers the page reads (WS4: effective values): the effective base
- * config, the base admin overrides, librechat.yaml alone, and the open
- * profile's own overrides, plus the configured/override path sets for each.
+ * The config layers the page reads (WS4: effective values): librechat.yaml
+ * (raw paths and as LibreChat processes it), the base admin overrides, the
+ * effective base config, and in a profile its own overrides and tombstones
+ * merged over Base. Also the configured/override path sets, the
+ * `ValueLayers` that `useFieldState` derives provenance from. Whether those
+ * queries have loaded is `useConfigBaseline`'s (WS5).
  */
 export function useConfigLayers({
   schemaTree,
   selectedScope,
   sectionPermissions,
 }: t.ConfigLayersOptions): t.ConfigLayers {
-  const { data: baseConfigData } = useQuery(baseConfigOptions);
+  const baseQuery = useQuery(baseConfigOptions);
+  const baseConfigData = baseQuery.data;
   const configValues = baseConfigData?.config ?? null;
   const dbOverrides = baseConfigData?.dbOverrides;
-  const configuredFromBase = baseConfigData?.configuredFromBase;
-  const schemaDefaults = baseConfigData?.schemaDefaults ?? {};
-  const flatBaseline = useMemo(() => flattenObject(configValues ?? {}), [configValues]);
+  const schemaDefaults = useMemo(
+    () => baseConfigData?.schemaDefaults ?? {},
+    [baseConfigData?.schemaDefaults],
+  );
 
   const fieldPaths = useMemo(() => collectFieldPaths(schemaTree), [schemaTree]);
   const schemaPathSet = useMemo(() => new Set(fieldPaths), [fieldPaths]);
 
-  const configuredPaths = useMemo(() => {
-    const paths = new Set<string>();
-    if (configuredFromBase) {
-      for (const p of configuredFromBase) paths.add(p);
-    }
-    if (dbOverrides) {
-      for (const p of Object.keys(flattenObject(dbOverrides))) paths.add(p);
-    }
-    return mapSecretPreviewPaths(paths, schemaPathSet);
-  }, [configuredFromBase, dbOverrides, schemaPathSet]);
+  /** Base-mode layers: librechat.yaml (raw paths and processed), base overrides and tombstones, effective base. */
+  const baseLayers = useMemo(
+    () =>
+      baseConfigData ? createBaseLayers(baseConfigData, schemaPathSet, runtimeDefaultAt) : null,
+    [baseConfigData, schemaPathSet],
+  );
 
-  const dbOverridePaths = useMemo(() => {
-    if (!dbOverrides) return new Set<string>();
-    return mapSecretPreviewPaths(Object.keys(flattenObject(dbOverrides)), schemaPathSet);
-  }, [dbOverrides, schemaPathSet]);
+  const dbOverridePaths = useMemo(
+    () => new Set(baseLayers?.baseOverridePaths.paths ?? []),
+    [baseLayers],
+  );
+
+  /** What librechat.yaml or a base override sets; values LibreChat synthesizes at startup are not configured. */
+  const configuredPaths = useMemo(
+    () => new Set([...(baseLayers?.yamlPaths.paths ?? []), ...dbOverridePaths]),
+    [baseLayers, dbOverridePaths],
+  );
 
   const baseRecordKeys = useMemo(() => {
     const result: Record<string, Set<string>> = {};
@@ -75,37 +97,66 @@ export function useConfigLayers({
   }, [baseConfigData]);
 
   const isEditingScope = selectedScope.type === 'SCOPE';
+  const openScope = selectedScope.type === 'SCOPE' ? selectedScope.scope : null;
 
-  const { data: resolvedData } = useQuery(resolvedConfigOptions(selectedScope));
-  const scopeChangedPaths = resolvedData?.changedPaths ?? null;
-  const scopeResolvedValues = resolvedData?.resolvedConfig ?? null;
+  const scopeQuery = useQuery(resolvedConfigOptions(selectedScope));
+  const scopeData = isEditingScope ? scopeQuery.data : undefined;
 
-  const scopeConfigValues = useMemo(() => {
-    if (!isEditingScope || !scopeResolvedValues) return null;
-    return unflattenObject(scopeResolvedValues) as Record<string, t.ConfigValue>;
-  }, [isEditingScope, scopeResolvedValues]);
+  /** Profile mode: Base merged with the profile's overrides, minus its tombstones (null until both load). */
+  const valueLayers = useMemo((): t.ValueLayers | null => {
+    if (!baseLayers || !isEditingScope) return baseLayers;
+    if (!openScope || !scopeData) return null;
+    return withScopeLayer(baseLayers, openScope, scopeData, schemaPathSet);
+  }, [baseLayers, isEditingScope, openScope, scopeData, schemaPathSet]);
 
-  const baseActiveConfigValues = isEditingScope ? scopeConfigValues : configValues;
-
-  /** Read-only sections can't be overridden per profile, so a profile shows the base values. */
-  const displayConfigValues = useMemo(() => {
-    if (!isEditingScope || !baseActiveConfigValues || !configValues) return baseActiveConfigValues;
-    const withBase = { ...baseActiveConfigValues };
-    for (const section of READ_ONLY_CONFIG_SECTIONS.keys()) {
-      if (section in configValues) withBase[section] = configValues[section];
+  /**
+   * Overridden entries of each keyed list, by the edit target: Base's
+   * overrides over librechat.yaml, or the open profile's over Base. A list a
+   * profile replaces whole (model specs) is one override there, as its
+   * overrides summary lists it (`listScopeOverrideItems`).
+   */
+  const listOverrideCounts = useMemo(() => {
+    const scopeLayer = valueLayers?.scope;
+    const stored = scopeLayer ? scopeLayer.overrides : (dbOverrides ?? null);
+    const lower = scopeLayer ? (valueLayers?.base ?? null) : (baseConfigData?.yamlConfig ?? null);
+    const counts = new Map<string, number>();
+    for (const collection of KEYED_COLLECTIONS.values()) {
+      const storedList = getValueAtPath(stored, collection.path);
+      if (scopeLayer && collection.merge === 'replace') {
+        counts.set(collection.path, Array.isArray(storedList) ? 1 : 0);
+        continue;
+      }
+      const keys = overriddenEntryKeys(
+        collection,
+        storedList,
+        getValueAtPath(lower, collection.path),
+      );
+      counts.set(collection.path, keys.size);
     }
-    return withBase;
-  }, [isEditingScope, baseActiveConfigValues, configValues]);
+    return counts;
+  }, [valueLayers, dbOverrides, baseConfigData?.yamlConfig]);
 
-  const scopeConfiguredPaths = useMemo(() => {
-    if (!scopeChangedPaths) return new Set<string>();
-    return mapSecretPreviewPaths(scopeChangedPaths, schemaPathSet);
-  }, [scopeChangedPaths, schemaPathSet]);
+  const baseActiveConfigValues = isEditingScope ? (valueLayers?.effective ?? null) : configValues;
+  const flatBaseline = useMemo(
+    () => flattenObject(baseActiveConfigValues ?? {}),
+    [baseActiveConfigValues],
+  );
 
-  const scopeChangedPathsMapped = useMemo(() => {
-    if (!scopeChangedPaths) return null;
-    return Array.from(mapSecretPreviewPaths(scopeChangedPaths, schemaPathSet));
-  }, [scopeChangedPaths, schemaPathSet]);
+  const scopeOverridePaths = useMemo(
+    () => new Set(valueLayers?.scope?.overridePaths.paths ?? []),
+    [valueLayers],
+  );
+
+  const scopeChangedPaths = useMemo(
+    () => (scopeData ? Array.from(scopeOverridePaths) : null),
+    [scopeData, scopeOverridePaths],
+  );
+
+  /** A profile customizes what it overrides and what it hides. */
+  const scopeConfiguredPaths = useMemo(
+    () => new Set([...scopeOverridePaths, ...(scopeData?.tombstones ?? [])]),
+    [scopeOverridePaths, scopeData],
+  );
 
   const { data: langfuseConnection } = useQuery({
     queryKey: LANGFUSE_CONNECTION_QUERY_KEY,
@@ -123,9 +174,6 @@ export function useConfigLayers({
     [configuredPaths, langfuseConnection?.configured],
   );
 
-  const activeConfiguredPaths = isEditingScope ? scopeConfiguredPaths : baseConfiguredPaths;
-  const overridePaths = isEditingScope ? scopeConfiguredPaths : dbOverridePaths;
-
   return {
     configValues,
     dbOverrides,
@@ -137,24 +185,53 @@ export function useConfigLayers({
     schemaPathSet,
     dbOverridePaths,
     baseRecordKeys,
-    scopeResolvedValues,
-    scopeChangedPaths: scopeChangedPathsMapped,
+    scopeResolvedValues: isEditingScope && baseActiveConfigValues ? flatBaseline : null,
+    scopeOverrideValues: scopeData?.resolvedConfig ?? null,
+    scopeChangedPaths,
     baseActiveConfigValues,
-    displayConfigValues,
-    activeConfiguredPaths,
-    overridePaths,
+    displayConfigValues: baseActiveConfigValues,
+    activeConfiguredPaths: isEditingScope ? scopeConfiguredPaths : baseConfiguredPaths,
+    overridePaths: isEditingScope ? scopeOverridePaths : dbOverridePaths,
+    listOverrideCounts,
+    valueLayers,
   };
 }
 
-/** Overlays pending indexed-array edits onto the displayed config, so lists and the TOC show them (WS4). */
+/**
+ * What a pending reset of a list or entry falls back to on the page: in base
+ * mode librechat.yaml; in a profile the Base value (removing a profile's own
+ * override reverts to what it inherits, SV-9).
+ */
+function pendingRevertValue(layers: t.ValueLayers | null | undefined, path: string): t.ConfigValue {
+  if (!layers) return undefined;
+  return getValueAtPath(layers.scope ? layers.base : layers.yamlEffective, path);
+}
+
+/**
+ * Overlays every pending structural edit onto the displayed config (EV-6):
+ * indexed array entries, whole lists (adds, deletes, reorders), new entries
+ * and removed ones, so collection counts and the table of contents match the
+ * page before saving. Primitive values are read by the fields themselves.
+ */
 export function usePendingConfigValues(
   displayConfigValues: Record<string, t.ConfigValue> | null,
   editedValues: t.FlatConfigMap,
+  valueLayers?: t.ValueLayers | null,
 ): Record<string, t.ConfigValue> | null {
   return useMemo(() => {
     if (!displayConfigValues) return displayConfigValues;
-    const indexedEdits = Object.entries(editedValues).filter(([k]) => /\.\d+$/.test(k));
-    if (indexedEdits.length === 0) return displayConfigValues;
-    return mergeIndexedArrayEdits(displayConfigValues, indexedEdits);
-  }, [displayConfigValues, editedValues]);
+    const indexed: Array<[string, t.ConfigValue]> = [];
+    const structural: Array<[string, t.ConfigValue]> = [];
+    for (const entry of Object.entries(editedValues)) {
+      (INDEXED_EDIT_PATH.test(entry[0]) ? indexed : structural).push(entry);
+    }
+    if (indexed.length === 0 && structural.length === 0) return displayConfigValues;
+    const withIndexed =
+      indexed.length > 0
+        ? mergeIndexedArrayEdits(displayConfigValues, indexed)
+        : displayConfigValues;
+    return overlayPendingEdits(withIndexed, structural, (path) =>
+      pendingRevertValue(valueLayers, path),
+    );
+  }, [displayConfigValues, editedValues, valueLayers]);
 }

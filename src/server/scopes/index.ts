@@ -7,4 +7,3 @@
 
 export * from './read';
 export * from './resolved';
-export * from './write';

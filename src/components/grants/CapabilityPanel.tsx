@@ -3,6 +3,7 @@ import { Icon, Switch } from '@clickhouse/click-ui';
 import type { BaseSystemCapability } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { CapabilityImplications, CAPABILITY_CATEGORIES } from '@/constants';
+import { DecorativeIcon } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -89,7 +90,7 @@ export function CapabilityPanel({ capabilities, onChange, disabled }: t.Capabili
               )}
             >
               <div className="flex flex-1 items-center gap-2">
-                <Icon
+                <DecorativeIcon
                   name="chevron-right"
                   size="sm"
                   className={cn(

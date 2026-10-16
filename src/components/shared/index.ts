@@ -1,6 +1,9 @@
 export { AccessDenied } from './AccessDenied';
 export { AddItemButton } from './AddItemButton';
 export { Avatar } from './Avatar';
+export { CloseButton } from './CloseButton';
+export { CountBadge, OverrideCount } from './CountBadge';
+export { DecorativeIcon } from './DecorativeIcon';
 export { EditButton } from './EditButton';
 export { EmptyState } from './EmptyState';
 export { FormDialog } from './FormDialog';
@@ -13,6 +16,7 @@ export { ScreenReaderAnnouncer } from './ScreenReaderAnnouncer';
 export { SearchInput } from './SearchInput';
 export { default as SidebarIcon } from './SidebarIcon';
 export { SelectedMemberList } from './SelectedMemberList';
+export { StateChip } from './StateChip';
 export { StatusToggle } from './StatusToggle';
 export { StickyActionBar } from './StickyActionBar';
 export { TrashButton } from './TrashButton';

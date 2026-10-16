@@ -29,7 +29,21 @@ export interface CommandMenuProps {
 }
 
 export interface CommandItemProps {
+  /** Unique cmdk value (the menu filters itself, so this is an id). */
+  value: string;
   icon?: IconName;
+  label: string;
+  /** Secondary line, e.g. a setting's breadcrumb. */
+  detail?: string;
+  /** Right-aligned text, e.g. a setting's current value. */
+  trailing?: string;
+  onSelect: () => void;
+}
+
+/** A fixed command-menu entry (navigation, tabs, actions), filtered by word prefix. */
+export interface StaticCommand {
+  id: string;
+  icon: IconName;
   label: string;
   keywords?: string[];
   onSelect: () => void;

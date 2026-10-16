@@ -1,133 +1,142 @@
-import { useQuery } from '@tanstack/react-query';
+import { Button, Dialog } from '@clickhouse/click-ui';
 import { PrincipalType } from 'librechat-data-provider';
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { Icon, Button, Dialog, Tabs } from '@clickhouse/click-ui';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import type * as t from '@/types';
-import { availableScopesOptions, createGroupFn, createRoleFn, parseImportedYaml } from '@/server';
-import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
+import { useLocalize, useImportPreview, importTargetLabel } from '@/hooks';
+import { Source, Targets, Preview, SyntaxFrame } from './wizard';
+import { parseImportedYaml } from '@/server';
 
+const STEPS: t.ImportStep[] = ['input', 'target', 'preview'];
+const STEP_KEYS: Readonly<Record<t.ImportStep, string>> = {
+  input: 'com_config_review_import_step_source',
+  target: 'com_config_review_import_step_target',
+  preview: 'com_config_review_import_step_preview',
+};
+
+/**
+ * The YAML import wizard (WS7, RV-6): paste or upload, choose any role,
+ * group or user (or Base) as the target, preview exactly the YAML's keys
+ * against what the target has now, and apply the chosen ones through the
+ * normal validated save. Imports merge; librechat.yaml is never modified.
+ */
 export function ImportYamlDialog({
   open,
   onClose,
   currentScope,
+  schemaTree,
+  schemaPathSet,
   onImport,
 }: t.ImportYamlDialogProps) {
   const localize = useLocalize();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const targetRef = useRef<HTMLDivElement>(null);
-
+  const [step, setStep] = useState<t.ImportStep>('input');
   const [activeTab, setActiveTab] = useState<t.ImportTab>('upload');
   const [yamlText, setYamlText] = useState('');
   const [fileName, setFileName] = useState<string>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [errorMark, setErrorMark] = useState<{ line: number; column: number }>();
   const [validationErrors, setValidationErrors] = useState<t.ImportValidationError[]>();
+  const [appConfig, setAppConfig] = useState<t.ConfigRecord | null>(null);
 
-  const [step, setStep] = useState<t.ImportStep>('input');
-  const [parsedConfig, setParsedConfig] = useState<Record<string, t.ConfigValue> | null>(null);
-  const [unknownPaths, setUnknownPaths] = useState<string[]>([]);
-  const defaultTargetMode: t.TargetMode = currentScope ? 'current' : 'base';
-  const [targetMode, setTargetMode] = useState<t.TargetMode>(defaultTargetMode);
-  const [selectedScope, setSelectedScope] = useState<t.ConfigScope | null>(null);
+  const defaultMode: t.TargetMode = currentScope ? 'current' : 'base';
+  const [mode, setMode] = useState<t.TargetMode>(defaultMode);
+  const [kind, setKind] = useState<t.ImportPrincipalKind>(PrincipalType.ROLE);
+  const [selected, setSelected] = useState<t.ImportPrincipal | null>(null);
+  const [newType, setNewType] = useState<PrincipalType.ROLE | PrincipalType.GROUP>(
+    PrincipalType.ROLE,
+  );
+  const [newName, setNewName] = useState('');
+  const [included, setIncluded] = useState<Set<string> | null>(null);
 
-  const [newScopeType, setNewScopeType] = useState<PrincipalType>(PrincipalType.ROLE);
-  const [newScopeName, setNewScopeName] = useState('');
+  const target = useMemo((): t.ImportTarget | null => {
+    if (mode === 'base') return { type: 'base' };
+    if (mode === 'current') {
+      return currentScope ? { type: 'scope', scope: currentScope, exists: true } : null;
+    }
+    if (mode === 'existing') return selected ? { type: 'scope', ...selected } : null;
+    const name = newName.trim();
+    return name ? { type: 'create', principalType: newType, name } : null;
+  }, [mode, currentScope, selected, newName, newType]);
 
-  const { data: allScopes = [] } = useQuery({
-    ...availableScopesOptions,
-    enabled: open && step === 'target',
+  const preview = useImportPreview({
+    schemaTree,
+    schemaPathSet,
+    appConfig: step === 'input' ? null : appConfig,
+    target: step === 'preview' ? target : null,
   });
 
-  useEffect(() => {
-    if (step === 'target' && targetRef.current) {
-      const first = targetRef.current.querySelector<HTMLElement>('[role="radio"]');
-      first?.focus();
-    }
-  }, [step]);
+  /** Leaves already equal to what the target has, and keys this panel does not recognise, start unchecked. */
+  const defaultIncluded = useMemo(
+    () =>
+      new Set(
+        preview.groups.flatMap((group) =>
+          group.rows.filter((row) => !row.unchanged && !row.unknown).map((row) => row.fieldPath),
+        ),
+      ),
+    [preview.groups],
+  );
+  const selection = included ?? defaultIncluded;
 
   const reset = useCallback(() => {
+    setStep('input');
     setActiveTab('upload');
     setYamlText('');
     setFileName(undefined);
     setLoading(false);
     setError(undefined);
+    setErrorMark(undefined);
     setValidationErrors(undefined);
-    setStep('input');
-    setParsedConfig(null);
-    setUnknownPaths([]);
-    setTargetMode(defaultTargetMode);
-    setSelectedScope(null);
-    setNewScopeType(PrincipalType.ROLE);
-    setNewScopeName('');
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }, [defaultTargetMode]);
+    setAppConfig(null);
+    setMode(defaultMode);
+    setKind(PrincipalType.ROLE);
+    setSelected(null);
+    setNewType(PrincipalType.ROLE);
+    setNewName('');
+    setIncluded(null);
+  }, [defaultMode]);
 
   /** A profile opened (or closed) since the last import changes which target is preselected. */
   useEffect(() => {
-    if (open && step === 'input') setTargetMode(defaultTargetMode);
-  }, [open, step, defaultTargetMode]);
+    if (open && step === 'input') setMode(defaultMode);
+  }, [open, step, defaultMode]);
 
   const handleClose = useCallback(() => {
     reset();
     onClose();
   }, [reset, onClose]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setFileName(file.name);
+  const clearErrors = () => {
     setError(undefined);
+    setErrorMark(undefined);
     setValidationErrors(undefined);
+  };
 
+  const handleFile = (file: File) => {
+    setFileName(file.name);
+    clearErrors();
     const reader = new FileReader();
-    reader.onload = (ev) => {
-      const text = ev.target?.result;
-      if (typeof text === 'string') {
-        setYamlText(text);
-      }
+    reader.onload = (event) => {
+      const text = event.target?.result;
+      if (typeof text === 'string') setYamlText(text);
     };
-    reader.onerror = () => {
-      setError(localize('com_config_import_error'));
-    };
+    reader.onerror = () => setError(localize('com_config_import_error'));
     reader.readAsText(file);
   };
 
-  const handleTabSwitch = (tab: string) => {
-    setActiveTab(tab as t.ImportTab);
-    setError(undefined);
-    setValidationErrors(undefined);
-    if (tab === 'paste' && fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
-
   const handleValidate = async () => {
-    const trimmed = yamlText.trim();
-    if (!trimmed) return;
-
+    if (!yamlText.trim()) return;
     setLoading(true);
-    setError(undefined);
-    setValidationErrors(undefined);
-
+    clearErrors();
     try {
-      const result = await parseImportedYaml({ data: { yamlContent: trimmed } });
-
-      if (!result.success) {
+      const result = await parseImportedYaml({ data: { yamlContent: yamlText } });
+      if (!result.success || !result.appConfig) {
         setError(result.error ?? localize('com_config_import_error'));
-        if (result.validationErrors) {
-          setValidationErrors(result.validationErrors as t.ImportValidationError[]);
-        }
+        setErrorMark(result.mark);
+        setValidationErrors(result.validationErrors);
         return;
       }
-
-      if (result.appConfig && typeof result.appConfig === 'object') {
-        setParsedConfig(result.appConfig as Record<string, t.ConfigValue>);
-        setUnknownPaths(result.unknownPaths ?? []);
-        setStep('target');
-      }
+      setAppConfig(result.appConfig);
+      setStep('target');
     } catch (err) {
       setError(err instanceof Error ? err.message : localize('com_config_import_error'));
     } finally {
@@ -136,55 +145,11 @@ export function ImportYamlDialog({
   };
 
   const handleApply = async () => {
-    if (!parsedConfig) return;
-
+    if (!target) return;
     setLoading(true);
     setError(undefined);
-
     try {
-      if (targetMode === 'base' || (targetMode === 'current' && currentScope)) {
-        await onImport(
-          parsedConfig,
-          targetMode === 'base' || !currentScope
-            ? { type: 'base' }
-            : { type: 'scope', scope: currentScope },
-        );
-        handleClose();
-        return;
-      }
-
-      let scope: t.ConfigScope;
-
-      if (targetMode === 'create') {
-        if (!newScopeName.trim()) return;
-        const name = newScopeName.trim();
-
-        if (newScopeType === PrincipalType.ROLE) {
-          const { role } = await createRoleFn({ data: { name } });
-          scope = {
-            principalType: PrincipalType.ROLE,
-            principalId: role.id,
-            name: role.name,
-            priority: 10,
-            isActive: true,
-          };
-        } else {
-          const { group } = await createGroupFn({ data: { name, description: '' } });
-          scope = {
-            principalType: PrincipalType.GROUP,
-            principalId: group.id,
-            name: group.name,
-            priority: 20,
-            memberCount: 0,
-            isActive: true,
-          };
-        }
-      } else {
-        if (!selectedScope) return;
-        scope = selectedScope;
-      }
-
-      await onImport(parsedConfig, { type: 'scope', scope });
+      await onImport({ target, entries: preview.entriesFor(selection) });
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : localize('com_config_import_error'));
@@ -193,18 +158,52 @@ export function ImportYamlDialog({
     }
   };
 
-  const canApply = (() => {
-    if (loading) return false;
-    if (targetMode === 'base') return true;
-    if (targetMode === 'current') return currentScope != null;
-    if (targetMode === 'existing') return selectedScope !== null;
-    if (targetMode === 'create') return newScopeName.trim().length > 0;
-    return false;
-  })();
+  const toggle = (fieldPath: string, include: boolean) => {
+    const next = new Set(selection);
+    if (include) next.add(fieldPath);
+    else next.delete(fieldPath);
+    setIncluded(next);
+  };
 
-  const hasContent = yamlText.trim().length > 0;
-  const roleScopes = allScopes.filter((s) => s.principalType === PrincipalType.ROLE);
-  const groupScopes = allScopes.filter((s) => s.principalType === PrincipalType.GROUP);
+  const goTo = (next: t.ImportStep) => {
+    clearErrors();
+    if (next !== 'preview') setIncluded(null);
+    setStep(next);
+  };
+
+  const { loading: previewLoading, issuesFor } = preview;
+  const importIssues = useMemo(
+    () => (step === 'preview' && !previewLoading ? issuesFor(selection) : []),
+    [step, previewLoading, issuesFor, selection],
+  );
+
+  const targetLabel = target ? importTargetLabel(target, localize) : '';
+  const count = selection.size;
+  const stepIndex = STEPS.indexOf(step);
+
+  const primary = (() => {
+    if (step === 'input') {
+      return {
+        label: loading ? localize('com_ui_loading') : localize('com_config_review_import_next'),
+        disabled: !yamlText.trim() || loading,
+        onClick: handleValidate,
+      };
+    }
+    if (step === 'target') {
+      return {
+        label: localize('com_config_review_import_preview'),
+        disabled: target == null,
+        onClick: async () => goTo('preview'),
+      };
+    }
+    return {
+      label: loading
+        ? localize('com_config_import_saving')
+        : localize('com_config_review_import_apply', { count, target: targetLabel }),
+      disabled: loading || preview.loading || count === 0 || importIssues.length > 0,
+      onClick: handleApply,
+    };
+  })();
 
   return (
     <Dialog
@@ -220,229 +219,93 @@ export function ImportYamlDialog({
         className="modal-frost"
       >
         <div className="flex flex-col gap-4">
-          <div className="sr-only" aria-live="polite">
-            {step === 'target' && localize('com_config_import_target')}
-          </div>
+          <p className="m-0 text-xs font-medium text-(--cui-color-text-muted)" aria-live="polite">
+            {localize('com_config_review_import_step', {
+              n: stepIndex + 1,
+              total: STEPS.length,
+              name: localize(STEP_KEYS[step]),
+            })}
+          </p>
 
           {step === 'input' && (
-            <>
-              <p className="text-sm text-(--cui-color-text-muted)">
-                {localize('com_config_import_yaml_desc')}
-              </p>
-
-              <Tabs value={activeTab} onValueChange={handleTabSwitch}>
-                <Tabs.TriggersList>
-                  <Tabs.Trigger value="upload">{localize('com_config_import_upload')}</Tabs.Trigger>
-                  <Tabs.Trigger value="paste">{localize('com_config_import_paste')}</Tabs.Trigger>
-                </Tabs.TriggersList>
-
-                <Tabs.Content value="upload" tabIndex={-1}>
-                  <div className="flex flex-col gap-3 pt-3">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".yaml,.yml"
-                      onChange={handleFileChange}
-                      className="hidden"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-(--cui-color-stroke-default) bg-transparent px-4 py-8 text-sm text-(--cui-color-text-muted) transition-colors hover:border-(--cui-color-accent) hover:text-(--cui-color-text-default)"
-                    >
-                      <span aria-hidden="true">
-                        <Icon name="upload" size="sm" />
-                      </span>
-                      {fileName ?? localize('com_config_import_choose_file')}
-                    </button>
-                    {fileName && hasContent && (
-                      <div className="flex items-center gap-2 text-sm text-(--cui-color-text-default)">
-                        <span aria-hidden="true">
-                          <Icon name="check" size="xs" />
-                        </span>
-                        <span>{fileName}</span>
-                        <span className="text-(--cui-color-text-muted)">
-                          ({yamlText.split('\n').length} lines)
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </Tabs.Content>
-
-                <Tabs.Content value="paste" tabIndex={-1}>
-                  <div className="pt-3">
-                    <textarea
-                      value={yamlText}
-                      onChange={(e) => {
-                        setYamlText(e.target.value);
-                        if (error) setError(undefined);
-                        if (validationErrors) setValidationErrors(undefined);
-                      }}
-                      aria-label={localize('com_config_import_paste')}
-                      placeholder={localize('com_config_import_paste_placeholder')}
-                      rows={12}
-                      className="config-input config-input-mono w-full resize-y"
-                      spellCheck={false}
-                    />
-                  </div>
-                </Tabs.Content>
-              </Tabs>
-            </>
+            <Source
+              activeTab={activeTab}
+              onTabChange={(tab) => {
+                setActiveTab(tab);
+                clearErrors();
+              }}
+              yamlText={yamlText}
+              onTextChange={(text) => {
+                setYamlText(text);
+                clearErrors();
+              }}
+              fileName={fileName}
+              onFile={handleFile}
+            />
           )}
 
           {step === 'target' && (
-            <div ref={targetRef}>
-              <p className="mb-3 text-sm text-(--cui-color-text-muted)">
-                {localize('com_config_import_target')}
-              </p>
+            <Targets
+              open={open}
+              currentScope={currentScope}
+              mode={mode}
+              onModeChange={setMode}
+              kind={kind}
+              onKindChange={(next) => {
+                setKind(next);
+                setSelected(null);
+              }}
+              selected={selected}
+              onSelect={setSelected}
+              newType={newType}
+              onNewTypeChange={setNewType}
+              newName={newName}
+              onNewNameChange={setNewName}
+            />
+          )}
 
-              <div
-                role="radiogroup"
-                aria-label={localize('com_config_import_target')}
-                className="flex flex-col gap-2"
-              >
-                {currentScope && (
-                  <TargetOption
-                    selected={targetMode === 'current'}
-                    onClick={() => {
-                      setTargetMode('current');
-                      setSelectedScope(null);
-                    }}
-                    icon={getScopeTypeConfig(currentScope.principalType).icon}
-                    iconColor={getScopeTypeConfig(currentScope.principalType).color}
-                    label={localize('com_config_import_as_current', { name: currentScope.name })}
-                    description={localize('com_config_import_as_current_desc')}
-                  />
-                )}
+          {step === 'preview' && (
+            <Preview
+              preview={preview}
+              targetLabel={targetLabel}
+              isScope={target?.type !== 'base'}
+              included={selection}
+              onToggle={toggle}
+            />
+          )}
 
-                <TargetOption
-                  selected={targetMode === 'base'}
-                  onClick={() => {
-                    setTargetMode('base');
-                    setSelectedScope(null);
-                  }}
-                  icon="settings"
-                  iconColor={getScopeTypeConfig('BASE').color}
-                  label={localize('com_config_import_as_base')}
-                  description={localize('com_config_import_as_base_desc')}
-                />
-
-                <TargetOption
-                  selected={targetMode === 'existing'}
-                  onClick={() => setTargetMode('existing')}
-                  icon="lock"
-                  iconColor={getScopeTypeConfig(PrincipalType.ROLE).color}
-                  label={localize('com_config_import_as_profile')}
-                  description={localize('com_config_import_as_profile_desc')}
-                />
-
-                {targetMode === 'existing' && (
-                  <div className="ml-6 flex flex-col gap-1.5 border-l-2 border-(--cui-color-stroke-default) pl-3">
-                    {roleScopes.length > 0 && (
-                      <ScopeGroup
-                        label={localize('com_scope_roles')}
-                        scopes={roleScopes}
-                        selectedId={selectedScope?.principalId ?? null}
-                        onSelect={setSelectedScope}
-                      />
-                    )}
-                    {groupScopes.length > 0 && (
-                      <ScopeGroup
-                        label={localize('com_scope_groups')}
-                        scopes={groupScopes}
-                        selectedId={selectedScope?.principalId ?? null}
-                        onSelect={setSelectedScope}
-                      />
-                    )}
-                    {allScopes.length === 0 && (
-                      <span className="py-1 text-xs text-(--cui-color-text-muted)">
-                        {localize('com_scope_no_results')}
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                <TargetOption
-                  selected={targetMode === 'create'}
-                  onClick={() => {
-                    setTargetMode('create');
-                    setSelectedScope(null);
-                  }}
-                  icon="plus"
-                  iconColor="var(--cui-color-text-muted)"
-                  label={localize('com_config_import_create_scope')}
-                />
-
-                {targetMode === 'create' && (
-                  <div className="ml-6 flex flex-col gap-3 border-l-2 border-(--cui-color-stroke-default) pt-1 pl-3">
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-(--cui-color-text-muted)">
-                        {localize('com_config_import_scope_type')}
-                      </label>
-                      <div className="flex gap-1">
-                        {[PrincipalType.ROLE, PrincipalType.GROUP].map((pt) => {
-                          const config = getScopeTypeConfig(pt);
-                          return (
-                            <button
-                              key={pt}
-                              type="button"
-                              onClick={() => setNewScopeType(pt)}
-                              className={cn(
-                                'cursor-pointer rounded-md px-3 py-1 text-xs font-medium transition-colors',
-                                newScopeType === pt
-                                  ? 'bg-(--cui-color-background-active) text-(--cui-color-text-default)'
-                                  : 'text-(--cui-color-text-muted) hover:text-(--cui-color-text-default)',
-                              )}
-                              aria-pressed={newScopeType === pt}
-                            >
-                              {localize(config.labelKey)}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-1">
-                      <label
-                        htmlFor="new-scope-name"
-                        className="text-xs font-medium text-(--cui-color-text-muted)"
-                      >
-                        {localize('com_config_import_scope_name')}
-                      </label>
-                      <input
-                        id="new-scope-name"
-                        type="text"
-                        value={newScopeName}
-                        onChange={(e) => setNewScopeName(e.target.value)}
-                        className="config-input w-full"
-                        placeholder={localize('com_config_import_scope_name_placeholder')}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-              {unknownPaths.length > 0 && (
-                <div className="mt-3 rounded-lg border border-(--cui-color-stroke-default) px-3 py-2 text-xs text-(--cui-color-text-muted)">
-                  <p className="m-0 mb-1 font-medium text-(--cui-color-text-default)">
-                    {localize('com_config_import_unknown_keys', { count: unknownPaths.length })}
-                  </p>
-                  <p className="m-0 font-mono break-all">{unknownPaths.slice(0, 10).join(', ')}</p>
-                </div>
-              )}
+          {importIssues.length > 0 && (
+            <div
+              className="flex flex-col gap-1 rounded-lg bg-[rgba(220,38,38,0.1)] px-3 py-2"
+              role="alert"
+            >
+              <span className="text-sm font-medium text-(--cui-color-text-danger)">
+                {localize('com_config_review_import_issues', { count: importIssues.length })}
+              </span>
+              <ul className="m-0 max-h-32 list-none overflow-auto p-0 text-xs text-(--cui-color-text-danger)">
+                {importIssues.map((issue) => (
+                  <li key={issue} className="py-0.5 wrap-anywhere">
+                    {issue}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
           {error && (
             <div
-              className="flex flex-col gap-1 rounded-lg bg-[rgba(220,38,38,0.1)] px-3 py-2"
+              className="flex flex-col gap-2 rounded-lg bg-[rgba(220,38,38,0.1)] px-3 py-2"
               role="alert"
             >
-              <span className="text-sm font-medium text-(--cui-color-text-danger)">{error}</span>
+              <span className="text-sm font-medium wrap-anywhere text-(--cui-color-text-danger)">
+                {error}
+              </span>
+              {errorMark && <SyntaxFrame text={yamlText} mark={errorMark} />}
               {validationErrors && validationErrors.length > 0 && (
                 <ul className="m-0 max-h-32 list-none overflow-auto p-0 text-xs text-(--cui-color-text-danger)">
-                  {validationErrors.slice(0, 10).map((ve, i) => (
-                    <li key={`${ve.path}-${i}`} className="py-0.5">
-                      <code>{ve.path}</code>: {ve.message}
+                  {validationErrors.slice(0, 10).map((issue, i) => (
+                    <li key={`${issue.path}-${i}`} className="py-0.5 wrap-anywhere">
+                      <code>{issue.path}</code>: {issue.message}
                     </li>
                   ))}
                   {validationErrors.length > 10 && (
@@ -458,141 +321,24 @@ export function ImportYamlDialog({
           )}
 
           <div className="flex items-center justify-end gap-2">
-            {step === 'target' && (
-              <Button
-                htmlType="button"
-                type="secondary"
-                label={localize('com_config_import_back')}
-                onClick={() => {
-                  setStep('input');
-                  setError(undefined);
-                }}
-              />
-            )}
-            {step === 'input' && (
-              <Button
-                htmlType="button"
-                type="secondary"
-                label={localize('com_ui_cancel')}
-                onClick={handleClose}
-              />
-            )}
-            {step === 'input' ? (
-              <Button
-                htmlType="button"
-                type="primary"
-                label={
-                  loading ? localize('com_ui_loading') : localize('com_config_import_validate')
-                }
-                iconLeft={loading ? 'loading-animated' : undefined}
-                onClick={handleValidate}
-                disabled={!hasContent || loading}
-              />
-            ) : (
-              <Button
-                htmlType="button"
-                type="primary"
-                label={
-                  loading
-                    ? localize(
-                        targetMode === 'create'
-                          ? 'com_config_import_creating'
-                          : 'com_config_import_saving',
-                      )
-                    : localize('com_config_import_apply')
-                }
-                iconLeft={loading ? 'loading-animated' : undefined}
-                onClick={handleApply}
-                disabled={!canApply}
-              />
-            )}
+            <Button
+              htmlType="button"
+              type="secondary"
+              label={localize(step === 'input' ? 'com_ui_cancel' : 'com_config_import_back')}
+              onClick={step === 'input' ? handleClose : () => goTo(STEPS[stepIndex - 1])}
+              disabled={loading}
+            />
+            <Button
+              htmlType="button"
+              type="primary"
+              label={primary.label}
+              iconLeft={loading ? 'loading-animated' : undefined}
+              onClick={() => void primary.onClick()}
+              disabled={primary.disabled}
+            />
           </div>
         </div>
       </Dialog.Content>
     </Dialog>
-  );
-}
-
-function TargetOption({
-  selected,
-  onClick,
-  icon,
-  iconColor,
-  label,
-  description,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  icon: t.IconName;
-  iconColor: string;
-  label: string;
-  description?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={onClick}
-      className={cn(
-        'flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
-        selected
-          ? 'border-(--cui-color-accent) bg-(--cui-color-background-hover)'
-          : 'border-(--cui-color-stroke-default) bg-transparent hover:bg-(--cui-color-background-hover)',
-      )}
-    >
-      <span aria-hidden="true" style={{ color: iconColor }}>
-        <Icon name={icon} size="sm" />
-      </span>
-      <div className="flex flex-col">
-        <span className="text-sm font-medium text-(--cui-color-text-default)">{label}</span>
-        {description && (
-          <span className="text-xs text-(--cui-color-text-muted)">{description}</span>
-        )}
-      </div>
-    </button>
-  );
-}
-
-function ScopeGroup({
-  label,
-  scopes,
-  selectedId,
-  onSelect,
-}: {
-  label: string;
-  scopes: t.ConfigScope[];
-  selectedId: string | null;
-  onSelect: (scope: t.ConfigScope) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-[10px] font-semibold tracking-wider text-(--cui-color-text-muted) uppercase">
-        {label}
-      </span>
-      {scopes.map((scope) => {
-        const config = getScopeTypeConfig(scope.principalType);
-        const isSelected = selectedId === scope.principalId;
-        return (
-          <button
-            key={scope.principalId}
-            type="button"
-            onClick={() => onSelect(scope)}
-            className={cn(
-              'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
-              isSelected
-                ? 'bg-(--cui-color-background-active) text-(--cui-color-text-default)'
-                : 'text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)',
-            )}
-            aria-pressed={isSelected}
-          >
-            <span aria-hidden="true" style={{ color: config.color }}>
-              <Icon name={config.icon} size="xs" />
-            </span>
-            <span>{scope.name}</span>
-          </button>
-        );
-      })}
-    </div>
   );
 }

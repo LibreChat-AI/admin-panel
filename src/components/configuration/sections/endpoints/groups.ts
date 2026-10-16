@@ -77,6 +77,7 @@ export function flattenGroupFields(
   disabled?: boolean,
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>,
   editSessionId?: number,
+  lockedKeys?: ReadonlySet<string>,
 ): ReactNode[] {
   const values =
     typeof parentValue === 'object' && parentValue !== null && !Array.isArray(parentValue)
@@ -116,7 +117,7 @@ export function flattenGroupFields(
           parentPath,
           onChange,
           localize,
-          disabled,
+          disabled || (lockedKeys?.has(field.key) ?? false),
           collectionRenderOverrides,
           true,
           editSessionId,

@@ -5,16 +5,10 @@ import {
   extractSchemaTree,
   getZodTypeName,
   flattenTree,
-  resolveSubSchema,
-  validateFieldValue,
   parseIndexedArrayPath,
-  toConfigArraySource,
   normalizeAppServiceKeys,
-  mergeConfigArraySources,
-  mergeIndexedArrayEntriesIntoBase,
   applyLangfuseSchemaVisibility,
   parseConfigYaml,
-  checkConfigChanges,
   findDroppedEntries,
   findUnknownConfigPaths,
 } from './config';
@@ -24,7 +18,8 @@ import {
   getEnumOptions,
   getArrayItemType,
   splitUnionTypes,
-} from '@/components/configuration/utils';
+} from '@/components/configuration/controls';
+import { resolveSubSchema, planConfigChanges, validateFieldValue } from '@/utils';
 
 interface ZodV3Schema extends t.ZodSchemaLike {
   object: (shape: Record<string, ZodV3Schema>) => ZodV3Schema;
@@ -812,12 +807,23 @@ function sampleValueForControl(field: t.SchemaField, path?: string): unknown {
     case 'number':
       return 1;
     case 'text':
+    case 'textarea':
+    case 'secret':
+    case 'ref-select':
       return 'sample';
     case 'select': {
       const opts = getEnumOptions(field.type);
       return opts.length > 0 ? coerceEnumValue(opts[0].value) : 'default';
     }
-    case 'array': {
+    case 'literal':
+      return coerceEnumValue(getEnumOptions(field.type)[0]?.value ?? 'default');
+    case 'bool-or-list':
+    case 'scalar-union':
+      return true;
+    case 'model-list':
+      return ['item', { name: 'item-2' }];
+    case 'array':
+    case 'multi-enum': {
       const itemType = getArrayItemType(field.type);
       if (itemType.startsWith('enum(')) {
         const enumOpts = getEnumOptions(itemType);
@@ -990,7 +996,10 @@ describe('YAML-editor fallback audit', () => {
 
   /** No field should fall back to the YAML editor. Every field must have a
    *  purpose-built control. This record must stay empty. */
-  const expectedCodeFields: Record<string, string> = {};
+  const expectedCodeFields: Record<string, string> = {
+    'modelSpecs.list.preset.additionalModelRequestFields':
+      'admin-panel — arbitrary JSON (record/array/scalars); YAML is the faithful editor',
+  };
 
   it('every code-fallback field is accounted for in the audit', () => {
     const unaccounted = codeFields
@@ -1112,55 +1121,6 @@ describe('parseIndexedArrayPath', () => {
   });
 });
 
-describe('toConfigArraySource', () => {
-  it('converts legacy numeric-key array objects to arrays', () => {
-    expect(
-      toConfigArraySource({
-        0: { name: 'first' },
-        2: { name: 'third' },
-      }),
-    ).toEqual([{ name: 'first' }, undefined, { name: 'third' }]);
-  });
-
-  it('rejects non-index object keys', () => {
-    expect(toConfigArraySource({ 0: 'zero', current: 'not-array' })).toBeUndefined();
-  });
-});
-
-describe('mergeConfigArraySources', () => {
-  it('overlays legacy numeric-key overrides onto inherited arrays', () => {
-    expect(
-      mergeConfigArraySources(
-        [
-          { name: 'base-a', baseURL: 'https://a.example.com' },
-          { name: 'base-b', baseURL: 'https://b.example.com' },
-          { name: 'base-c', baseURL: 'https://c.example.com' },
-        ],
-        {
-          1: { name: 'scope-b', baseURL: 'https://scope.example.com' },
-        },
-        undefined,
-      ),
-    ).toEqual([
-      { name: 'base-a', baseURL: 'https://a.example.com' },
-      { name: 'scope-b', baseURL: 'https://scope.example.com' },
-      { name: 'base-c', baseURL: 'https://c.example.com' },
-    ]);
-  });
-
-  it('treats real arrays as complete overrides', () => {
-    expect(mergeConfigArraySources(['base-a', 'base-b'], ['scope-only'], undefined)).toEqual([
-      'scope-only',
-    ]);
-  });
-
-  it('applies pending numeric-key entries after scoped overlays', () => {
-    expect(
-      mergeConfigArraySources(['base-a', 'base-b', 'base-c'], { 1: 'scope-b' }, { 2: 'pending-c' }),
-    ).toEqual(['base-a', 'scope-b', 'pending-c']);
-  });
-});
-
 describe('normalizeAppServiceKeys', () => {
   it('maps MCP AppService output to canonical mcpServers records', () => {
     const normalized = normalizeAppServiceKeys({
@@ -1202,92 +1162,6 @@ describe('normalizeAppServiceKeys', () => {
         ],
       },
     });
-  });
-});
-
-describe('mergeIndexedArrayEntriesIntoBase', () => {
-  it('merges indexed MCP array edits from AppService fallback aliases', () => {
-    const mergedPaths = new Set<string>();
-    const result = mergeIndexedArrayEntriesIntoBase(
-      [{ fieldPath: 'mcpServers.filesystem.args.1', value: '--workspace' }],
-      {
-        mcpConfig: {
-          filesystem: {
-            type: 'stdio',
-            args: ['server.js', '--root', '/tmp'],
-          },
-        },
-      },
-      mergedPaths,
-    );
-
-    expect(result).toEqual([
-      {
-        fieldPath: 'mcpServers.filesystem.args',
-        value: ['server.js', '--workspace', '/tmp'],
-      },
-    ]);
-    expect(mergedPaths.has('mcpServers.filesystem.args')).toBe(true);
-  });
-
-  it('preserves legacy numeric-key array objects while merging', () => {
-    const result = mergeIndexedArrayEntriesIntoBase(
-      [
-        {
-          fieldPath: 'endpoints.custom.1',
-          value: { name: 'edited', baseURL: 'https://edited.example.com' },
-        },
-      ],
-      {
-        endpoints: {
-          custom: {
-            0: { name: 'first', baseURL: 'https://first.example.com' },
-            1: { name: 'second', baseURL: 'https://second.example.com' },
-            2: { name: 'third', baseURL: 'https://third.example.com' },
-          },
-        },
-      },
-    );
-
-    expect(result).toEqual([
-      {
-        fieldPath: 'endpoints.custom',
-        value: [
-          { name: 'first', baseURL: 'https://first.example.com' },
-          { name: 'edited', baseURL: 'https://edited.example.com' },
-          { name: 'third', baseURL: 'https://third.example.com' },
-        ],
-      },
-    ]);
-  });
-
-  it('strips secret preview companions from untouched array entries after merging', () => {
-    const result = mergeIndexedArrayEntriesIntoBase(
-      [
-        {
-          fieldPath: 'endpoints.custom.1',
-          value: { name: 'edited', baseURL: 'https://edited.example.com', apiKey: '' },
-        },
-      ],
-      {
-        endpoints: {
-          custom: [
-            { name: 'first', baseURL: 'https://first.example.com', apiKeyPreview: 'sk-...aaaa' },
-            { name: 'second', baseURL: 'https://second.example.com', apiKeyPreview: 'sk-...bbbb' },
-          ],
-        },
-      },
-    );
-
-    expect(result).toEqual([
-      {
-        fieldPath: 'endpoints.custom',
-        value: [
-          { name: 'first', baseURL: 'https://first.example.com' },
-          { name: 'edited', baseURL: 'https://edited.example.com', apiKey: '' },
-        ],
-      },
-    ]);
   });
 });
 
@@ -1391,20 +1265,22 @@ describe('parseConfigYaml (import)', () => {
     expect(result.unknownPaths).toEqual(['interface.replyNotifications.sound']);
   });
 
-  it('rejects keys the admin API would drop', () => {
+  it('keeps keys the admin API would drop; the import plan leaves out only the leaves carrying them', () => {
     const result = parseConfigYaml(
       'endpoints:\n  bedrock:\n    inferenceProfiles:\n      us.anthropic.claude: arn:aws:x\n',
     );
-    expect(result.success).toBe(false);
-    expect(result.validationErrors?.[0]).toMatchObject({
-      path: 'endpoints.bedrock.inferenceProfiles',
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({
+      endpoints: { bedrock: { inferenceProfiles: { 'us.anthropic.claude': 'arn:aws:x' } } },
     });
+    expect(result.unknownPaths).toEqual([]);
   });
 
-  it('reports the line of a YAML syntax error', () => {
+  it('reports the line and column of a YAML syntax error', () => {
     const result = parseConfigYaml('balance:\n  startBalance: [1\n');
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/line \d+/);
+    expect(result.error).toMatch(/line \d+, column \d+/);
+    expect(result.mark).toEqual({ line: expect.any(Number), column: expect.any(Number) });
   });
 
   it('reports schema validation errors', () => {
@@ -1420,71 +1296,85 @@ describe('findUnknownConfigPaths', () => {
       findUnknownConfigPaths({ balance: { startBalance: 1 }, brandNew: { flag: true } }),
     ).toEqual(['brandNew.flag']);
   });
+
+  it('resolves AppService alias sections before looking keys up', () => {
+    expect(
+      findUnknownConfigPaths({
+        interfaceConfig: { customWelcome: 'hi', privacyPolicy: { externalUrl: 'https://x' } },
+      }),
+    ).toEqual([]);
+  });
 });
 
-describe('checkConfigChanges (save pre-flight)', () => {
+/** The save pre-flight every write path runs: the plan's issues and skipped changes for sets and resets. */
+function preflight(saves: t.SaveEntry[], resets: string[] = []) {
+  const ops: t.ConfigChange[] = [
+    ...saves.map(({ fieldPath, value }): t.ConfigChange => ({ op: 'set', path: fieldPath, value })),
+    ...resets.map((path): t.ConfigChange => ({ op: 'reset', path })),
+  ];
+  const plan = planConfigChanges(ops, { stored: {}, lower: {}, lowerKind: 'yaml' });
+  return { issues: plan.issues, skipped: plan.skipped };
+}
+
+describe('save pre-flight (planConfigChanges write rules)', () => {
   it('passes valid entries, including an indexed array entry', () => {
-    const check = checkConfigChanges(
-      [
-        { fieldPath: 'balance.startBalance', value: 100 },
-        {
-          fieldPath: 'endpoints.custom.2',
-          value: { name: 'Proxy', apiKey: 'k', baseURL: 'https://p', models: { default: ['m'] } },
-        },
-      ],
-      ['balance.refillAmount'],
-    );
-    expect(check).toEqual({ errors: [], skipped: [] });
+    const check = preflight([
+      { fieldPath: 'balance.startBalance', value: 100 },
+      {
+        fieldPath: 'endpoints.custom.2',
+        value: { name: 'Proxy', apiKey: 'k', baseURL: 'https://p', models: { default: ['m'] } },
+      },
+    ]);
+    expect(check).toEqual({ issues: [], skipped: [] });
   });
 
   it('validates an indexed array entry against the element schema', () => {
-    const check = checkConfigChanges(
-      [{ fieldPath: 'endpoints.custom.0', value: { name: 'Proxy', iconURL: 42 } }],
-      [],
-    );
-    expect(check.errors).toHaveLength(1);
-    expect(check.errors[0].fieldPath).toBe('endpoints.custom.0');
+    const check = preflight([
+      {
+        fieldPath: 'endpoints.custom.0',
+        value: {
+          name: 'Proxy',
+          apiKey: 'k',
+          baseURL: 'https://p',
+          models: { fetch: true },
+          iconURL: 42,
+        },
+      },
+    ]);
+    expect(check.issues.map((issue) => issue.entryPath)).toContain('iconURL');
   });
 
   it('rejects an invalid MCP title before anything is written', () => {
-    const check = checkConfigChanges(
-      [{ fieldPath: 'mcpServers.final-server.title', value: 'Bad_Title!' }],
-      ['mcpServers.renamer'],
-    );
-    expect(check.errors.map((e) => e.fieldPath)).toEqual(['mcpServers.final-server.title']);
+    const check = preflight([{ fieldPath: 'mcpServers.final-server.title', value: 'Bad_Title!' }]);
+    expect(check.issues.map((issue) => issue.path)).toContain('mcpServers.final-server.title');
   });
 
   it('rejects process-backed MCP fields with the field named', () => {
-    const check = checkConfigChanges([{ fieldPath: 'mcpServers.local.command', value: 'npx' }], []);
-    expect(check.errors[0].error).toMatch(/mcpServers\.local\.command/);
+    const check = preflight([{ fieldPath: 'mcpServers.local.command', value: 'npx' }]);
+    expect(check.issues[0].path).toBe('mcpServers.local.command');
+    expect(check.issues[0].code).toBe('PROCESS_MCP_FIELD');
   });
 
   it('rejects keys the admin API would silently drop', () => {
-    const check = checkConfigChanges(
-      [
-        {
-          fieldPath: 'endpoints.bedrock.inferenceProfiles',
-          value: { 'us.anthropic.claude': 'arn:aws:x' },
-        },
-      ],
-      [],
-    );
-    expect(check.errors[0].error).toMatch(/us\.anthropic\.claude/);
+    const check = preflight([
+      {
+        fieldPath: 'endpoints.bedrock.inferenceProfiles',
+        value: { 'us.anthropic.claude': 'arn:aws:x' },
+      },
+    ]);
+    expect(check.issues[0].message).toMatch(/us\.anthropic\.claude/);
   });
 
-  it('skips YAML-managed fields on every write path but allows removing their stale override', () => {
-    const check = checkConfigChanges(
-      [
-        {
-          fieldPath: 'endpoints.azureOpenAI.groups',
-          value: [{ group: 'evil', apiKey: 'sk-evil', instanceName: 'evil', models: {} }],
-        },
-        { fieldPath: 'endpoints.anthropic.vertex.region', value: 'us-east5' },
-        { fieldPath: 'endpoints.azureOpenAI.groups.0', value: { group: 'evil' } },
-      ],
-      ['endpoints.azureOpenAI.groups', 'endpoints.anthropic.vertex'],
-    );
-    expect(check.errors).toEqual([]);
+  it('skips YAML-managed fields on every write path', () => {
+    const check = preflight([
+      {
+        fieldPath: 'endpoints.azureOpenAI.groups',
+        value: [{ group: 'evil', apiKey: 'sk-evil', instanceName: 'evil', models: {} }],
+      },
+      { fieldPath: 'endpoints.anthropic.vertex.region', value: 'us-east5' },
+      { fieldPath: 'endpoints.azureOpenAI.groups.0', value: { group: 'evil' } },
+    ]);
+    expect(check.issues).toEqual([]);
     expect(check.skipped).toEqual([
       { fieldPath: 'endpoints.azureOpenAI.groups', reason: 'yamlOnly' },
       { fieldPath: 'endpoints.anthropic.vertex.region', reason: 'yamlOnly' },
@@ -1493,18 +1383,18 @@ describe('checkConfigChanges (save pre-flight)', () => {
   });
 
   it('rejects a save at an ancestor path that carries a YAML-managed field', () => {
-    const check = checkConfigChanges(
-      [{ fieldPath: 'endpoints.azureOpenAI', value: { titleModel: 'x', groups: [] } }],
-      [],
-    );
-    expect(check.errors).toHaveLength(1);
-    expect(check.errors[0].error).toMatch(
-      /^endpoints\.azureOpenAI\.groups: managed in librechat\.yaml/,
-    );
+    const check = preflight([
+      { fieldPath: 'endpoints.azureOpenAI', value: { titleModel: 'x', groups: [] } },
+    ]);
+    expect(check.issues).toHaveLength(1);
+    expect(check.issues[0]).toMatchObject({
+      path: 'endpoints.azureOpenAI.groups',
+      code: 'YAML_MANAGED',
+    });
   });
 
   it('skips dedicated (Langfuse) and newer base-only (mcpAppSandbox) sections', () => {
-    const check = checkConfigChanges(
+    const check = preflight(
       [
         { fieldPath: 'balance.startBalance', value: 999 },
         { fieldPath: 'mcpAppSandbox.enabled', value: true },
@@ -1512,7 +1402,7 @@ describe('checkConfigChanges (save pre-flight)', () => {
       ],
       ['langfuse.baseUrl'],
     );
-    expect(check.errors).toEqual([]);
+    expect(check.issues).toEqual([]);
     expect(check.skipped).toEqual([
       { fieldPath: 'mcpAppSandbox.enabled', reason: 'baseOnly' },
       { fieldPath: 'langfuse.baseUrl', reason: 'dedicated' },
@@ -1520,16 +1410,16 @@ describe('checkConfigChanges (save pre-flight)', () => {
     ]);
   });
 
-  it('skips base-only, YAML-only and permission paths instead of sending them', () => {
-    const check = checkConfigChanges(
+  it('skips base-only, YAML-only and permission writes, but lets stale YAML-only overrides be removed', () => {
+    const check = preflight(
       [
         { fieldPath: 'filters.messages.pii.action', value: 'block' },
         { fieldPath: 'cloudfront.urlExpiry', value: 3601 },
         { fieldPath: 'interface.prompts', value: false },
       ],
-      ['filters.messages'],
+      ['filters.messages', 'cloudfront.urlExpiry'],
     );
-    expect(check.errors).toEqual([]);
+    expect(check.issues).toEqual([]);
     expect(check.skipped).toEqual([
       { fieldPath: 'filters.messages.pii.action', reason: 'baseOnly' },
       { fieldPath: 'cloudfront.urlExpiry', reason: 'yamlOnly' },

@@ -1,6 +1,7 @@
 import type * as t from '@/types';
 import { useLocalize } from '@/hooks';
 
+/** Label cell of a settings row: label (14/500), hint (12) and description (13, muted). */
 export function SectionHeader({
   title,
   description,
@@ -8,46 +9,47 @@ export function SectionHeader({
   htmlFor,
   titleAdornment,
   subtitle,
+  required,
   children,
 }: t.SectionHeaderProps) {
   const localize = useLocalize();
 
-  const titleClasses = 'wrap-break-word text-sm font-medium text-(--cui-color-text-default)';
+  const text = (
+    <>
+      {title}
+      {required && (
+        <span className="settings-required" aria-hidden="true">
+          *
+        </span>
+      )}
+    </>
+  );
 
   return (
-    <div className="flex w-[20%] max-w-75 min-w-0 shrink-0 flex-col gap-1 pl-2.5">
-      <div className="flex flex-col">
-        <span className="flex items-center gap-1.5">
-          {htmlFor ? (
-            <label htmlFor={htmlFor} className={titleClasses}>
-              {title}
-            </label>
-          ) : (
-            <span className={titleClasses} title={title}>
-              {title}
-            </span>
-          )}
-          {titleAdornment}
-        </span>
-        {subtitle}
-      </div>
+    <div className="settings-row-label">
+      <span className="flex items-center gap-1.5">
+        {htmlFor ? (
+          <label htmlFor={htmlFor} className="settings-label">
+            {text}
+          </label>
+        ) : (
+          <span className="settings-label">{text}</span>
+        )}
+        {titleAdornment}
+      </span>
+      {subtitle}
       {description && (
-        <span className="text-sm wrap-break-word text-(--cui-color-text-muted)">
+        <p className="settings-help">
           {description}
           {learnMoreUrl && (
             <>
               {' '}
-              <a
-                href={learnMoreUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-medium text-(--cui-color-text-link) hover:underline"
-              >
+              <a href={learnMoreUrl} target="_blank" rel="noopener noreferrer">
                 {localize('com_ui_read_more')}
               </a>
             </>
           )}
-        </span>
+        </p>
       )}
       {children}
     </div>

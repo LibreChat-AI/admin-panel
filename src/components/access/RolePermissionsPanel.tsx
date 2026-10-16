@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { Icon, Switch } from '@clickhouse/click-ui';
+import { Switch } from '@clickhouse/click-ui';
 import { PermissionTypes } from 'librechat-data-provider';
 import type * as t from '@/types';
 import { PERMISSION_TYPE_SCHEMA } from '@/constants';
+import { DecorativeIcon } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
@@ -96,7 +97,7 @@ export function RolePermissionsPanel({
                 )}
               >
                 <div className="flex flex-1 items-center gap-2">
-                  <Icon
+                  <DecorativeIcon
                     name="chevron-right"
                     size="sm"
                     className={cn(

@@ -1,16 +1,58 @@
 import { Tabs } from '@clickhouse/click-ui';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import type * as t from '@/types';
+import { TabCountBadge } from './values';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
+const EDGE = 4;
+
+/**
+ * Configuration tabs in one horizontally scrolling row: labels never wrap,
+ * fading edges show there is more, and the active tab scrolls into view (SH-7).
+ */
 export function ConfigTabBar({
   tabs,
   activeTab,
   onTabChange,
-  tabCounts,
+  tabBadges,
   children,
 }: t.ConfigTabBarProps) {
   const localize = useLocalize();
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ start: false, end: false });
+
+  const updateEdges = useCallback(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const start = row.scrollLeft > EDGE;
+    const end = row.scrollLeft + row.clientWidth < row.scrollWidth - EDGE;
+    setEdges((prev) => (prev.start === start && prev.end === end ? prev : { start, end }));
+  }, []);
+
+  useEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    updateEdges();
+    const observer = new ResizeObserver(updateEdges);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [updateEdges]);
+
+  /** Again once badges load (in a profile they widen the tabs before the active one). */
+  useEffect(() => {
+    const row = rowRef.current;
+    const active = row?.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+    if (!row || !active) return;
+    const rowRect = row.getBoundingClientRect();
+    const tabRect = active.getBoundingClientRect();
+    if (tabRect.left < rowRect.left) {
+      row.scrollLeft -= rowRect.left - tabRect.left + 16;
+    } else if (tabRect.right > rowRect.right) {
+      row.scrollLeft += tabRect.right - rowRect.right + 16;
+    }
+    updateEdges();
+  }, [activeTab, tabs.length, tabBadges, updateEdges]);
 
   return (
     <Tabs
@@ -18,28 +60,29 @@ export function ConfigTabBar({
       onValueChange={onTabChange}
       ariaLabel={localize('com_nav_configuration')}
     >
-      <Tabs.TriggersList>
-        {tabs.map((tab) => {
-          const count = tabCounts?.[tab.id];
-          return (
-            <Tabs.Trigger key={tab.id} value={tab.id}>
+      <div
+        ref={rowRef}
+        onScroll={updateEdges}
+        className={cn(
+          'config-tab-row scrollbar-none overflow-x-auto overflow-y-hidden [&::-webkit-scrollbar]:hidden **:[[role=tab]]:shrink-0 **:[[role=tab]]:whitespace-nowrap **:[[role=tablist]]:w-max **:[[role=tablist]]:min-w-full **:[[role=tablist]]:flex-nowrap',
+          edges.start &&
+            edges.end &&
+            'mask-[linear-gradient(to_right,transparent,black_2rem,black_calc(100%-2rem),transparent)]',
+          edges.start && !edges.end && 'mask-[linear-gradient(to_right,transparent,black_2rem)]',
+          !edges.start && edges.end && 'mask-[linear-gradient(to_left,transparent,black_2rem)]',
+        )}
+      >
+        <Tabs.TriggersList>
+          {tabs.map((tab) => (
+            <Tabs.Trigger key={tab.id} value={tab.id} aria-controls={undefined}>
               <span className="flex items-center gap-1.5">
                 {localize(tab.labelKey)}
-                {count !== undefined && (
-                  <span
-                    className={cn(
-                      'config-tab-count',
-                      count > 0 ? 'config-tab-count-active' : 'config-tab-count-zero',
-                    )}
-                  >
-                    {count}
-                  </span>
-                )}
+                <TabCountBadge badge={tabBadges?.[tab.id]} />
               </span>
             </Tabs.Trigger>
-          );
-        })}
-      </Tabs.TriggersList>
+          ))}
+        </Tabs.TriggersList>
+      </div>
       {children}
     </Tabs>
   );

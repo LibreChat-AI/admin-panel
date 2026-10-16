@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { ButtonGroup } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { ListField } from './ListField';
 import { CodeField } from './CodeField';
@@ -46,19 +47,21 @@ export function ListRecordField({
   };
 
   return (
-    <div id={id} className="w-full max-w-75">
-      <div className="mb-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={handleToggle}
-          disabled={disabled}
-          className="rounded border border-[--click-control-border-color] px-2 py-0.5 text-xs text-[--click-text-secondary] hover:bg-[--click-control-bg-hover] disabled:opacity-50"
-        >
-          {mode === 'list'
-            ? localize('com_config_mode_advanced')
-            : localize('com_config_mode_simple')}
-        </button>
-      </div>
+    <div id={id} className="flex w-full max-w-150 flex-col">
+      {!disabled && (
+        <ButtonGroup
+          aria-label={localize('com_config_ctl_list_form', { name: ariaLabel ?? '' })}
+          className="mb-2 max-w-full self-start"
+          selected={mode}
+          onClick={(next) => {
+            if (!disabled && next !== mode) handleToggle();
+          }}
+          options={[
+            { value: 'list', label: localize('com_config_ctl_list_mode'), disabled },
+            { value: 'advanced', label: localize('com_config_ctl_yaml_mode'), disabled },
+          ]}
+        />
+      )}
       {mode === 'list' && (
         <ListField
           id={`${id}-list`}

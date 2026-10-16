@@ -1,36 +1,50 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type * as t from '@/types';
-import { SECTION_META, splitCamelCase } from '@/components/configuration/configMeta';
-import { configSchemaTreeOptions } from '@/server';
+import { buildConfigSearchIndex } from '@/components/configuration/search';
+import { baseConfigOptions, configSchemaTreeOptions } from '@/server';
+import { useCapabilities } from './useCapabilities';
+import { hasConfigCapability } from '@/utils';
 
-function buildSearchItems(tree: t.SchemaField[], localize: t.LocalizeFn): t.CommandItem[] {
-  const items: t.CommandItem[] = [];
-  for (const section of tree) {
-    const meta = SECTION_META[section.key];
-    if (!meta) continue;
-
-    items.push({
-      id: `section:${section.key}`,
-      label: localize(meta.titleKey),
-      keywords: [section.key, ...splitCamelCase(section.key)],
-      category: 'config-section',
-      tab: meta.tab,
-    });
-  }
-  return items;
-}
-
+/**
+ * The configuration search index for the command menu (WS5: SH-3): every
+ * schema leaf the viewer may read, plus the entries of the base config with
+ * current values. Loads once the menu opens.
+ */
 export function useSearchIndex(
   localize: t.LocalizeFn,
   shouldLoad: boolean,
-): { items: t.CommandItem[]; loading: boolean } {
-  const { data: tree, isLoading } = useQuery({
-    ...configSchemaTreeOptions,
-    enabled: shouldLoad,
-  });
+): { items: t.ConfigSearchItem[]; loading: boolean } {
+  const { hasCapability } = useCapabilities();
+  const canReadAll = hasConfigCapability(hasCapability, null, 'read');
 
-  const items = useMemo(() => (tree ? buildSearchItems(tree, localize) : []), [tree, localize]);
+  const { data: tree, isLoading } = useQuery({ ...configSchemaTreeOptions, enabled: shouldLoad });
+  const { data: base } = useQuery({ ...baseConfigOptions, enabled: shouldLoad && canReadAll });
+  const values = base?.config;
+
+  const items = useMemo(() => {
+    if (!tree) return [];
+    const readable = tree.filter((section) =>
+      hasConfigCapability(hasCapability, section.key, 'read'),
+    );
+    return buildConfigSearchIndex(readable, values, localize);
+  }, [tree, values, localize, hasCapability]);
 
   return { items, loading: isLoading };
+}
+
+/**
+ * The search index of the configuration page's own values (open profile,
+ * pending list edits), built only while `enabled` (the tab filter has text).
+ */
+export function useConfigSearchIndex(
+  tree: t.SchemaField[],
+  values: t.ConfigSearchValues,
+  localize: t.LocalizeFn,
+  enabled: boolean,
+): t.ConfigSearchItem[] {
+  return useMemo(
+    () => (enabled ? buildConfigSearchIndex(tree, values, localize) : []),
+    [tree, values, localize, enabled],
+  );
 }

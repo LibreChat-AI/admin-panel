@@ -3,14 +3,11 @@ import yaml from 'js-yaml';
 import { configSchema } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
 import type * as t from '@/types';
-import { BLOCK_UNSAFE_CONFIG_KEYS, UNSAFE_CONFIG_KEY_MESSAGE } from '@/constants';
-import { flattenObject, findUnsafeKeys, resolveSubSchema } from '@/utils';
+import { findUnknownImportPaths } from '@/utils';
 
-/** Leaf paths of `raw` that the bundled config schema does not describe. */
+/** Leaf paths of `raw` the bundled config schema does not describe (AppService aliases resolved). */
 export function findUnknownConfigPaths(raw: Record<string, t.ConfigValue>): string[] {
-  return Object.keys(flattenObject(raw)).filter(
-    (path) => resolveSubSchema(configSchema as t.ZodSchemaLike, path.split('.')) == null,
-  );
+  return findUnknownImportPaths(raw);
 }
 
 /**
@@ -18,27 +15,37 @@ export function findUnknownConfigPaths(raw: Record<string, t.ConfigValue>): stri
  * copy with `version` replaced (a snippet need not carry it, and import never
  * writes it, so `version: 1.2` read as a number must not fail), but the result
  * is the raw parsed object: no Zod defaults are injected and keys the bundled
- * schema does not know are kept (and reported in `unknownPaths`).
+ * schema does not know are kept (and reported in `unknownPaths`). Keys the
+ * admin API can't store do not fail the parse: the import plan leaves out
+ * only the leaves that carry them, and only when they would be written.
  */
 export function parseConfigYaml(yamlContent: string): t.ImportParseResult {
   const failure = (
     error: string,
-    validationErrors?: t.ImportValidationError[],
+    extra: Pick<t.ImportParseResult, 'validationErrors' | 'mark'> = {},
   ): t.ImportParseResult => ({
     success: false,
     error,
-    validationErrors,
     appConfig: null,
     unknownPaths: [],
+    ...extra,
   });
 
   let rawConfig: unknown;
   try {
     rawConfig = yaml.load(yamlContent, { schema: yaml.JSON_SCHEMA });
   } catch (parseError) {
-    const mark = (parseError as { mark?: { line: number; column: number } }).mark;
-    const where = mark ? ` (line ${mark.line + 1}, column ${mark.column + 1})` : '';
-    return failure(`Invalid YAML syntax${where}. Please check the content for syntax errors.`);
+    const { mark, reason } = parseError as {
+      mark?: { line: number; column: number };
+      reason?: string;
+    };
+    if (!mark) return failure('Invalid YAML syntax. Please check the content for syntax errors.');
+    const line = mark.line + 1;
+    const column = mark.column + 1;
+    return failure(
+      `Invalid YAML syntax (line ${line}, column ${column})${reason ? `: ${reason}` : ''}`,
+      { mark: { line, column } },
+    );
   }
 
   if (!rawConfig || typeof rawConfig !== 'object' || Array.isArray(rawConfig)) {
@@ -48,32 +55,18 @@ export function parseConfigYaml(yamlContent: string): t.ImportParseResult {
   const appConfig = rawConfig as t.ConfigRecord;
   const result = configSchema.safeParse({ ...appConfig, version: '1.0.0' });
   if (!result.success) {
-    return failure(
-      'Config validation failed',
-      result.error.errors.map((e: { path: (string | number)[]; message: string }) => ({
-        path: e.path.join('.'),
-        message: e.message,
-      })),
-    );
-  }
-
-  if (BLOCK_UNSAFE_CONFIG_KEYS) {
-    const unsafe = findUnsafeKeys(appConfig, '');
-    if (unsafe.length > 0) {
-      return failure(
-        'Some keys cannot be imported',
-        unsafe.map(({ path, key }) => ({
-          path: path || key,
-          message: `"${key}": ${UNSAFE_CONFIG_KEY_MESSAGE}`,
-        })),
-      );
-    }
+    return failure('Config validation failed', {
+      validationErrors: result.error.errors.map(
+        (e: { path: (string | number)[]; message: string }) => ({
+          path: e.path.join('.'),
+          message: e.message,
+        }),
+      ),
+    });
   }
 
   return {
     success: true,
-    error: undefined,
-    validationErrors: undefined,
     appConfig,
     unknownPaths: findUnknownConfigPaths(appConfig),
   };

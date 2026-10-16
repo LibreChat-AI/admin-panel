@@ -1,34 +1,60 @@
-import { useState, useMemo, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import type * as t from '@/types';
-import {
-  saveBaseConfigFn,
-  resetBaseConfigFn,
-  resetBaseConfigFieldFn,
-  bulkSaveProfileValuesFn,
-  validateConfigChangesFn,
-  removeFieldProfileValueFn,
-  tombstoneFieldProfileValueFn,
-} from '@/server';
 import {
   notifyInfo,
   notifyError,
   notifyWarning,
   notifySuccess,
-  findUnsafeKeys,
   getValueAtPath,
-  stripSecretPreviewValues,
+  planConfigChanges,
+  mergedBackChanges,
 } from '@/utils';
-import { buildSavePayload, partitionScopeResetPaths } from '@/components/configuration/edits';
 import { validateMcpCrossField } from '@/components/configuration/sections/mcp/validation';
-import { BLOCK_UNSAFE_CONFIG_KEYS, SKIP_REASON_KEYS } from '@/constants';
+import { buildConfigChanges, normalizeEditValue } from '@/components/configuration/edits';
+import { isResetSent, summarizeChanges } from '@/components/configuration/summary';
+import { describeSkippedChanges } from '@/components/configuration/review/group';
+import { applyConfigChangesFn, resetBaseConfigFn } from '@/server';
+import { describeIssues } from '@/components/configuration/issues';
 import { hasPathOverlap } from '@/components/configuration/counts';
 import { useLocalize } from '../useLocalize';
 
+function toTargetRef(target: t.WriteTarget): t.WriteTargetRef {
+  if (target.type === 'base') return { type: 'base' };
+  const { principalType, principalId } = target.scope;
+  return { type: 'scope', scope: { principalType, principalId } };
+}
+
+function hasWrites(plan: t.WritePlan): boolean {
+  return (
+    plan.sets.length + plan.resets.length + plan.tombstones.length + plan.untombstones.length > 0
+  );
+}
+
+/** The admin session ended (signed out elsewhere or expired): the save never reached LibreChat. */
+const SESSION_ERROR_RE = /no admin session token|session (has )?expired|unauthori[sz]ed|\b401\b/i;
+
+function isSessionError(message: string): boolean {
+  return SESSION_ERROR_RE.test(message);
+}
+
+/** Skipped changes without repeats (the client and the server can report the same path). */
+function uniqueSkipped(skipped: t.SkippedChange[]): t.SkippedChange[] {
+  const seen = new Set<string>();
+  return skipped.filter(({ fieldPath, reason }) => {
+    const key = `${fieldPath}|${reason}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
- * The save pipeline of the configuration page (WS1): what Save would send,
- * the change review values, and the one validated write path shared by saves
- * and imports.
+ * The save pipeline of the configuration page (WS1). Pending edits become
+ * `ConfigChange` ops (keyed collection entries by identity), which are
+ * planned against the target's layers on the client for the review, the
+ * inline errors and the skipped list, and applied on the server in one
+ * validated, all-or-nothing call that reports what did not take effect.
  */
 export function useConfigSave({
   schemaTree,
@@ -46,13 +72,26 @@ export function useConfigSave({
     yamlMcpServers,
     schemaDefaults,
     overridePaths,
+    valueLayers,
     baseActiveConfigValues,
   } = layers;
-  const { editedValues, touchedPaths, resetEdits, setSaveError } = edits;
+  const {
+    editedValues,
+    touchedPaths,
+    resetEdits,
+    setSaveError,
+    collectionEdits,
+    editBaselines,
+    visibilityEdits,
+  } = edits;
   const isEditingScope = editingScope !== undefined;
 
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [serverIssues, setServerIssues] = useState<t.ConfigIssue[]>([]);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => setServerIssues([]), [editedValues, visibilityEdits]);
 
   const clearEdits = useCallback(() => {
     resetEdits();
@@ -61,23 +100,31 @@ export function useConfigSave({
     setSaveError(null);
   }, [resetEdits, setSaveError]);
 
+  const describeSkipped = useCallback(
+    (skipped: t.SkippedChange[]) =>
+      describeSkippedChanges(skipped, {
+        localize,
+        fields: schemaTree,
+        tree: baseActiveConfigValues,
+      }),
+    [localize, schemaTree, baseActiveConfigValues],
+  );
+
   /**
-   * Toast for a finished write. When anything was not stored, a warning lists
-   * each path with the reason, and only claims a save if something was written.
+   * Toast for a finished write: "Changes saved" only when everything took
+   * effect; otherwise a warning that lists each change with the reason.
    */
   const announceWrite = useCallback(
     (skipped: t.SkippedChange[], written: number, successMessage: string) => {
-      if (skipped.length === 0) {
+      const unique = uniqueSkipped(skipped);
+      if (unique.length === 0) {
         notifySuccess(successMessage);
         return;
       }
-      const details = skipped
-        .map((s) => `${s.fieldPath}: ${localize(SKIP_REASON_KEYS[s.reason])}`)
-        .join('\n');
-      const titleKey = written > 0 ? 'com_config_saved_with_skipped' : 'com_config_nothing_stored';
-      notifyWarning(localize(titleKey, { count: skipped.length }), details);
+      const titleKey = written > 0 ? 'com_config_apply_not_effective' : 'com_config_nothing_stored';
+      notifyWarning(localize(titleKey, { count: unique.length }), describeSkipped(unique));
     },
-    [localize],
+    [localize, describeSkipped],
   );
 
   const invalidateTarget = useCallback(
@@ -87,7 +134,6 @@ export function useConfigSave({
       }
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: ['resolvedConfig'] }),
-        queryClient.invalidateQueries({ queryKey: ['profileMap'] }),
         queryClient.invalidateQueries({ queryKey: ['availableScopes'] }),
       ]);
     },
@@ -95,92 +141,179 @@ export function useConfigSave({
   );
 
   /**
-   * The one write path for saves and imports. Every entry is validated before
-   * anything is written, so a rejected batch never leaves resets half-applied;
-   * queries are refetched afterwards whether or not the write succeeded, so
-   * the page always shows what was actually persisted.
+   * Applies ops through the server's validated apply; queries are refetched
+   * whatever the outcome. A call that fails outright (an ended session) is
+   * reported at once: the refetch, which retries, runs in the background.
    */
-  const writeChanges = useCallback(
-    async (
-      target: t.WriteTarget,
-      saves: t.SaveEntry[],
-      resets: string[],
-      inheritedMcpKeys: Set<string> = new Set(),
-    ): Promise<t.SkippedChange[]> => {
+  const applyChanges = useCallback(
+    async (target: t.WriteTarget, ops: t.ConfigChange[]) => {
       try {
-        const check = await validateConfigChangesFn({
-          data: { target: target.type, saves, resets },
-        });
-        if (check.errors.length > 0) {
-          throw new Error(
-            `${localize('com_config_validation_failed')} — ${check.errors.map((e) => e.error).join('; ')}`,
-          );
-        }
-        const skippedPaths = new Set(check.skipped.map((s) => s.fieldPath));
-        const writableResets = resets.filter((p) => !skippedPaths.has(p));
-        const writableSaves = saves.filter((e) => !skippedPaths.has(e.fieldPath));
-
-        /** Resets land before saves so a delete-then-recreate at the same path (e.g. MCP entry replaced with different fields) wipes stale fields first and the new leaf PATCHes don't race against the DELETE. */
-        if (target.type === 'scope') {
-          const { principalType, principalId } = target.scope;
-          const { resetPaths, tombstonePaths } = partitionScopeResetPaths(
-            writableResets,
-            inheritedMcpKeys,
-          );
-          await Promise.all([
-            ...resetPaths.map((fieldPath) =>
-              removeFieldProfileValueFn({ data: { fieldPath, principalType, principalId } }),
-            ),
-            ...tombstonePaths.map((fieldPath) =>
-              tombstoneFieldProfileValueFn({ data: { fieldPath, principalType, principalId } }),
-            ),
-          ]);
-        } else {
-          await Promise.all(
-            writableResets.map((fieldPath) => resetBaseConfigFieldFn({ data: { fieldPath } })),
-          );
-        }
-
-        if (writableSaves.length === 0) return check.skipped;
-        const result =
-          target.type === 'scope'
-            ? await bulkSaveProfileValuesFn({
-                data: {
-                  principalType: target.scope.principalType,
-                  principalId: target.scope.principalId,
-                  entries: writableSaves,
-                },
-              })
-            : await saveBaseConfigFn({ data: { entries: writableSaves } });
-        return [...check.skipped, ...result.skipped];
-      } finally {
+        const result = await applyConfigChangesFn({ data: { target: toTargetRef(target), ops } });
         await invalidateTarget(target);
+        return result;
+      } catch (err) {
+        void invalidateTarget(target);
+        throw err;
       }
     },
-    [localize, invalidateTarget],
+    [invalidateTarget],
   );
 
-  const saveContext = useMemo<t.SaveContext>(
+  const describeFailure = useCallback(
+    (result: t.ApplyConfigChangesResult, collections: t.PendingCollection[]) => {
+      const blocking = [...result.issues, ...result.failed];
+      const { summaries } = describeIssues(blocking, collections, localize);
+      const titleKey = (() => {
+        if (result.issues.length > 0) return 'com_config_validation_failed';
+        return result.compensated === false
+          ? 'com_config_apply_rollback_incomplete'
+          : 'com_config_apply_failed';
+      })();
+      return `${localize(titleKey)} — ${summaries.join('; ')}`;
+    },
+    [localize],
+  );
+
+  /** The write path shared with imports: saves and resets as ops, all or nothing. */
+  const writeChanges = useCallback<t.WriteChangesFn>(
+    async (target, saves, resets) => {
+      const ops: t.ConfigChange[] = [
+        ...saves.map(
+          ({ fieldPath, value }): t.ConfigChange => ({
+            op: 'set',
+            path: fieldPath,
+            value,
+          }),
+        ),
+        ...resets.map((path): t.ConfigChange => ({ op: 'reset', path })),
+      ];
+      const result = await applyChanges(target, ops);
+      if (result.issues.length > 0 || result.failed.length > 0) {
+        throw new Error(describeFailure(result, []));
+      }
+      return result.skipped;
+    },
+    [applyChanges, describeFailure],
+  );
+
+  const changeContext = useMemo<t.ChangeContext>(
     () => ({
       fields: schemaTree,
       baselineAt: (path) => getValueAtPath(baseActiveConfigValues, path),
       hasOverride: (path) => hasPathOverlap(path, overridePaths),
+      isScope: isEditingScope,
+      root: baseActiveConfigValues,
+      collections: collectionEdits,
+      visibility: visibilityEdits,
     }),
-    [schemaTree, baseActiveConfigValues, overridePaths],
+    [
+      schemaTree,
+      baseActiveConfigValues,
+      overridePaths,
+      isEditingScope,
+      collectionEdits,
+      visibilityEdits,
+    ],
   );
 
-  /** What Save would actually send: normalized, unchanged edits dropped, read-only paths skipped. */
-  const savePlan = useMemo(
-    () => buildSavePayload(touchedPaths, editedValues, schemaPathSet, saveContext),
-    [touchedPaths, editedValues, schemaPathSet, saveContext],
+  const changeSet = useMemo(
+    () => buildConfigChanges(touchedPaths, editedValues, schemaPathSet, changeContext),
+    [touchedPaths, editedValues, schemaPathSet, changeContext],
   );
+
+  /** The target's stored overrides and the layer beneath, as loaded (the server re-reads them). */
+  const snapshot = useMemo<t.WriteSnapshot>(() => {
+    if (isEditingScope) {
+      return {
+        stored: valueLayers?.scope?.overrides ?? {},
+        lower: configValues ?? {},
+        lowerKind: 'inherited',
+      };
+    }
+    return { stored: dbOverrides ?? {}, lower: yamlConfig ?? {}, lowerKind: 'yaml' };
+  }, [isEditingScope, valueLayers, configValues, dbOverrides, yamlConfig]);
+
+  const plan = useMemo(() => planConfigChanges(changeSet.ops, snapshot), [changeSet, snapshot]);
+
+  const clientIssues = useMemo(
+    () => [...changeSet.issues, ...plan.issues],
+    [changeSet.issues, plan.issues],
+  );
+
+  const issues = useMemo(() => [...clientIssues, ...serverIssues], [clientIssues, serverIssues]);
+
+  const { fieldErrors, summaries: issueSummaries } = useMemo(
+    () => describeIssues(issues, changeSet.collections, localize),
+    [issues, changeSet.collections, localize],
+  );
+
+  /**
+   * What Save changes, as the admin edited it (the review reads it): plain
+   * saves the plan sends, each edited keyed collection as its whole pending
+   * list (sent as per-entry ops), the resets the plan sends, and what is left
+   * out and why.
+   */
+  const savePlan = useMemo<t.SavePayload>(() => {
+    const notSent = new Set(plan.skipped.map((s) => s.fieldPath));
+    const collectionSaves = changeSet.collections.map(({ collection, items }) => ({
+      fieldPath: collection.path,
+      value: items.map((item) =>
+        normalizeEditValue(`${collection.path}.0`, item, schemaTree, schemaPathSet),
+      ),
+    }));
+    return {
+      touched: changeSet.payload.touched,
+      saves: [
+        ...changeSet.payload.saves.filter((s) => !notSent.has(s.fieldPath)),
+        ...collectionSaves,
+      ],
+      resets: changeSet.ops
+        .filter((op) => op.op === 'reset' && isResetSent(plan, op.path))
+        .map((op) => op.path),
+      skipped: uniqueSkipped([
+        ...changeSet.payload.skipped,
+        ...plan.skipped,
+        ...mergedBackChanges(plan.warnings, snapshot),
+      ]),
+    };
+  }, [changeSet, plan, snapshot, schemaTree, schemaPathSet]);
 
   const unsafeKeys = useMemo(
     () =>
-      BLOCK_UNSAFE_CONFIG_KEYS
-        ? savePlan.saves.flatMap((entry) => findUnsafeKeys(entry.value, entry.fieldPath))
-        : [],
-    [savePlan],
+      plan.issues
+        .filter((issue) => issue.code === 'UNSAFE_KEY')
+        .map((issue) => ({ path: issue.path, key: String(issue.params?.key ?? '') })),
+    [plan.issues],
+  );
+
+  const summaryLayers = useMemo<t.SummaryLayers>(() => {
+    const ownValues = isEditingScope ? snapshot.stored : (dbOverrides ?? {});
+    return {
+      baselineAt: (path) => getValueAtPath(baseActiveConfigValues, path),
+      ownAt: (path) => getValueAtPath(ownValues, path),
+      revertAt: (path) => {
+        const lower = getValueAtPath(isEditingScope ? configValues : yamlConfig, path);
+        if (lower !== undefined) {
+          return { value: lower, source: isEditingScope ? 'inherited' : 'yaml' };
+        }
+        return { value: schemaDefaults[path], source: 'default' };
+      },
+      editBaselines,
+    };
+  }, [
+    isEditingScope,
+    snapshot.stored,
+    dbOverrides,
+    baseActiveConfigValues,
+    configValues,
+    yamlConfig,
+    schemaDefaults,
+    editBaselines,
+  ]);
+
+  const changes = useMemo(
+    () => summarizeChanges(changeSet, plan, summaryLayers),
+    [changeSet, plan, summaryLayers],
   );
 
   const editTarget = useMemo<t.WriteTarget>(
@@ -189,151 +322,120 @@ export function useConfigSave({
     [isEditingScope, editingScope],
   );
 
-  const handleConfirmSave = useCallback(async () => {
-    if (saving || unsafeKeys.length > 0) return;
-    const { touched, saves, resets, skipped } = savePlan;
-    if (saves.length === 0 && resets.length === 0) {
-      clearEdits();
-      if (skipped.length > 0) {
-        announceWrite(skipped, 0, localize('com_config_saved'));
-      } else {
-        notifyInfo(localize('com_config_nothing_to_save'));
-      }
-      return;
-    }
-
-    /** Per-leaf saves can land an MCP entry in a transport state whose required siblings are missing (e.g. type=stdio with no command/args). Server-side per-field validation only sees one path at a time, so do the cross-field check here against the merged effective entry before any PATCH fires. Use baseActiveConfigValues so scope-mode edits validate against the scope-resolved baseline (where prior scope overrides supply some required fields) instead of the base config alone. */
-    const mcpBaseline = (() => {
-      const v = baseActiveConfigValues?.mcpServers;
-      if (v && typeof v === 'object' && !Array.isArray(v)) {
-        return v as Record<string, t.ConfigValue>;
-      }
-      return {};
-    })();
+  /** Per-leaf saves can land an MCP entry in a transport state whose required siblings are missing; check the merged entry (scope-resolved in a profile) before anything is sent. */
+  const findMcpError = useCallback((): string | null => {
+    const { touched, saves, resets } = changeSet.payload;
     const savedValues = new Map(saves.map((e) => [e.fieldPath, e.value]));
     const resetSet = new Set(resets);
     const mcpEdits: Array<[string, t.ConfigValue]> = touched
       .filter((p) => p.startsWith('mcpServers.') && (savedValues.has(p) || resetSet.has(p)))
       .map((p) => [p, savedValues.get(p)]);
-    /** A leaf reset (undefined write) removes the override and reveals the value of the next-lower layer. In scope mode that next layer is the base config; in base mode it is the un-merged YAML config (the baseOnly response). Feed whichever layer applies as the resetFallback so the cross-field validator does not falsely flag a reset-but-still-valid field as missing. */
-    const mcpResetFallback = (() => {
-      const source = isEditingScope ? configValues?.mcpServers : yamlMcpServers;
-      if (source && typeof source === 'object' && !Array.isArray(source)) {
-        return source as Record<string, t.ConfigValue>;
-      }
-      return undefined;
-    })();
-    if (mcpEdits.length > 0) {
-      const mcpErrors = validateMcpCrossField(mcpBaseline, mcpEdits, mcpResetFallback);
-      if (mcpErrors.length > 0) {
-        const { entryKey, missingField } = mcpErrors[0];
-        const message = localize('com_config_mcp_invalid_after_edit', {
-          entry: entryKey,
-          field: missingField,
-        });
+    if (mcpEdits.length === 0) return null;
+    const asRecord = (value: t.ConfigValue) =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, t.ConfigValue>)
+        : undefined;
+    /** A reset reveals the next-lower layer: the base config in a profile, librechat.yaml in base. */
+    const fallback = asRecord(isEditingScope ? configValues?.mcpServers : yamlMcpServers);
+    const mcpErrors = validateMcpCrossField(
+      asRecord(baseActiveConfigValues?.mcpServers) ?? {},
+      mcpEdits,
+      fallback,
+    );
+    if (mcpErrors.length === 0) return null;
+    const { entryKey, missingField } = mcpErrors[0];
+    return localize('com_config_mcp_invalid_after_edit', { entry: entryKey, field: missingField });
+  }, [
+    changeSet.payload,
+    isEditingScope,
+    configValues,
+    yamlMcpServers,
+    baseActiveConfigValues,
+    localize,
+  ]);
+
+  const handleConfirmSave = useCallback(async () => {
+    if (saving || unsafeKeys.length > 0) return;
+    if (clientIssues.length > 0) {
+      setSaveError(`${localize('com_config_validation_failed')} — ${issueSummaries.join('; ')}`);
+      return;
+    }
+    if (!hasWrites(plan)) {
+      clearEdits();
+      if (savePlan.skipped.length > 0)
+        announceWrite(savePlan.skipped, 0, localize('com_config_saved'));
+      else notifyInfo(localize('com_config_nothing_to_save'));
+      return;
+    }
+    const mcpError = findMcpError();
+    if (mcpError) {
+      setSaveError(mcpError);
+      notifyError(mcpError);
+      return;
+    }
+
+    setSaving(true);
+    setSaveError(null);
+    setSessionExpired(false);
+    try {
+      const result = await applyChanges(editTarget, changeSet.ops);
+      if (result.issues.length > 0 || result.failed.length > 0) {
+        const message = describeFailure(result, changeSet.collections);
+        setServerIssues([...result.issues, ...result.failed]);
+        setSaving(false);
         setSaveError(message);
         notifyError(message);
         return;
       }
-    }
-
-    const inheritedMcpKeys = (() => {
-      const source = isEditingScope ? configValues?.mcpServers : undefined;
-      if (source && typeof source === 'object' && !Array.isArray(source)) {
-        return new Set(Object.keys(source as Record<string, t.ConfigValue>));
-      }
-      return new Set<string>();
-    })();
-
-    setSaving(true);
-    setSaveError(null);
-
-    try {
-      const writeSkipped = await writeChanges(editTarget, saves, resets, inheritedMcpKeys);
-      const written = Math.max(0, saves.length + resets.length - writeSkipped.length);
       clearEdits();
-      announceWrite([...skipped, ...writeSkipped], written, localize('com_config_saved'));
+      announceWrite(
+        [...changeSet.payload.skipped, ...result.skipped],
+        result.applied,
+        localize('com_config_saved'),
+      );
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const raw = err instanceof Error ? err.message : String(err);
+      const expired = isSessionError(raw);
+      const message = expired ? localize('com_config_session_expired') : raw;
       setSaving(false);
+      setSessionExpired(expired);
       setSaveError(message);
       notifyError(message);
     }
   }, [
     saving,
     unsafeKeys,
+    clientIssues,
+    issueSummaries,
+    plan,
     savePlan,
+    changeSet,
     clearEdits,
     announceWrite,
-    baseActiveConfigValues,
-    isEditingScope,
-    configValues,
-    yamlMcpServers,
-    localize,
-    writeChanges,
+    findMcpError,
+    applyChanges,
+    describeFailure,
     editTarget,
+    localize,
     setSaveError,
   ]);
 
-  /** The review lists exactly what Save sends: a value for each save, "removed" for each reset. */
-  const reviewValues = useMemo(() => {
-    const result: t.FlatConfigMap = {};
-    for (const { fieldPath, value } of savePlan.saves) result[fieldPath] = value;
-    for (const fieldPath of savePlan.resets) result[fieldPath] = undefined;
-    return result;
-  }, [savePlan]);
-
   /**
-   * BEFORE values come from the target being edited (the open profile's own
-   * values in scope mode). A reset removes the target's own override, so its
-   * BEFORE is that stored override, not the merged value (which for a
-   * YAML-managed field such as Azure groups is the librechat.yaml one).
+   * Opening the review re-reads the target, so rows saved by someone else
+   * meanwhile are flagged as drifted (SV-8). Blocking problems are listed by
+   * the review from `issues`.
    */
-  const originalValuesForDialog = useMemo(() => {
-    const result: t.FlatConfigMap = {};
-    const ownValues = isEditingScope ? baseActiveConfigValues : dbOverrides;
-    for (const path of Object.keys(reviewValues)) {
-      const before =
-        (reviewValues[path] === undefined ? getValueAtPath(ownValues, path) : undefined) ??
-        getValueAtPath(baseActiveConfigValues, path);
-      if (before !== undefined) {
-        result[path] = stripSecretPreviewValues(before, path, schemaPathSet);
-      }
-    }
-    return result;
-  }, [reviewValues, isEditingScope, baseActiveConfigValues, dbOverrides, schemaPathSet]);
-
-  /**
-   * What each reset falls back to: the librechat.yaml value for base (or the
-   * schema default when the YAML does not set it), the base value for a profile.
-   */
-  const revertValuesForDialog = useMemo(() => {
-    const result: t.FlatConfigMap = {};
-    const fallback = isEditingScope ? configValues : yamlConfig;
-    for (const path of savePlan.resets) {
-      const value = getValueAtPath(fallback, path) ?? schemaDefaults[path];
-      result[path] = stripSecretPreviewValues(value, path, schemaPathSet);
-    }
-    return result;
-  }, [savePlan, isEditingScope, configValues, yamlConfig, schemaDefaults, schemaPathSet]);
-
-  const review = useMemo<t.ConfigReviewValues>(
-    () => ({
-      editedValues: reviewValues,
-      originalValues: originalValuesForDialog,
-      revertValues: revertValuesForDialog,
-    }),
-    [reviewValues, originalValuesForDialog, revertValuesForDialog],
-  );
-
   const openReview = useCallback(() => {
+    void invalidateTarget(editTarget);
     setSaveError(null);
+    setSessionExpired(false);
     setConfirmSaveOpen(true);
-  }, [setSaveError]);
+  }, [invalidateTarget, editTarget, setSaveError]);
 
   const cancelReview = useCallback(() => {
     setConfirmSaveOpen(false);
     setSaveError(null);
+    setSessionExpired(false);
   }, [setSaveError]);
 
   const closeReview = useCallback(() => setConfirmSaveOpen(false), []);
@@ -341,15 +443,21 @@ export function useConfigSave({
   return {
     confirmSaveOpen,
     saving,
+    sessionExpired,
     savePlan,
     unsafeKeys,
-    review,
+    changes,
+    warnings: plan.warnings,
+    issues,
+    fieldErrors,
+    issueSummaries,
     handleConfirmSave,
     openReview,
     cancelReview,
     closeReview,
     writeChanges,
     announceWrite,
+    describeSkipped,
   };
 }
 

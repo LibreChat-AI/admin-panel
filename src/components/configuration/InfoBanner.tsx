@@ -1,26 +1,36 @@
 import { useState } from 'react';
-import { Alert, Icon } from '@clickhouse/click-ui';
+import { Link } from '@tanstack/react-router';
 import type * as t from '@/types';
+import { DecorativeIcon } from '@/components/shared';
+import { useDismissal, useLocalize } from '@/hooks';
 import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
 
+/**
+ * Informational banner (VS-10): a visible info icon, AA-contrast text, an
+ * optional in-app link and a dismissal that persists per `dismissKey`. The
+ * scope variants announce which profile is being edited.
+ */
 export function InfoBanner({
   text,
   dismissible = true,
+  dismissKey,
+  link,
   variant = 'info',
   scopeSelection,
   onBackToBase,
 }: t.InfoBannerProps) {
   const localize = useLocalize();
-  const [dismissed, setDismissed] = useState(false);
+  const persisted = useDismissal(dismissKey);
+  const [localDismissed, setLocalDismissed] = useState(false);
 
   const [prevKey, setPrevKey] = useState(`${variant}:${text}`);
   const key = `${variant}:${text}`;
   if (key !== prevKey) {
     setPrevKey(key);
-    setDismissed(false);
+    setLocalDismissed(false);
   }
 
+  const dismissed = dismissKey ? persisted.dismissed : localDismissed;
   if (dismissed) return null;
 
   if (
@@ -36,8 +46,8 @@ export function InfoBanner({
         role="status"
         aria-live="polite"
       >
-        <span aria-hidden="true" style={{ color: config.color }}>
-          <Icon name={config.icon} size="sm" />
+        <span style={{ color: config.color }} className="flex">
+          <DecorativeIcon name={config.icon} size="sm" />
         </span>
         <span className="flex-1 text-(--cui-color-text-default)">
           {localize('com_scope_editing', {
@@ -58,12 +68,35 @@ export function InfoBanner({
     );
   }
 
+  const dismiss = dismissKey ? persisted.dismiss : () => setLocalDismissed(true);
+
   return (
-    <Alert
-      text={text}
-      state="info"
-      dismissible={dismissible}
-      onDismiss={() => setDismissed(true)}
-    />
+    <div className="settings-banner" role="note">
+      <span className="settings-banner-icon">
+        <DecorativeIcon name="info-in-circle" size="sm" />
+      </span>
+      <p className="settings-banner-text">
+        {text}
+        {link && (
+          <>
+            {' '}
+            <Link to={link.to} search={link.search}>
+              {localize(link.labelKey)}
+            </Link>
+          </>
+        )}
+      </p>
+      {dismissible && (
+        <button
+          type="button"
+          className="settings-banner-dismiss"
+          onClick={dismiss}
+          aria-label={localize('com_ui_dismiss')}
+          title={localize('com_ui_dismiss')}
+        >
+          <DecorativeIcon name="cross" size="sm" />
+        </button>
+      )}
+    </div>
   );
 }

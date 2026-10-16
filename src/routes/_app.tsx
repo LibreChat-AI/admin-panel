@@ -19,7 +19,6 @@ const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/help': 'com_help_title',
 };
 
-
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ location }) => {
     const result = await verifyAdminTokenFn();
@@ -27,12 +26,14 @@ export const Route = createFileRoute('/_app')({
     if (!result.valid) {
       throw redirect({
         to: '/login',
-        search: { redirect: location.pathname },
+        search: { redirect: location.href },
       });
     }
 
     return { user: result.user };
   },
+  pendingMs: 300,
+  pendingComponent: AppPending,
   component: AppLayout,
   errorComponent: AppError,
   notFoundComponent: AppNotFound,
@@ -87,6 +88,20 @@ function AppLayout() {
         </main>
       </div>
       <CommandMenu open={open} onOpenChange={setOpen} />
+    </div>
+  );
+}
+
+/** Shell placeholder while the session is verified, instead of a blank page. */
+function AppPending() {
+  const localize = useLocalize();
+  return (
+    <div role="status" aria-busy="true" className="flex h-screen overflow-hidden">
+      <span className="sr-only">{localize('com_ui_loading')}</span>
+      <div className="w-14 shrink-0 border-r border-(--cui-color-stroke-default) bg-(--cui-color-background-panel)" />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="h-15.25 shrink-0 border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-panel)" />
+      </div>
     </div>
   );
 }

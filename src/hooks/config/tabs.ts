@@ -1,5 +1,5 @@
-import { useCallback, useMemo } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { useCallback, useEffect, useMemo } from 'react';
 import type * as t from '@/types';
 import {
   CONFIG_TABS,
@@ -69,9 +69,18 @@ export function useConfigTabs({ schemaTree, initialTab }: t.ConfigTabsOptions): 
       ? initialTab
       : (visibleTabs[0]?.id ?? CONFIG_TABS[0].id);
 
+  /** An unknown or hidden `?tab=` is replaced by the tab actually shown (SH-5). */
+  useEffect(() => {
+    if (initialTab === undefined || initialTab === activeTab) return;
+    navigate({
+      search: (prev: t.ConfigSearchParams) => ({ ...prev, tab: activeTab }),
+      replace: true,
+    });
+  }, [initialTab, activeTab, navigate]);
+
   const handleTabChange = useCallback(
     (newTab: string) => {
-      navigate({ search: (prev: Record<string, unknown>) => ({ ...prev, tab: newTab }) });
+      navigate({ search: (prev: t.ConfigSearchParams) => ({ ...prev, tab: newTab }) });
     },
     [navigate],
   );

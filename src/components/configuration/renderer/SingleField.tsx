@@ -1,40 +1,62 @@
+import { useRef } from 'react';
+import type { ReactNode } from 'react';
 import type * as t from '@/types';
 import {
-  coerceEnumValue,
-  getArrayItemType,
-  getControlType,
-  getEnumOptions,
-  isStringLikeItemType,
-  splitUnionTypes,
-} from '../controls';
-import { ArrayObjectNestedGroup, RecordObjectNestedGroup } from './Collections';
-import { SwitchObjectField } from '../fields/SwitchObjectField';
-import { TextRecordField } from '../fields/TextRecordField';
-import { ListRecordField } from '../fields/ListRecordField';
-import { TextareaField } from '../fields/TextareaField';
-import { KeyValueField } from '../fields/KeyValueField';
-import { NumberField } from '../fields/NumberField';
-import { SecretField } from '../fields/SecretField';
-import { ToggleField } from '../fields/ToggleField';
-import { SelectField } from '../fields/SelectField';
+  ListOwnershipNotice,
+  ArrayObjectNestedGroup,
+  RecordObjectNestedGroup,
+} from './Collections';
+import { fieldDescription, hasPathOrDescendant, isContainerKind, toFieldId } from './paths';
+import { fieldMetaFor, fieldVariants, resolveControl } from './kinds';
+import { useLocalize, useFieldState, useValuesScope } from '@/hooks';
+import { getKeyedCollection, isConfigValueEqual } from '@/utils';
+import { deriveFieldDefault, lowerLayerKeys } from './defaults';
+import { BooleanChip, FieldControl } from './FieldControl';
+import { TriStateField } from '../fields/TriStateField';
+import { VariantField } from '../fields/VariantField';
 import { InlineFieldRenderer } from './InlineField';
-import { TextField } from '../fields/TextField';
-import { ListField } from '../fields/ListField';
-import { CodeField } from '../fields/CodeField';
-import { hasDescendant } from '../counts';
+import { ToggleField } from '../fields/ToggleField';
+import { getDefaultHint } from '../controls';
 import { ConfigRow } from '../ConfigRow';
-import { toKVPair } from '../fields/kv';
-import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
+import { labelForPath } from '../meta';
 
-function formatDefault(value: t.ConfigValue): string | null {
-  if (value === undefined || value === null) return null;
-  if (typeof value === 'boolean') return value ? 'on' : 'off';
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'string') return value.length > 40 ? `${value.slice(0, 37)}…` : value;
-  return null;
+/** Controls whose "Default (…)" choice names the default, so the row hint is dropped while it is selected. */
+const SHOWS_DEFAULT_CHOICE: ReadonlySet<t.ControlKind> = new Set([
+  'tristate',
+  'select',
+  'switch-object',
+  'bool-or-list',
+  'scalar-union',
+]);
+
+/** Inputs that show a default nothing sets as their placeholder ("Default: 1,800,000"), like entry cards do. */
+const PLACEHOLDER_DEFAULT_KINDS: ReadonlySet<t.ControlKind> = new Set([
+  'number',
+  'text',
+  'secret',
+  'textarea',
+  'ref-select',
+]);
+
+function isPlainRecord(value: t.ConfigValue): value is t.ConfigRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** On/off reading of a `boolean | object` value: an object means enabled. */
+function asEnabled(value: t.ConfigValue): boolean | undefined {
+  if (value === true || isPlainRecord(value)) return true;
+  if (value === false) return false;
+  return undefined;
+}
+
+/**
+ * One top-level settings row: label, help, state markers and Reset from
+ * `ConfigRow`, and the control from `FieldControl`. Inside a single-field
+ * section the row lends its control and chips to the section card (WS6
+ * `SoleFieldContext`), so the field keeps its markers, hint and Reset without
+ * a second label. Record, object and code values count as configured and
+ * overridden when any leaf under them is.
+ */
 export function SingleFieldRenderer({
   field,
   value,
@@ -46,7 +68,6 @@ export function SingleFieldRenderer({
   editedValues,
   disabled,
   permissions,
-  onProfileChange,
   previewMode,
   previewScope,
   previewChangedPaths,
@@ -62,25 +83,89 @@ export function SingleFieldRenderer({
   editSessionId,
 }: t.SingleFieldRendererProps) {
   const localize = useLocalize();
-  const controlType = getControlType(field);
-  const description = field.description || undefined;
+  const state = useFieldState(path);
+  const valuesScope = useValuesScope();
+  const lastObjectRef = useRef<t.ConfigRecord | null>(null);
   const currentValue = getValue(path, value);
-  const fieldId = path.replace(/\./g, '-');
-  const fieldLabel = localize(`com_config_field_${field.key}`);
-  const isConfigured = configuredPaths?.has(path);
-  const isDbOverride = dbOverridePaths?.has(path);
-  const isTouched = touchedPaths?.has(path);
-  const isPendingReset = pendingResets?.has(path) ?? false;
+  const meta = fieldMetaFor(field, path);
+  const { kind } = resolveControl({ field, path, value: currentValue });
+  const fieldId = toFieldId(path);
+  const label = labelForPath(path, localize);
+  const description = fieldDescription(field, meta, localize);
+  const container = isContainerKind(kind);
+  const isConfigured = container
+    ? hasPathOrDescendant(path, configuredPaths)
+    : (configuredPaths?.has(path) ?? false);
+  const isDbOverride = container
+    ? hasPathOrDescendant(path, dbOverridePaths)
+    : (dbOverridePaths?.has(path) ?? false);
+  const isTouched = touchedPaths?.has(path) ?? false;
+  const isPendingReset = state.isPendingReset || (pendingResets?.has(path) ?? false);
   const hasPendingEdit = editedValues ? path in editedValues : false;
-  const defaultHint = schemaDefaults ? formatDefault(schemaDefaults[path]) : null;
+  const schemaDefault = schemaDefaults?.[path];
+  const fieldDefault = deriveFieldDefault(
+    {
+      ...state,
+      isOverride: state.isOverride || isDbOverride,
+      isEdited: state.isEdited || hasPendingEdit,
+      isPendingReset,
+    },
+    meta,
+    schemaDefault,
+  );
+  /** A control whose Default choice names the default needs no hint (and the row keeps its height when edited). */
+  const defaultHint = SHOWS_DEFAULT_CHOICE.has(kind)
+    ? null
+    : getDefaultHint(field, schemaDefault, localize);
 
-  if (showConfiguredOnly && !isConfigured && !hasDescendant(path, configuredPaths)) return null;
+  /**
+   * A secret the target stores is redacted to its masked preview; whatever the
+   * value reads as underneath (the librechat.yaml env reference) is not it, so
+   * the row shows the preview with Replace instead.
+   */
+  const showsStoredSecret =
+    secretPreviewValue != null && !isPendingReset && (value == null || value === '');
+
+  /** The schema default filled into the tree is not a value anyone set: the input stays empty with it as the placeholder. */
+  const showsDefaultAsPlaceholder =
+    !fieldDefault.hasOwnValue &&
+    PLACEHOLDER_DEFAULT_KINDS.has(kind) &&
+    (fieldDefault.source === 'default' || fieldDefault.source === 'runtimeDefault') &&
+    isConfigValueEqual(currentValue, fieldDefault.value);
+  const shownValue = (() => {
+    if (showsStoredSecret && !hasPendingEdit) return '';
+    return showsDefaultAsPlaceholder ? undefined : currentValue;
+  })();
+
+  if (isPlainRecord(currentValue)) lastObjectRef.current = currentValue;
+  if (showConfiguredOnly && !hasPathOrDescendant(path, configuredPaths)) return null;
+
+  /**
+   * "Default": remove the target's own value, or drop a pending edit when it
+   * has none. Returns false when a librechat.yaml (or Base) value remains,
+   * which cannot be removed from here (D3).
+   */
+  const clear = (): boolean => {
+    if (isDbOverride || state.isOverride) {
+      onChange(path, undefined);
+      return true;
+    }
+    /** Emptying a list the layer beneath sets: it can't be emptied, and its earlier pending removals stay. */
+    const keepsPendingList =
+      isConfigured && !SHOWS_DEFAULT_CHOICE.has(kind) && Array.isArray(editedValues?.[path]);
+    if (keepsPendingList) return false;
+    if (hasPendingEdit && onDiscardField) onDiscardField(path);
+    else if (hasPendingEdit) onChange(path, undefined);
+    /** A profile can't empty what it inherits: the control says so instead of silently refilling. */
+    const inheritsValue = state.source === 'inherited' && state.effective !== undefined;
+    return !isConfigured && (hasPendingEdit || !inheritsValue);
+  };
 
   const rowProps = {
     fieldPath: path,
     permissions,
-    onProfileChange,
     onResetField,
+    onDiscardField,
     previewMode,
     previewScope,
     previewChangedPaths,
@@ -92,85 +177,27 @@ export function SingleFieldRenderer({
     defaultHint,
   };
 
-  if (controlType === 'toggle') {
-    const control = disabled ? (
-      <BooleanChip value={Boolean(currentValue)} />
-    ) : (
-      <ToggleField
-        id={fieldId}
-        checked={Boolean(currentValue)}
-        onChange={(checked) => onChange(path, checked)}
-        aria-label={fieldLabel}
-      />
-    );
-    if (isSoleField) return control;
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        {control}
-      </ConfigRow>
-    );
-  }
-
-  if (controlType === 'select') {
-    const options = getEnumOptions(field.type);
-    const control = (
-      <SelectField
-        id={fieldId}
-        value={currentValue == null ? '' : String(currentValue)}
-        options={options}
-        onChange={(v) => onChange(path, coerceEnumValue(v))}
-        disabled={disabled}
-        aria-label={fieldLabel}
-      />
-    );
-    if (isSoleField) return control;
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        {control}
-      </ConfigRow>
-    );
-  }
-
-  if (controlType === 'number') {
-    const control = (
-      <NumberField
-        id={fieldId}
-        value={typeof currentValue === 'number' ? currentValue : undefined}
-        onChange={(v) => onChange(path, v)}
-        disabled={disabled}
-      />
-    );
-    if (isSoleField) return control;
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        {control}
-      </ConfigRow>
-    );
-  }
-
-  if (controlType === 'array-object') {
+  if (kind === 'array-object') {
+    const ownsList =
+      getKeyedCollection(path)?.merge === 'replace' &&
+      (isDbOverride || state.isOverride) &&
+      !isPendingReset;
     return (
       <ArrayObjectNestedGroup
+        notice={
+          ownsList ? (
+            <ListOwnershipNotice
+              isScope={valuesScope != null}
+              onRevert={
+                !disabled && permissions?.canEdit !== false && onResetField
+                  ? () => onResetField(path)
+                  : undefined
+              }
+            />
+          ) : undefined
+        }
         fieldId={fieldId}
-        fieldLabel={fieldLabel}
+        fieldLabel={label}
         path={path}
         currentValue={currentValue}
         field={field}
@@ -182,19 +209,14 @@ export function SingleFieldRenderer({
     );
   }
 
-  if (controlType === 'record-object') {
-    const entries =
-      currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)
-        ? Object.keys(currentValue as Record<string, t.ConfigValue>)
-        : [];
+  if (kind === 'record-object') {
     return (
       <RecordObjectNestedGroup
         fieldId={fieldId}
-        fieldLabel={fieldLabel}
+        fieldLabel={label}
         path={path}
         currentValue={currentValue}
         field={field}
-        entries={entries}
         onChange={onChange}
         disabled={disabled}
         isSoleField={isSoleField}
@@ -203,278 +225,96 @@ export function SingleFieldRenderer({
     );
   }
 
-  if (controlType === 'array') {
-    const arrayValue = Array.isArray(currentValue) ? currentValue : [];
-    const itemType = getArrayItemType(field.type);
+  const { variants, discriminator } = fieldVariants(field, localize);
 
-    if (isStringLikeItemType(itemType)) {
-      return (
-        <ConfigRow
-          title={fieldLabel}
-          description={description}
-          disabled={disabled}
-          fieldId={fieldId}
-          {...rowProps}
-        >
-          <ListField
-            id={fieldId}
-            values={arrayValue.map(String)}
-            onChange={(v) => onChange(path, v)}
-            itemLabel={localize(`com_config_field_${field.key}_item`)}
-            disabled={disabled}
-            options={itemType.startsWith('enum(') ? getEnumOptions(itemType) : undefined}
-            aria-label={fieldLabel}
-          />
-        </ConfigRow>
-      );
-    }
-
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        <CodeField
-          id={fieldId}
-          value={currentValue}
-          onChange={(v) => onChange(path, v)}
-          disabled={disabled}
-        />
-      </ConfigRow>
-    );
-  }
-
-  if (controlType === 'text') {
-    const stringValue = typeof currentValue === 'string' ? currentValue : '';
-    const baselineEmpty = typeof value !== 'string' || value === '';
-    const maskedSecret =
-      secretPreviewValue != null && baselineEmpty && !isPendingReset ? secretPreviewValue : null;
-
-    if (maskedSecret != null) {
-      const control = (
-        <SecretField
-          key={`${fieldId}-${editSessionId ?? 0}`}
-          id={fieldId}
-          value={stringValue}
-          maskedValue={maskedSecret}
-          onChange={(v) => onChange(path, v)}
-          onCancel={() => onDiscardField?.(path)}
-          hasPendingEdit={hasPendingEdit}
-          disabled={disabled}
-          aria-label={fieldLabel}
-        />
-      );
-      if (isSoleField) return control;
-      return (
-        <ConfigRow
-          title={fieldLabel}
-          description={description}
-          disabled={disabled}
-          fieldId={fieldId}
-          {...rowProps}
-        >
-          {control}
-        </ConfigRow>
-      );
-    }
-
-    const isMultiline = stringValue.includes('\n') || field.key.toLowerCase().includes('content');
-
-    if (isMultiline) {
-      const control = (
-        <TextareaField
-          id={fieldId}
-          value={stringValue}
-          onChange={(v) => onChange(path, v)}
-          rows={5}
-          disabled={disabled}
-        />
-      );
-      if (isSoleField) return control;
-      return (
-        <ConfigRow
-          title={fieldLabel}
-          description={description}
-          disabled={disabled}
-          fieldId={fieldId}
-          {...rowProps}
-        >
-          {control}
-        </ConfigRow>
-      );
-    }
-
-    const control = (
-      <TextField
-        id={fieldId}
-        value={stringValue}
-        onChange={(v) => onChange(path, v)}
-        type="text"
-        disabled={disabled}
-      />
-    );
-    if (isSoleField) return control;
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        {control}
-      </ConfigRow>
-    );
-  }
-
-  if (controlType === 'record') {
-    const isEditedPairs = Array.isArray(currentValue);
-    const pairs: t.KeyValuePair[] = isEditedPairs
-      ? (currentValue as t.KeyValuePair[])
-      : Object.entries(
-          typeof currentValue === 'object' && currentValue !== null
-            ? (currentValue as Record<string, t.ConfigValue>)
-            : {},
-        ).map(([k, v]) => toKVPair(k, v));
-
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        <KeyValueField
-          id={fieldId}
-          pairs={pairs}
-          onChange={(newPairs) => onChange(path, newPairs)}
-          disabled={disabled}
-          valueTypes={field.recordValueKVTypes}
-          aria-label={fieldLabel}
-        />
-      </ConfigRow>
-    );
-  }
-
-  if (controlType === 'switch-object') {
-    const isObj =
-      typeof currentValue === 'object' && currentValue !== null && !Array.isArray(currentValue);
-    const isEnabled = isObj || currentValue === true;
-    const subFields = field.children ?? [];
-    const control = (
-      <SwitchObjectField
+  let control: ReactNode;
+  if (kind === 'variant' && variants.length > 0) {
+    control = (
+      <VariantField
+        key={`${fieldId}-${editSessionId ?? 0}`}
         id={fieldId}
         value={currentValue}
-        onChange={(v) => onChange(path, v)}
+        variants={variants}
+        discriminator={discriminator}
+        inheritedKeys={lowerLayerKeys(state)}
+        onChange={(next) => onChange(path, next)}
         disabled={disabled}
-        aria-label={fieldLabel}
-      >
-        {isEnabled && subFields.length > 0 && (
+        aria-label={label}
+        renderFields={(variantFields, variantValue, onVariantChange) => (
           <InlineFieldRenderer
-            fields={subFields}
-            parentValue={isObj ? currentValue : {}}
+            fields={variantFields}
+            parentValue={variantValue}
             parentPath={path}
-            onChange={onChange}
+            onChange={onVariantChange}
             disabled={disabled}
+            editSessionId={editSessionId}
           />
         )}
-      </SwitchObjectField>
-    );
-    if (isSoleField) return control;
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        {control}
-      </ConfigRow>
-    );
-  }
-
-  if (controlType === 'text-record') {
-    const types = splitUnionTypes(field.type);
-    const variant = types.some((u) => u.startsWith('array')) ? 'array' : 'record';
-    const control = (
-      <TextRecordField
-        id={fieldId}
-        value={currentValue}
-        onChange={(v) => onChange(path, v)}
-        disabled={disabled}
-        variant={variant as 'record' | 'array'}
-        aria-label={fieldLabel}
       />
     );
-    if (isSoleField) return control;
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        {control}
-      </ConfigRow>
-    );
-  }
-
-  if (controlType === 'list-record') {
-    const control = (
-      <ListRecordField
+  } else if (kind === 'switch-object') {
+    const enabled = asEnabled(currentValue);
+    const defaultEnabled = asEnabled(fieldDefault.value);
+    const setEnabled = (next: boolean | undefined) => {
+      if (next === undefined) clear();
+      else onChange(path, next ? (lastObjectRef.current ?? true) : false);
+    };
+    if (disabled) control = <BooleanChip value={enabled ?? defaultEnabled ?? false} />;
+    else if (field.isOptional) {
+      control = (
+        <TriStateField
+          id={fieldId}
+          value={fieldDefault.hasOwnValue ? enabled : undefined}
+          defaultValue={defaultEnabled}
+          defaultSource={fieldDefault.source}
+          defaultFromGlobal={fieldDefault.fromGlobal}
+          unsetLabel={meta?.defaultLabelKey ? localize(meta.defaultLabelKey) : undefined}
+          onChange={setEnabled}
+          aria-label={label}
+        />
+      );
+    } else {
+      control = (
+        <ToggleField
+          id={fieldId}
+          checked={enabled ?? defaultEnabled ?? false}
+          onChange={setEnabled}
+          aria-label={label}
+        />
+      );
+    }
+  } else {
+    control = (
+      <FieldControl
+        key={kind === 'secret' ? `${fieldId}-${editSessionId ?? 0}` : undefined}
+        field={field}
+        path={path}
         id={fieldId}
-        value={currentValue}
-        onChange={(v) => onChange(path, v)}
+        label={label}
+        value={shownValue}
+        onChange={(next) => onChange(path, next)}
+        onClear={clear}
+        fieldDefault={fieldDefault}
         disabled={disabled}
-        aria-label={fieldLabel}
+        required={!field.isOptional}
+        secretPreview={showsStoredSecret ? secretPreviewValue : null}
+        hasPendingEdit={hasPendingEdit}
+        onCancelSecret={() => onDiscardField?.(path)}
+        editSessionId={editSessionId}
       />
-    );
-    if (isSoleField) return control;
-    return (
-      <ConfigRow
-        title={fieldLabel}
-        description={description}
-        disabled={disabled}
-        fieldId={fieldId}
-        {...rowProps}
-      >
-        {control}
-      </ConfigRow>
     );
   }
 
   return (
     <ConfigRow
-      title={fieldLabel}
+      title={label}
       description={description}
+      learnMoreUrl={meta?.docsUrl}
       disabled={disabled}
       fieldId={fieldId}
       {...rowProps}
     >
-      <CodeField
-        id={fieldId}
-        value={currentValue}
-        onChange={(v) => onChange(path, v)}
-        disabled={disabled}
-      />
+      {control}
     </ConfigRow>
-  );
-}
-
-function BooleanChip({ value }: { value: boolean }) {
-  const localize = useLocalize();
-  return (
-    <span
-      className={cn('boolean-chip self-start', value ? 'boolean-chip-true' : 'boolean-chip-false')}
-      aria-label={localize(value ? 'com_ui_true' : 'com_ui_false')}
-    >
-      {localize(value ? 'com_ui_true' : 'com_ui_false')}
-    </span>
   );
 }

@@ -1,5 +1,5 @@
-import { Icon } from '@clickhouse/click-ui';
-import { memo, useRef, useMemo, useState, useEffect, useCallback } from 'react';
+import { isProcessMCPServerConfig } from 'librechat-data-provider';
+import { memo, useRef, useMemo, useState, useEffect, useContext, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
 import {
@@ -11,36 +11,37 @@ import {
   validateMcpCrossField,
   REQUIRED_BY_TRANSPORT,
 } from './mcp/validation';
-import { YAML_LOCKED_FIELDS, INSPECTOR_DERIVED } from './mcpFieldMeta';
+import {
+  isMcpFieldShown,
+  INSPECTOR_DERIVED,
+  YAML_LOCKED_FIELDS,
+  PROCESS_LOCKED_FIELDS,
+} from './mcpFieldMeta';
 import { useCollapsibleSection } from '../useCollapsibleSection';
+import { DecorativeIcon, FormDialog } from '@/components/shared';
+import { RowFilterContext } from '@/contexts/RowFilterContext';
+import { cn, isRowVisible, isUnsafeConfigKey, isConfigValueEqual } from '@/utils';
 import { ObjectEntryCard } from '../fields/ObjectEntryCard';
+import { renderInlineField, toFieldId } from '../renderer';
 import { renderCollapsible } from '../renderCollapsible';
+import { useLocalize, useLowerEntryKeys, useRecordEntryOverrides } from '@/hooks';
 import { SelectField } from '../fields/SelectField';
-import { FormDialog } from '@/components/shared';
-import { renderInlineField } from '../renderer';
-import { cn, isUnsafeConfigKey } from '@/utils';
-import { useLocalize } from '@/hooks';
+import { SettingsRow } from '../SettingsRow';
 
-const TRANSPORT_FIELDS: Record<string, string[]> = {
-  stdio: ['command', 'args', 'env', 'stderr'],
-  sse: ['url', 'headers'],
-  'streamable-http': ['url', 'headers'],
-  http: ['url', 'headers'],
-  websocket: ['url'],
-};
+const TRANSPORT_TYPES = ['streamable-http', 'sse', 'websocket', 'stdio'] as const;
 
-const ALL_TRANSPORT_KEYS = new Set(Object.values(TRANSPORT_FIELDS).flat());
-const REMOTE_ONLY_FIELDS = new Set(['requiresOAuth', 'apiKey', 'oauth', 'oauth_headers']);
-const REMOTE_TRANSPORTS = new Set(['sse', 'streamable-http', 'http', 'websocket']);
-const HTTP_ONLY_FIELDS = new Set(['obo', 'proxy']);
-const HTTP_TRANSPORTS = new Set(['sse', 'streamable-http', 'http']);
-
-const TRANSPORT_TYPE_OPTIONS: { label: string; value: string }[] = [
-  { label: 'streamable-http', value: 'streamable-http' },
-  { label: 'sse', value: 'sse' },
-  { label: 'stdio', value: 'stdio' },
-  { label: 'websocket', value: 'websocket' },
-];
+/**
+ * Transport choices. stdio servers run a local process, which only
+ * librechat.yaml can define (D10): the choice is shown, disabled, unless the
+ * server already is one.
+ */
+function transportOptions(current: string, localize: t.LocalizeFn): t.SelectOption[] {
+  return TRANSPORT_TYPES.map((value) => {
+    const isLocked = value === 'stdio' && current !== 'stdio';
+    const key = isLocked ? 'stdio_locked' : value.replace('-', '_');
+    return { value, label: localize(`com_config_mcp_transport_${key}`), disabled: isLocked };
+  });
+}
 
 const ALWAYS_REQUIRED = new Set(['type']);
 
@@ -94,7 +95,7 @@ function enumerateLeafPaths(
 const MCP_FIELD_GROUPS: t.FieldGroupDef[] = [
   {
     labelKey: 'com_config_group_connection',
-    fields: ['type', 'url', 'command', 'args', 'headers', 'env', 'stderr', 'requiresOAuth'],
+    fields: ['type', 'url', 'command', 'args', 'headers', 'env', 'cwd', 'stderr', 'requiresOAuth'],
     defaultExpanded: true,
   },
   {
@@ -141,6 +142,7 @@ function flattenGroupFields(
   disabled?: boolean,
   collectionRenderOverrides?: Record<string, t.CollectionRenderFields>,
   lockedKeys?: Set<string>,
+  rowFilter: t.PathIndex | null = null,
 ): ReactNode[] {
   const values = isPlainObject(parentValue) ? parentValue : {};
 
@@ -148,31 +150,33 @@ function flattenGroupFields(
   for (const field of fields) {
     const fieldDisabled = disabled || (lockedKeys?.has(field.key) ?? false);
     if (field.key === 'type') {
-      const fieldId = `${parentPath}-${field.key}`;
+      if (!isRowVisible(rowFilter, `${parentPath}.${field.key}`)) continue;
+      const fieldId = toFieldId(`${parentPath}.${field.key}`);
       const label = localize(`com_config_field_${field.key}`);
       const explicitValue = typeof values.type === 'string' ? values.type : '';
       const rawValue = explicitValue || inferTransportType(values);
       const displayValue = rawValue === 'http' ? 'streamable-http' : rawValue;
       nodes.push(
-        <div key={field.key} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-4">
-          <label
-            htmlFor={fieldId}
-            className="shrink-0 text-sm font-medium text-(--cui-color-text-default) sm:w-35"
-          >
-            {label}
-            <span className="ml-0.5 text-(--cui-color-text-danger)">*</span>
-          </label>
-          <div className="flex-1">
+        <SettingsRow
+          key={field.key}
+          label={label}
+          htmlFor={fieldId}
+          chips={
+            <span aria-hidden="true" className="text-(--cui-color-text-danger)">
+              *
+            </span>
+          }
+          control={
             <SelectField
               id={fieldId}
               value={displayValue}
-              options={TRANSPORT_TYPE_OPTIONS}
+              options={transportOptions(displayValue, localize)}
               onChange={(v) => onChange(field.key, v)}
               disabled={fieldDisabled}
               aria-label={label}
             />
-          </div>
-        </div>,
+          }
+        />,
       );
       continue;
     }
@@ -214,19 +218,34 @@ function flattenGroupFields(
   return nodes;
 }
 
+/** The data paths of a group's fields, and whether any stays visible under the tab filter. */
+function useGroupFilter(fields: t.SchemaField[], parentPath: string) {
+  const rowFilter = useContext(RowFilterContext);
+  const paths = fields.map((field) => `${parentPath}.${field.key}`);
+  return { rowFilter, paths, isShown: paths.some((path) => isRowVisible(rowFilter, path)) };
+}
+
 function FieldGroupSection({
   labelKey,
   defaultExpanded,
+  fields,
+  parentPath,
   children,
 }: {
   labelKey: string;
   defaultExpanded: boolean;
+  /** Every field the section shows, its child groups' included. */
+  fields: t.SchemaField[];
+  parentPath: string;
   children: ReactNode;
 }) {
   const localize = useLocalize();
+  const { paths, isShown } = useGroupFilter(fields, parentPath);
   const { isExpanded, hasEverExpanded, sectionRef, toggle } = useCollapsibleSection({
     defaultExpanded,
+    revealPaths: paths,
   });
+  if (!isShown) return null;
 
   return (
     <section ref={sectionRef} className="flex flex-col">
@@ -243,7 +262,7 @@ function FieldGroupSection({
               isExpanded && 'rotate-90',
             )}
           >
-            <Icon name="chevron-right" size="xs" />
+            <DecorativeIcon name="chevron-right" size="xs" />
           </span>
           <span className="text-xs font-medium text-(--cui-color-text-muted)">
             {localize(labelKey)}
@@ -281,11 +300,13 @@ function FieldGroup({
   lockedKeys?: Set<string>;
 }) {
   const localize = useLocalize();
+  const { rowFilter, paths, isShown } = useGroupFilter(fields, parentPath);
   const { isExpanded, hasEverExpanded, sectionRef, toggle } = useCollapsibleSection({
     defaultExpanded,
+    revealPaths: paths,
   });
 
-  if (fields.length === 0) return null;
+  if (fields.length === 0 || !isShown) return null;
 
   return (
     <section ref={sectionRef} className="flex flex-col">
@@ -302,7 +323,7 @@ function FieldGroup({
               isExpanded && 'rotate-90',
             )}
           >
-            <Icon name="chevron-right" size="xs" />
+            <DecorativeIcon name="chevron-right" size="xs" />
           </span>
           <span className="text-xs font-medium text-(--cui-color-text-muted)">
             {localize(labelKey)}
@@ -323,6 +344,7 @@ function FieldGroup({
             disabled,
             undefined,
             lockedKeys,
+            rowFilter,
           )}
         </div>,
       )}
@@ -346,31 +368,14 @@ function McpEntryFields({
   lockedKeys?: Set<string>;
 }) {
   const localize = useLocalize();
+  const rowFilter = useContext(RowFilterContext);
   const values = isPlainObject(parentValue) ? parentValue : {};
   const explicitType = typeof values.type === 'string' ? values.type : '';
   const currentType = explicitType || inferTransportType(values);
 
-  const currentTransportFields = new Set(TRANSPORT_FIELDS[currentType] ?? []);
-  const isRemote = REMOTE_TRANSPORTS.has(currentType);
-  const visibleKeys = new Set<string>();
-  for (const field of fields) {
-    if (INSPECTOR_DERIVED.has(field.key)) continue;
-    if (ALL_TRANSPORT_KEYS.has(field.key)) {
-      if (currentTransportFields.has(field.key)) {
-        visibleKeys.add(field.key);
-      }
-    } else if (HTTP_ONLY_FIELDS.has(field.key)) {
-      if (HTTP_TRANSPORTS.has(currentType)) {
-        visibleKeys.add(field.key);
-      }
-    } else if (REMOTE_ONLY_FIELDS.has(field.key)) {
-      if (isRemote) {
-        visibleKeys.add(field.key);
-      }
-    } else {
-      visibleKeys.add(field.key);
-    }
-  }
+  const visibleKeys = new Set(
+    fields.filter((field) => isMcpFieldShown(field.key, currentType)).map((field) => field.key),
+  );
 
   const fieldsByKey = new Map(fields.map((f) => [f.key, f]));
   const collectGroupKeys = (groups: t.FieldGroupDef[]): string[] =>
@@ -395,6 +400,8 @@ function McpEntryFields({
           key={group.labelKey}
           labelKey={group.labelKey}
           defaultExpanded={group.defaultExpanded}
+          fields={[...groupFields, ...childGroups.flatMap((child) => resolveFields(child.fields))]}
+          parentPath={parentPath}
         >
           {groupFields.length > 0 && (
             <div className="flex flex-col gap-3">
@@ -408,6 +415,7 @@ function McpEntryFields({
                 disabled,
                 undefined,
                 lockedKeys,
+                rowFilter,
               )}
             </div>
           )}
@@ -447,6 +455,11 @@ function McpEntryFields({
 
   return (
     <div className="flex flex-col gap-4">
+      {lockedKeys?.has('command') && (
+        <p className="m-0 text-xs text-(--cui-color-text-muted)">
+          {localize('com_config_mcp_process_locked')}
+        </p>
+      )}
       {MCP_FIELD_GROUPS.map(renderGroup)}
       {ungrouped.length > 0 && (
         <FieldGroup
@@ -581,6 +594,30 @@ function CreateMcpServerDialog({
   );
 }
 
+/**
+ * Entries with the pending deletions at their places. Under the tab filter
+ * (`atEnd`) the positions no longer line up, so deletions are listed last:
+ * they stay visible, with Undo, whatever the filter matches.
+ */
+function withRemovals(
+  entries: Array<[string, t.ConfigValue]>,
+  removed: t.McpRemoval[],
+  atEnd = false,
+): Array<t.RemovalRow<t.ConfigValue>> {
+  const rows: Array<t.RemovalRow<t.ConfigValue>> = entries.map(([key, value]) => ({
+    kind: 'entry',
+    key,
+    value,
+  }));
+  for (const ghost of [...removed].sort((a, b) => a.index - b.index)) {
+    const at = atEnd ? rows.length : Math.max(0, Math.min(ghost.index, rows.length));
+    rows.splice(at, 0, { kind: 'removed', ghost });
+  }
+  return rows;
+}
+
+const renderRemovedFields: t.CollectionRenderFields = () => null;
+
 export function McpServersRenderer(props: t.FieldRendererProps) {
   const {
     fields,
@@ -593,10 +630,16 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     yamlBaseKeys,
     isEditingScope,
     onValidationError,
+    onDiscardField,
+    editSessionId,
   } = props;
   const localize = useLocalize();
+  const rowFilter = useContext(RowFilterContext);
   const [createOpen, setCreateOpen] = useState(false);
   const [justAddedKey, setJustAddedKey] = useState<string | null>(null);
+  const [removed, setRemoved] = useState<t.McpRemoval[]>([]);
+
+  useEffect(() => setRemoved([]), [editSessionId]);
 
   const path = parentPath;
   const entryPrefix = `${path}.`;
@@ -676,6 +719,10 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   }, [baseRecord, editsByEntry]);
 
   const entries = useMemo(() => Object.entries(record), [record]);
+  /** A server back in the list (Undo, a removal reverted from the review) is no longer pending deletion. */
+  if (removed.some((ghost) => ghost.key in record)) {
+    setRemoved((list) => list.filter((ghost) => !(ghost.key in record)));
+  }
 
   const existingKeys = useMemo(() => new Set(Object.keys(record)), [record]);
 
@@ -687,6 +734,9 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
   const yamlSourceKeys = useMemo(() => {
     return yamlBaseKeys ?? new Set<string>();
   }, [yamlBaseKeys]);
+  /** In a profile, servers Base defines are inherited: editable, but not renamed or removed here (D1). */
+  const lowerKeys = useLowerEntryKeys(path);
+  const overridesOf = useRecordEntryOverrides(path);
 
   /** Refs keep the callbacks referentially stable so memo(McpEntryRow) can bail. */
   const editedValuesRef = useRef(editedValues);
@@ -755,6 +805,18 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       const baseRecord = baseRecordRef.current;
       const prefix = `${path}.${key}.`;
       const entryPath = `${path}.${key}`;
+      const current = recordRef.current;
+      const isUnder = (editPath: string) => editPath === entryPath || editPath.startsWith(prefix);
+      setRemoved((list) => [
+        ...list.filter((ghost) => ghost.key !== key),
+        {
+          key,
+          index: Object.keys(current).indexOf(key),
+          value: current[key],
+          label: key,
+          edits: Object.entries(editedValues ?? {}).filter(([editPath]) => isUnder(editPath)),
+        },
+      ]);
       const seen = new Set<string>();
       if (editedValues) {
         for (const editPath of Object.keys(editedValues)) {
@@ -777,6 +839,21 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
       }
     },
     [onChange, path],
+  );
+
+  /** Undo of a pending deletion: the deletion's edits are dropped and the edits made before it come back. */
+  const handleUndoRemove = useCallback(
+    (ghost: t.McpRemoval) => {
+      if (!onDiscardField) return;
+      const entryPath = `${path}.${ghost.key}`;
+      for (const editPath of Object.keys(editedValuesRef.current ?? {})) {
+        if (editPath === entryPath || editPath.startsWith(`${entryPath}.`))
+          onDiscardField(editPath);
+      }
+      for (const [editPath, value] of ghost.edits) onChange(editPath, value);
+      setRemoved((list) => list.filter((entry) => entry.key !== ghost.key));
+    },
+    [onChange, onDiscardField, path],
   );
 
   const handleRename = useCallback(
@@ -846,12 +923,8 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
     <div className="flex flex-col gap-2">
       {!disabled && (
         <div className="flex items-center gap-3 py-2">
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="config-add-btn"
-          >
-            <Icon name="plus" size="sm" />
+          <button type="button" onClick={() => setCreateOpen(true)} className="config-add-btn">
+            <DecorativeIcon name="plus" size="sm" />
             <span>{localize('com_config_create_mcp_server')}</span>
           </button>
         </div>
@@ -861,23 +934,47 @@ export function McpServersRenderer(props: t.FieldRendererProps) {
           {localize('com_config_no_mcp_servers')}
         </div>
       )}
-      {entries.map(([key, entryValue]) => (
-        <McpEntryRow
-          key={key}
-          entryKey={key}
-          entryValue={entryValue}
-          fields={fields}
-          path={path}
-          disabled={disabled}
-          isEditingScope={!!isEditingScope}
-          isYamlSource={yamlSourceKeys.has(key)}
-          onChange={onChange}
-          onRemove={handleRemove}
-          onRename={handleRename}
-          justAdded={key === justAddedKey}
-        />
-      ))}
-      {!disabled && entries.length === 0 && (
+      {withRemovals(
+        rowFilter ? entries.filter(([key]) => isRowVisible(rowFilter, `${path}.${key}`)) : entries,
+        removed,
+        rowFilter != null,
+      ).map((row) =>
+        row.kind === 'removed' ? (
+          <ObjectEntryCard
+            key={`removed-${row.ghost.key}`}
+            entryKey={row.ghost.key}
+            fields={fields}
+            value={row.ghost.value}
+            onValueChange={() => undefined}
+            renderFields={renderRemovedFields}
+            pendingRemoval
+            focusUndo
+            onUndoRemove={() => handleUndoRemove(row.ghost)}
+          />
+        ) : (
+          <McpEntryRow
+            key={row.key}
+            entryKey={row.key}
+            entryValue={row.value}
+            fields={fields}
+            path={path}
+            disabled={disabled}
+            isEditingScope={!!isEditingScope}
+            isYamlSource={yamlSourceKeys.has(row.key)}
+            isInherited={!!isEditingScope && lowerKeys.has(row.key)}
+            {...overridesOf?.(row.key)}
+            isEdited={
+              Object.hasOwn(baseRecord, row.key) &&
+              !isConfigValueEqual(baseRecord[row.key], row.value)
+            }
+            onChange={onChange}
+            onRemove={handleRemove}
+            onRename={handleRename}
+            justAdded={row.key === justAddedKey}
+          />
+        ),
+      )}
+      {!disabled && entries.length === 0 && removed.length === 0 && (
         <p className="py-2 text-sm text-(--cui-color-text-muted)">
           {localize('com_config_no_entries')}
         </p>
@@ -910,6 +1007,10 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   disabled,
   isEditingScope,
   isYamlSource,
+  isInherited,
+  overridden = false,
+  added = false,
+  isEdited,
   onChange,
   onRemove,
   onRename,
@@ -922,6 +1023,13 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   disabled?: boolean;
   isEditingScope: boolean;
   isYamlSource: boolean;
+  isInherited: boolean;
+  /** The edit target stores an override inside the server (`useRecordEntryOverrides`). */
+  overridden?: boolean;
+  /** The layer beneath doesn't define the server: the edit target added it. */
+  added?: boolean;
+  /** The server differs from its saved value. */
+  isEdited: boolean;
   onChange: (path: string, value: t.ConfigValue) => void;
   onRemove: (key: string) => void;
   onRename: (oldKey: string, newKey: string) => void;
@@ -938,8 +1046,12 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   /** Dotted entry names predate the dot-rejecting create/rename validators; the save endpoint parses fieldPath as dot-delimited so any per-leaf write under such a key collides with a parallel "legacy" → "dotted" nested-object interpretation. Render them read-only so they stay visible in the list but never round-trip through the per-field save API. */
   const isDottedLegacy = entryKey.includes('.');
   const isReadOnly = !!disabled || isDottedLegacy;
-  const isLockedIdentity = (!isEditingScope && isYamlSource) || isDottedLegacy;
-  const lockedKeys = isYamlSource && !isDottedLegacy ? YAML_LOCKED_FIELDS : undefined;
+  const isLockedIdentity = (!isEditingScope && isYamlSource) || isInherited || isDottedLegacy;
+  const lockedKeys = (() => {
+    if (isDottedLegacy) return undefined;
+    if (isProcessMCPServerConfig(entryObj)) return PROCESS_LOCKED_FIELDS;
+    return isYamlSource || isInherited ? YAML_LOCKED_FIELDS : undefined;
+  })();
 
   const entryOnChange = useCallback(
     (leafKey: string, leafValue: t.ConfigValue) => {
@@ -963,6 +1075,11 @@ const McpEntryRow = memo(function McpEntryRowImpl({
     [entryOnChange, isReadOnly, lockedKeys],
   );
 
+  const markers = useMemo(
+    () => ({ overridden, added, edited: isEdited }),
+    [overridden, added, isEdited],
+  );
+
   /** Required by ObjectEntryCard's onValueChange contract; unused on leaf edits. */
   const handleWholeEntryChange = useCallback(
     (v: t.ConfigValue) => {
@@ -975,6 +1092,7 @@ const McpEntryRow = memo(function McpEntryRowImpl({
   return (
     <ObjectEntryCard
       id={`section-mcpServers-${encodeURIComponent(entryKey)}`}
+      dataPath={entryPathBase}
       entryKey={entryKey}
       fields={fields}
       value={displayValue}
@@ -984,6 +1102,7 @@ const McpEntryRow = memo(function McpEntryRowImpl({
         isReadOnly || isLockedIdentity ? undefined : (renamed) => onRename(entryKey, renamed)
       }
       disabled={isReadOnly}
+      markers={markers}
       defaultExpanded={justAdded}
       renderFields={renderEntryFields}
     />

@@ -1,13 +1,24 @@
 import { z } from 'zod';
 import { createServerFn } from '@tanstack/react-start';
 import { PrincipalType } from 'librechat-data-provider';
-import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
+import { normalizeAppServiceKeys } from '../config/normalize';
+import { collectLeafPaths, getValueAtPath } from '@/utils';
 import { apiFetch } from '../utils/api';
 
+const EMPTY_SCOPE_CONFIG: t.ResolvedConfigData = {
+  resolvedConfig: {},
+  changedPaths: [],
+  overrides: {},
+  tombstones: [],
+};
+
 /**
- * Fetch the resolved (merged) config for a specific scope.
- * Returns the config's overrides with the changed field paths.
+ * Fetch one profile's own config document: its overrides (canonical keys) and
+ * tombstones, plus the legacy flattened view of the overrides. What a profile
+ * inherits is the base config the page already holds; the client merges the
+ * two (`mergeScopeLayer`) the way LibreChat does, since lower-priority profiles
+ * vary per user and are not part of a profile's inheritance (EV-5).
  */
 export const getResolvedConfigFn = createServerFn({ method: 'GET' })
   .inputValidator(
@@ -16,37 +27,27 @@ export const getResolvedConfigFn = createServerFn({ method: 'GET' })
       principalId: z.string(),
     }),
   )
-  .handler(async ({ data }: { data: { principalType: PrincipalType; principalId: string } }) => {
-    const apiType = data.principalType;
-    const response = await apiFetch(
-      `/api/admin/config/${apiType}/${encodeURIComponent(data.principalId)}`,
-    );
+  .handler(
+    async ({
+      data,
+    }: {
+      data: { principalType: PrincipalType; principalId: string };
+    }): Promise<t.ResolvedConfigData> => {
+      const response = await apiFetch(
+        `/api/admin/config/${data.principalType}/${encodeURIComponent(data.principalId)}`,
+      );
 
-    if (response.status === 404) {
-      return { resolvedConfig: {}, changedPaths: [] };
-    }
-    if (!response.ok) {
-      throw new Error(`Failed to fetch config: ${response.status}`);
-    }
-
-    const { config } = (await response.json()) as AdminConfigResponse;
-    const overrides = config.overrides ?? {};
-
-    const changedPaths: string[] = [];
-    const resolvedConfig: t.FlatConfigMap = {};
-
-    function flatten(obj: object, prefix: string) {
-      for (const [key, value] of Object.entries(obj)) {
-        const path = prefix ? `${prefix}.${key}` : key;
-        if (value != null && typeof value === 'object' && !Array.isArray(value)) {
-          flatten(value as object, path);
-        } else {
-          changedPaths.push(path);
-          resolvedConfig[path] = value as t.FlatConfigMap[string];
-        }
+      if (response.status === 404) return EMPTY_SCOPE_CONFIG;
+      if (!response.ok) {
+        throw new Error(`Failed to fetch config: ${response.status}`);
       }
-    }
-    flatten(overrides, '');
 
-    return { resolvedConfig, changedPaths };
-  });
+      const { config } = (await response.json()) as t.AdminConfigDocResponse;
+      const overrides = normalizeAppServiceKeys((config.overrides ?? {}) as t.ConfigRecord);
+      const changedPaths = collectLeafPaths(overrides);
+      const resolvedConfig: t.FlatConfigMap = {};
+      for (const path of changedPaths) resolvedConfig[path] = getValueAtPath(overrides, path);
+
+      return { resolvedConfig, changedPaths, overrides, tombstones: config.tombstones ?? [] };
+    },
+  );

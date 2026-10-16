@@ -7,6 +7,9 @@ import {
   SECTION_META,
   HIDDEN_SECTIONS,
   splitCamelCase,
+  compareSections,
+  isPathInSection,
+  fallbackSectionTitle,
 } from './configMeta';
 
 describe('splitCamelCase', () => {
@@ -95,5 +98,47 @@ describe('schema coverage', () => {
       (key) => !HIDDEN_SECTIONS.has(key) && !Object.hasOwn(SECTION_META, key),
     );
     expect(unmapped, `Sections without SECTION_META: ${unmapped.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('section order and ownership', () => {
+  it('orders a tab by SECTION_META order, unordered sections last by key', () => {
+    const ids = ['skillSync', 'zzNew', 'balance', 'registration', 'aaNew'];
+    const sorted = ids.map((id) => ({ id })).sort(compareSections);
+    expect(sorted.map((s) => s.id)).toEqual([
+      'registration',
+      'balance',
+      'skillSync',
+      'aaNew',
+      'zzNew',
+    ]);
+  });
+
+  it('keeps the storage sections together at the top of Files & storage', () => {
+    const files = Object.entries(SECTION_META)
+      .filter(([, meta]) => meta.tab === 'files')
+      .map(([id]) => ({ id }))
+      .sort(compareSections)
+      .map((s) => s.id);
+    expect(files.slice(0, 3)).toEqual(['fileStrategy', 'fileStrategies', 'cloudfront']);
+    expect(files.slice(0, 3).every((id) => SECTION_META[id].group === 'storage')).toBe(true);
+  });
+
+  it('splits endpoints between the custom endpoints and providers sections', () => {
+    expect(isPathInSection('endpoints', 'endpoints', 'endpoints.custom.0.name')).toBe(true);
+    expect(isPathInSection('endpoints', 'endpoints', 'endpoints.openAI.titleModel')).toBe(false);
+    expect(isPathInSection('endpointsProviders', 'endpoints', 'endpoints.openAI.titleModel')).toBe(
+      true,
+    );
+    expect(isPathInSection('endpointsProviders', 'endpoints', 'endpoints.custom.0.name')).toBe(
+      false,
+    );
+    expect(isPathInSection('balance', 'balance', 'balance.startBalance')).toBe(true);
+    expect(isPathInSection('balance', 'balance', 'balanceX.startBalance')).toBe(false);
+  });
+
+  it('titles unmapped sections from their key', () => {
+    expect(fallbackSectionTitle('mcpAppSandbox')).toBe('Mcp App Sandbox');
+    expect(fallbackSectionTitle('projects')).toBe('Projects');
   });
 });

@@ -1,21 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useExpandableState } from '@/hooks';
 
 /**
  * Shared state machine for collapsible sections.
  *
  * Manages expand/collapse state, deferred rendering via `hasEverExpanded`,
  * deferred add-after-expand via `pendingAddRef`, and `config:expand` /
- * `config:collapse` custom DOM event listeners.
+ * `config:collapse` custom DOM event listeners. Follows the page's Expand all
+ * and Collapse all (`useExpandableState`).
  */
 export function useCollapsibleSection({
   defaultExpanded,
   onAdd,
+  revealPaths,
 }: {
   defaultExpanded: boolean;
   onAdd?: () => void;
+  /** Data paths the section shows: it opens while the tab filter matches one of them or inside them. */
+  revealPaths?: readonly string[];
 }) {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-  const [hasEverExpanded, setHasEverExpanded] = useState(defaultExpanded);
+  const [isExpanded, setIsExpanded] = useExpandableState(defaultExpanded, revealPaths);
+  const [hasEverExpanded, setHasEverExpanded] = useState(isExpanded);
   const sectionRef = useRef<HTMLElement>(null);
   const pendingAddRef = useRef(false);
 

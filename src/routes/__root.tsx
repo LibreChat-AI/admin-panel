@@ -9,12 +9,13 @@ import {
   Outlet,
   ScriptOnce,
   Scripts,
-  createRootRoute,
+  createRootRouteWithContext,
 } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
+import type * as t from '@/types';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
+import { useLocalize, useDialogCloseLabels } from '@/hooks';
 import appCss from '../styles.css?url';
-import { useLocalize } from '@/hooks';
 
 const themeScript = `(function(){
   try {
@@ -24,7 +25,7 @@ const themeScript = `(function(){
   } catch(e) {}
 })();`;
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<t.RouterContext>()({
   ssr: false,
   head: () => ({
     meta: [
@@ -67,6 +68,8 @@ function RootComponent() {
 
 function ThemedApp() {
   const { resolvedTheme } = useTheme();
+  const localize = useLocalize();
+  useDialogCloseLabels(localize('com_ui_close'));
   return (
     <ClickUIProvider theme={resolvedTheme}>
       <div className="isolate">

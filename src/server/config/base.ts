@@ -1,96 +1,109 @@
 import { queryOptions } from '@tanstack/react-query';
 import { configSchema } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
-import type { AdminConfigResponse } from '@librechat/data-schemas';
 import type * as t from '@/types';
+import { collectLeafPaths, flattenObject, isConfigRecord } from '@/utils';
 import { BASE_CONFIG_PRINCIPAL_ID } from '../constants';
 import { normalizeAppServiceKeys } from './normalize';
 import { extractSchemaDefaults } from './schema';
 import { apiFetch } from '../utils/api';
-import { flattenObject } from '@/utils';
 
-function computeConfiguredPaths(
-  config: Record<string, t.ConfigValue>,
-  defaults: Record<string, unknown>,
-): string[] {
-  const flatConfig = flattenObject(config);
-  const flatDefaults = flattenObject(defaults as Record<string, t.ConfigValue>);
-  const configured: string[] = [];
-  for (const [path, value] of Object.entries(flatConfig)) {
-    if (value === '' || value === null || value === undefined) continue;
-    if (!(path in flatDefaults)) {
-      configured.push(path);
-      continue;
-    }
-    const defaultVal = flatDefaults[path];
-    if (value === defaultVal) continue;
-    if (JSON.stringify(value) === JSON.stringify(defaultVal)) continue;
-    configured.push(path);
-  }
-  return configured;
+/**
+ * AppConfig keys that are runtime state, not settings: server filesystem
+ * paths, the tool registry, and the nested raw librechat.yaml (read here and
+ * reduced to `yamlPaths`). They never reach the browser (EV-7).
+ */
+const APP_SERVICE_INTERNAL_KEYS: ReadonlySet<string> = new Set([
+  'paths',
+  'config',
+  'availableTools',
+]);
+
+interface AppConfigPayload {
+  config: t.ConfigRecord;
 }
 
-export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(async () => {
-  const [baseResponse, baseOnlyResponse, dbBaseResponse] = await Promise.all([
-    apiFetch('/api/admin/config/base'),
-    apiFetch('/api/admin/config/base?baseOnly=true'),
-    apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`),
-  ]);
-
-  if (!baseResponse.ok) {
-    throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
+/** A normalized AppConfig without its runtime internals. */
+function toConfigLayer(appConfig: t.ConfigRecord): t.ConfigRecord {
+  const settings: t.ConfigRecord = {};
+  for (const [key, value] of Object.entries(appConfig)) {
+    if (!APP_SERVICE_INTERNAL_KEYS.has(key)) settings[key] = value;
   }
+  return normalizeAppServiceKeys(settings);
+}
 
-  const { config: rawConfig } = (await baseResponse.json()) as {
-    config: Record<string, t.ConfigValue>;
-  };
-  const config = normalizeAppServiceKeys(rawConfig);
-
-  let configuredFromBase: string[] = [];
-  let flatDefaults: Record<string, t.ConfigValue> = {};
+function readSchemaDefaults(): t.FlatConfigMap {
   try {
-    const schemaDefaults = extractSchemaDefaults(configSchema as t.ZodSchemaLike);
-    flatDefaults = flattenObject(schemaDefaults as Record<string, t.ConfigValue>);
-    configuredFromBase = computeConfiguredPaths(config, schemaDefaults);
+    const defaults = extractSchemaDefaults(configSchema as t.ZodSchemaLike);
+    return flattenObject(defaults as t.ConfigRecord);
   } catch (e) {
     console.warn('[getBaseConfigFn] Failed to compute schema defaults:', e);
+    return {};
   }
+}
 
-  let dbOverrides: Record<string, t.ConfigValue> | undefined;
-
-  if (dbBaseResponse.ok) {
-    const { config: dbConfig } = (await dbBaseResponse.json()) as AdminConfigResponse;
-    dbOverrides = dbConfig.overrides as Record<string, t.ConfigValue>;
-  }
-
-  let yamlMcpKeys: string[] | undefined;
-  let yamlMcpServers: Record<string, t.ConfigValue> | undefined;
-  /** librechat.yaml alone (no admin overrides): what a base field reverts to when its override is reset. */
-  let yamlConfig: t.ConfigRecord | undefined;
-  if (baseOnlyResponse.ok) {
-    const { config: baseOnlyRaw } = (await baseOnlyResponse.json()) as {
-      config: Record<string, t.ConfigValue>;
-    };
-    const baseOnly = normalizeAppServiceKeys(baseOnlyRaw);
-    yamlConfig = baseOnly;
-    const mcp = baseOnly.mcpServers;
-    if (mcp && typeof mcp === 'object' && !Array.isArray(mcp)) {
-      /** Trust the baseOnly response when it has a valid mcpServers shape. The previous byte-equality fallback against `config.mcpServers` was a defensive heuristic for hypothetical legacy backends that ignore `?baseOnly`, but it false-negatived whenever an admin override happened to be a no-op (e.g. an admin set `title` to a value that already matched YAML), causing the YAML lock affordances to disappear for entries that should stay locked. The deployed LibreChat supports `?baseOnly` directly, so the heuristic is no longer earning its keep. */
-      yamlMcpServers = mcp as Record<string, t.ConfigValue>;
-      yamlMcpKeys = Object.keys(yamlMcpServers);
-    }
-  }
-
+async function readOverrideDoc(
+  response: Response,
+): Promise<Pick<t.BaseConfigData, 'dbOverrides' | 'dbTombstones'>> {
+  if (!response.ok) return { dbOverrides: undefined, dbTombstones: [] };
+  const { config } = (await response.json()) as t.AdminConfigDocResponse;
   return {
-    config,
-    dbOverrides,
-    configuredFromBase,
-    schemaDefaults: flatDefaults,
-    yamlMcpKeys,
-    yamlMcpServers,
-    yamlConfig,
+    dbOverrides: (config.overrides ?? {}) as t.ConfigRecord,
+    dbTombstones: config.tombstones ?? [],
   };
-});
+}
+
+/**
+ * The layers of the base configuration (EV-1):
+ * - `config`: effective base (librechat.yaml + base overrides);
+ * - `yamlConfig`: librechat.yaml as LibreChat processes it (`?baseOnly=true`),
+ *   which is what a base field reverts to;
+ * - `yamlPaths`: what the raw librechat.yaml itself sets. Values LibreChat
+ *   synthesizes at startup appear in both trees above but not here, so they
+ *   are not counted as configured (EV-2);
+ * - `dbOverrides`/`dbTombstones`: the base admin override document;
+ * - `schemaDefaults`: flattened schema defaults.
+ */
+export const getBaseConfigFn = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<t.BaseConfigData> => {
+    const [baseResponse, baseOnlyResponse, dbBaseResponse] = await Promise.all([
+      apiFetch('/api/admin/config/base'),
+      apiFetch('/api/admin/config/base?baseOnly=true'),
+      apiFetch(`/api/admin/config/role/${BASE_CONFIG_PRINCIPAL_ID}`),
+    ]);
+
+    if (!baseResponse.ok) {
+      throw new Error(`Failed to fetch base config: ${baseResponse.status}`);
+    }
+
+    const { config: appConfig } = (await baseResponse.json()) as AppConfigPayload;
+    const rawYaml = appConfig.config;
+    const yamlPaths = isConfigRecord(rawYaml) ? collectLeafPaths(rawYaml) : [];
+
+    let yamlConfig: t.ConfigRecord | undefined;
+    let yamlMcpKeys: string[] | undefined;
+    let yamlMcpServers: Record<string, t.ConfigValue> | undefined;
+    if (baseOnlyResponse.ok) {
+      const { config: baseOnlyConfig } = (await baseOnlyResponse.json()) as AppConfigPayload;
+      yamlConfig = toConfigLayer(baseOnlyConfig);
+      const mcp = yamlConfig.mcpServers;
+      if (isConfigRecord(mcp)) {
+        yamlMcpServers = mcp;
+        yamlMcpKeys = Object.keys(mcp);
+      }
+    }
+
+    return {
+      config: toConfigLayer(appConfig),
+      yamlConfig,
+      yamlPaths,
+      ...(await readOverrideDoc(dbBaseResponse)),
+      schemaDefaults: readSchemaDefaults(),
+      yamlMcpKeys,
+      yamlMcpServers,
+    };
+  },
+);
 
 export const baseConfigOptions = queryOptions({
   queryKey: ['baseConfig'],

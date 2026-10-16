@@ -8,7 +8,11 @@ import {
   enumerateLeafPaths,
   validateMcpCrossField,
 } from '../McpServersRenderer';
+import { ConfigValuesProvider } from '@/contexts/ConfigValuesContext';
+import { scopeLayersFixture, valuesDataFixture } from '@/test/layers';
+import { RowFilterContext } from '@/contexts/RowFilterContext';
 import { createField } from '@/test/fixtures';
+import { createPathIndex } from '@/utils';
 
 vi.mock('@/hooks/useLocalize', () => ({
   default: () => (key: string) => key,
@@ -174,6 +178,8 @@ function renderRenderer({
   dbOverridePaths,
   yamlBaseKeys,
   isEditingScope,
+  layers,
+  filter = null,
   onChange = vi.fn(),
   onValidationError = vi.fn(),
 }: {
@@ -182,6 +188,8 @@ function renderRenderer({
   dbOverridePaths?: Set<string>;
   yamlBaseKeys?: Set<string>;
   isEditingScope?: boolean;
+  layers?: t.ValueLayers;
+  filter?: t.PathIndex | null;
   onChange?: (path: string, value: t.ConfigValue) => void;
   onValidationError?: (message: string) => void;
 }) {
@@ -202,8 +210,19 @@ function renderRenderer({
     isEditingScope,
     onValidationError,
   };
+  const tree = (
+    <RowFilterContext.Provider value={filter}>
+      <McpServersRenderer {...props} />
+    </RowFilterContext.Provider>
+  );
   return {
-    ...render(<McpServersRenderer {...props} />),
+    ...render(
+      layers ? (
+        <ConfigValuesProvider value={valuesDataFixture(layers)}>{tree}</ConfigValuesProvider>
+      ) : (
+        tree
+      ),
+    ),
     onChange,
     onValidationError,
     fields,
@@ -238,7 +257,9 @@ describe('McpServersRenderer — per-leaf write granularity', () => {
     const { container } = renderRenderer({ baseRecord, onChange });
 
     fireEvent.click(screen.getByText('kapa'));
-    const urlInput = container.querySelector('input#kapa-url') as HTMLInputElement | null;
+    const urlInput = container.querySelector(
+      'input#mcpServers-kapa-url',
+    ) as HTMLInputElement | null;
     expect(urlInput).not.toBeNull();
     fireEvent.change(urlInput!, { target: { value: 'https://new.example.com' } });
     fireEvent.blur(urlInput!);
@@ -255,7 +276,7 @@ describe('McpServersRenderer — per-leaf write granularity', () => {
 });
 
 describe('McpServersRenderer — YAML source detection', () => {
-  it('keeps transport fields editable on a YAML-defined server with no DB overrides', () => {
+  it("shows a librechat.yaml stdio server's process fields read-only, other fields editable (D10)", () => {
     const baseRecord = {
       yamlOne: { type: 'stdio', command: 'node', title: 'YAML server' },
     };
@@ -266,9 +287,36 @@ describe('McpServersRenderer — YAML source detection', () => {
     });
 
     fireEvent.click(screen.getByText('yamlOne'));
-    const cmd = container.querySelector('input#yamlOne-command') as HTMLInputElement | null;
-    expect(cmd).not.toBeNull();
-    expect(cmd!.hasAttribute('disabled')).toBe(false);
+    expect(container.querySelector('input#mcpServers-yamlOne-command')).toBeNull();
+    expect(container.querySelector('#mcpServers-yamlOne-command')?.textContent).toBe('node');
+    expect(screen.getByText('com_config_mcp_process_locked')).toBeTruthy();
+  });
+
+  it('locks rename and delete of servers a profile inherits from Base (D1)', () => {
+    const { container } = renderRenderer({
+      baseRecord: {
+        github: { type: 'sse', url: 'https://gh.example.com' },
+        own: { type: 'sse', url: 'https://own.example.com' },
+      },
+      isEditingScope: true,
+      layers: scopeLayersFixture(),
+    });
+
+    const deletes = container.querySelectorAll('button[aria-label^="com_ui_delete"]');
+    expect(deletes).toHaveLength(1);
+  });
+
+  it('lists only the servers the tab filter matches', () => {
+    renderRenderer({
+      baseRecord: {
+        github: { type: 'sse', url: 'https://gh.example.com' },
+        docs: { type: 'sse', url: 'https://docs.example.com' },
+      },
+      filter: createPathIndex(['mcpServers.docs.url']),
+    });
+
+    expect(screen.queryByText('github')).toBeNull();
+    expect(screen.getByText('docs')).toBeTruthy();
   });
 
   it('locks identity (rename/delete) on a YAML-defined server but leaves url editable', () => {
@@ -282,7 +330,7 @@ describe('McpServersRenderer — YAML source detection', () => {
     });
 
     fireEvent.click(screen.getByText('kapa'));
-    const url = container.querySelector('input#kapa-url') as HTMLInputElement | null;
+    const url = container.querySelector('input#mcpServers-kapa-url') as HTMLInputElement | null;
     expect(url).not.toBeNull();
     expect(url!.hasAttribute('disabled')).toBe(false);
     expect(container.querySelector('button[aria-label^="com_ui_delete"]')).toBeNull();
@@ -319,7 +367,9 @@ describe('McpServersRenderer — YAML source detection', () => {
     });
 
     fireEvent.click(screen.getByText('adminOnly'));
-    const url = container.querySelector('input#adminOnly-url') as HTMLInputElement | null;
+    const url = container.querySelector(
+      'input#mcpServers-adminOnly-url',
+    ) as HTMLInputElement | null;
     expect(url).not.toBeNull();
     expect(url!.hasAttribute('disabled')).toBe(false);
     expect(container.querySelector('button[aria-label^="com_ui_delete"]')).not.toBeNull();
@@ -336,7 +386,7 @@ describe('McpServersRenderer — YAML source detection', () => {
     });
 
     fireEvent.click(screen.getByText('brandNew'));
-    const url = container.querySelector('input#brandNew-url') as HTMLInputElement | null;
+    const url = container.querySelector('input#mcpServers-brandNew-url') as HTMLInputElement | null;
     expect(url).not.toBeNull();
     expect(url!.hasAttribute('disabled')).toBe(false);
     expect(container.querySelector('button[aria-label^="com_ui_delete"]')).not.toBeNull();
@@ -390,9 +440,7 @@ describe('validateMcpCrossField', () => {
     const baseline = {
       foo: { type: 'sse', url: 'https://x.example.com' },
     };
-    const errors = validateMcpCrossField(baseline, [
-      ['mcpServers.foo.type', 'stdio'],
-    ]);
+    const errors = validateMcpCrossField(baseline, [['mcpServers.foo.type', 'stdio']]);
     expect(errors.length).toBe(1);
     expect(errors[0].entryKey).toBe('foo');
     expect(errors[0].missingField).toBe('command');
@@ -415,9 +463,7 @@ describe('validateMcpCrossField', () => {
       foo: { type: 'streamable-http', url: 'https://x.example.com' },
       bar: { type: 'stdio', command: 'node', args: ['x.js'] },
     };
-    const errors = validateMcpCrossField(baseline, [
-      ['mcpServers.foo.type', 'http'],
-    ]);
+    const errors = validateMcpCrossField(baseline, [['mcpServers.foo.type', 'http']]);
     expect(errors).toEqual([]);
   });
 
@@ -425,9 +471,7 @@ describe('validateMcpCrossField', () => {
     const baseline = {
       foo: { type: 'sse', url: 'https://x.example.com' },
     };
-    const errors = validateMcpCrossField(baseline, [
-      ['mcpServers.foo', undefined],
-    ]);
+    const errors = validateMcpCrossField(baseline, [['mcpServers.foo', undefined]]);
     expect(errors).toEqual([]);
   });
 
@@ -481,9 +525,7 @@ describe('validateMcpCrossField', () => {
     const baseline = {
       foo: { type: 'stdio', command: 'node', args: ['index.js'] },
     };
-    const errors = validateMcpCrossField(baseline, [
-      ['mcpServers.foo.args', []],
-    ]);
+    const errors = validateMcpCrossField(baseline, [['mcpServers.foo.args', []]]);
     expect(errors).toEqual([]);
   });
 
@@ -492,9 +534,7 @@ describe('validateMcpCrossField', () => {
     const baseline = {
       foo: { command: 'node', args: ['index.js'] },
     };
-    const errors = validateMcpCrossField(baseline, [
-      ['mcpServers.foo.command', ''],
-    ]);
+    const errors = validateMcpCrossField(baseline, [['mcpServers.foo.command', '']]);
     expect(errors.length).toBe(1);
     expect(errors[0].entryKey).toBe('foo');
     expect(errors[0].missingField).toBe('command');
@@ -511,7 +551,8 @@ describe('McpServersRenderer — non-YAML entry identity affordances', () => {
       yamlBaseKeys: new Set<string>(),
     });
 
-    const createBtn = screen.getByText('com_config_create_mcp_server')
+    const createBtn = screen
+      .getByText('com_config_create_mcp_server')
       .closest('button') as HTMLButtonElement;
     expect(createBtn.hasAttribute('disabled')).toBe(false);
 
@@ -532,7 +573,9 @@ describe('McpServersRenderer — non-YAML entry identity affordances', () => {
     });
 
     fireEvent.click(screen.getByText('adminOnly'));
-    const urlInput = container.querySelector('input#adminOnly-url') as HTMLInputElement | null;
+    const urlInput = container.querySelector(
+      'input#mcpServers-adminOnly-url',
+    ) as HTMLInputElement | null;
     expect(urlInput).not.toBeNull();
     expect(urlInput!.hasAttribute('disabled')).toBe(false);
     fireEvent.change(urlInput!, { target: { value: 'https://override.example.com' } });
@@ -553,7 +596,9 @@ describe('McpServersRenderer — non-YAML entry identity affordances', () => {
       onChange,
     });
 
-    const deleteBtn = container.querySelector('button[aria-label^="com_ui_delete"]') as HTMLButtonElement | null;
+    const deleteBtn = container.querySelector(
+      'button[aria-label^="com_ui_delete"]',
+    ) as HTMLButtonElement | null;
     expect(deleteBtn).not.toBeNull();
     fireEvent.click(deleteBtn!);
 
@@ -611,7 +656,9 @@ describe('McpServersRenderer — entry order', () => {
 
     const headers = container.querySelectorAll('[data-section-id^="section-mcpServers-"]');
     const renderedKeys = Array.from(headers).map((h) =>
-      decodeURIComponent((h.getAttribute('data-section-id') ?? '').replace(/^section-mcpServers-/, '')),
+      decodeURIComponent(
+        (h.getAttribute('data-section-id') ?? '').replace(/^section-mcpServers-/, ''),
+      ),
     );
     expect(renderedKeys).toEqual(['alpha', 'beta', 'gamma']);
   });
@@ -633,7 +680,9 @@ describe('McpServersRenderer — entry order', () => {
 
     const headers = container.querySelectorAll('[data-section-id^="section-mcpServers-"]');
     const renderedKeys = Array.from(headers).map((h) =>
-      decodeURIComponent((h.getAttribute('data-section-id') ?? '').replace(/^section-mcpServers-/, '')),
+      decodeURIComponent(
+        (h.getAttribute('data-section-id') ?? '').replace(/^section-mcpServers-/, ''),
+      ),
     );
     expect(renderedKeys).toEqual(['alpha', 'beta', 'brandNew']);
   });
@@ -652,9 +701,9 @@ describe('McpServersRenderer — legacy dotted entry keys', () => {
     const header = screen.queryByText('legacy.dotted');
     expect(header).not.toBeNull();
     fireEvent.click(header!);
-    const url = container.querySelector('input#legacy-dotted-url') as HTMLInputElement | null;
+    const url = container.querySelector('#mcpServers-legacy-dotted-url');
     expect(url).not.toBeNull();
-    expect(url!.value).toBe('https://new.example.com');
+    expect(url!.textContent).toBe('https://new.example.com');
   });
 
   it('renders dotted legacy entries read-only with no rename or delete affordances', () => {
@@ -669,9 +718,10 @@ describe('McpServersRenderer — legacy dotted entry keys', () => {
     });
 
     fireEvent.click(screen.getByText('legacy.dotted'));
-    const url = container.querySelector('input#legacy-dotted-url') as HTMLInputElement | null;
+    const url = container.querySelector('#mcpServers-legacy-dotted-url');
     expect(url).not.toBeNull();
-    expect(url!.hasAttribute('disabled')).toBe(true);
+    expect(url!.tagName).not.toBe('INPUT');
+    expect(url!.textContent).toBe('https://old.example.com');
 
     expect(container.querySelector('button[aria-label^="com_ui_delete"]')).toBeNull();
     expect(container.querySelector('button[aria-label^="com_a11y_rename_entry"]')).toBeNull();
@@ -688,8 +738,8 @@ describe('McpServersRenderer — legacy dotted entry keys', () => {
       onChange,
     });
 
-    const dottedWrites = onChange.mock.calls.filter(([p]) =>
-      typeof p === 'string' && p.startsWith('mcpServers.legacy'),
+    const dottedWrites = onChange.mock.calls.filter(
+      ([p]) => typeof p === 'string' && p.startsWith('mcpServers.legacy'),
     );
     expect(dottedWrites).toEqual([]);
   });
@@ -910,7 +960,9 @@ describe('McpServersRenderer — record overlay', () => {
       yamlBaseKeys: new Set<string>(),
     });
     fireEvent.click(screen.getByText('kapa'));
-    const urlInput = container.querySelector('input#kapa-url') as HTMLInputElement | null;
+    const urlInput = container.querySelector(
+      'input#mcpServers-kapa-url',
+    ) as HTMLInputElement | null;
     expect(urlInput).not.toBeNull();
     expect(urlInput!.value).toBe('https://overlay.example.com');
   });
@@ -932,7 +984,9 @@ describe('McpServersRenderer — record overlay', () => {
     });
     expect(screen.getByText('kapa')).toBeTruthy();
     fireEvent.click(screen.getByText('kapa'));
-    const urlInput = container.querySelector('input#kapa-url') as HTMLInputElement | null;
+    const urlInput = container.querySelector(
+      'input#mcpServers-kapa-url',
+    ) as HTMLInputElement | null;
     expect(urlInput).not.toBeNull();
     expect(urlInput!.value).toBe('https://new.example.com');
   });

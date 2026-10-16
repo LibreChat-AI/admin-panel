@@ -2,7 +2,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { PrincipalType, ResourceType } from 'librechat-data-provider';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Button, DatePicker, Icon, Select, TextField } from '@clickhouse/click-ui';
+import { Badge, Button, DatePicker, Select, TextField } from '@clickhouse/click-ui';
 import type { AuditAction } from '@librechat/data-schemas';
 import type { AuditFilters } from '@/server';
 import type * as t from '@/types';
@@ -18,18 +18,19 @@ import {
   localDayBoundaryIso,
 } from './auditLogUtils';
 import {
-  AUDIT_LOG_PAGE_SIZE,
-  auditLogEntryQueryOptions,
-  auditLogQueryOptions,
-  exportAuditLogServerFn,
-} from '@/server';
-import {
+  DecorativeIcon,
   EmptyState,
   LoadingState,
   Pagination,
   ScreenReaderAnnouncer,
   SearchInput,
 } from '@/components/shared';
+import {
+  AUDIT_LOG_PAGE_SIZE,
+  auditLogEntryQueryOptions,
+  auditLogQueryOptions,
+  exportAuditLogServerFn,
+} from '@/server';
 import { useAnnouncement, useDebouncedFilter, useLocalize } from '@/hooks';
 import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
 import { AUDIT_ACTIONS, isAuditEntryId } from '@/constants';
@@ -314,7 +315,11 @@ export function AuditLogTab() {
         announce(localize('com_a11y_copy_failed'));
         return false;
       }
-      const url = buildEntryPermalink(id, window.location.origin, import.meta.env.VITE_BASE_PATH || '');
+      const url = buildEntryPermalink(
+        id,
+        window.location.origin,
+        import.meta.env.VITE_BASE_PATH || '',
+      );
       try {
         await navigator.clipboard.writeText(url);
         return true;
@@ -694,7 +699,7 @@ function AuditLogTableRow({
             state="neutral"
             text={
               <span className="inline-flex items-center gap-1">
-                <Icon name={targetConfig.icon} size="xs" />
+                <DecorativeIcon name={targetConfig.icon} size="xs" />
                 {localize(targetConfig.labelKey)}
               </span>
             }
@@ -706,9 +711,7 @@ function AuditLogTableRow({
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-col">
-          <span className="text-(--cui-color-text-default)">
-            {subject.label}
-          </span>
+          <span className="text-(--cui-color-text-default)">{subject.label}</span>
           <span aria-hidden="true" className="text-[10px] text-(--cui-color-text-muted)">
             {subject.value}
           </span>

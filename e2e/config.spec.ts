@@ -1,16 +1,13 @@
-import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { CONFIG_TABS, LIVE, LIVE_SKIP_REASON, openConfigTab } from './live';
 
-const TABS = ['providers', 'custom', 'specs', 'mcp', 'features', 'files', 'system'];
+test.skip(!LIVE, LIVE_SKIP_REASON);
+
 const TEXT_INPUTS =
   'form input[type=text]:visible:enabled, form input[type=number]:visible:enabled, form input:not([type]):visible:enabled';
 const MAX_INPUTS_PER_TAB = 30;
-
-async function openTab(page: Page, tab: string) {
-  await page.goto(`/configuration?tab=${tab}`);
-  await page.waitForLoadState('networkidle');
-}
 
 /** Opens collapsed sections and entry cards so their inputs can be reached (select triggers are left alone). */
 async function expandAll(page: Page) {
@@ -22,52 +19,56 @@ async function expandAll(page: Page) {
       await toggle.click({ timeout: 1_000 }).catch(() => undefined);
     }
   }
-  const cards = await page.locator('form [role=button][aria-expanded=false]').all();
+  const cards = await page.locator('form [data-entry-card] button[aria-expanded=false]').all();
   for (const card of cards.slice(0, 3)) await card.click({ timeout: 1_000 }).catch(() => undefined);
 }
 
-const unsavedBar = (page: Page) => page.getByText('Unsaved changes');
+const unsavedBar = (page: Page) => page.getByRole('region', { name: 'Unsaved changes' });
 
 test.describe('Configuration: Enter never edits another field', () => {
   test.describe.configure({ timeout: 120_000 });
 
-  for (const tab of TABS) {
+  for (const tab of CONFIG_TABS) {
     test(`Enter in each input on the ${tab} tab leaves the page clean`, async ({ page }) => {
-      await openTab(page, tab);
+      await openConfigTab(page, tab);
       await expandAll(page);
       await expect(unsavedBar(page)).toHaveCount(0);
       const inputs = page.locator(TEXT_INPUTS);
+      await expect
+        .poll(() => inputs.count(), { message: `no editable inputs on the ${tab} tab` })
+        .toBeGreaterThan(0);
       const count = Math.min(await inputs.count(), MAX_INPUTS_PER_TAB);
-      const cardsBefore = await page.locator('form [role=button][aria-expanded]').count();
+      const cardsBefore = await page
+        .locator('form [data-entry-card] button[aria-expanded]')
+        .count();
       for (let i = 0; i < count; i++) {
         const input = inputs.nth(i);
         await input.focus();
         await input.press('Enter');
         await expect(unsavedBar(page), `Enter in input #${i} made the page dirty`).toHaveCount(0);
       }
-      await expect(page.locator('form [role=button][aria-expanded]')).toHaveCount(cardsBefore);
+      await expect(page.locator('form [data-entry-card] button[aria-expanded]')).toHaveCount(
+        cardsBefore,
+      );
     });
   }
 
   test('Enter after editing a value marks only that field', async ({ page }) => {
-    await openTab(page, 'system');
+    await openConfigTab(page, 'system');
     const field = page.locator('#balance-startBalance');
     await field.fill('424242');
     await field.press('Enter');
     await expect(unsavedBar(page)).toHaveCount(1);
-    await page
-      .getByRole('button', { name: /^Save$/ })
-      .last()
-      .click();
+    await page.getByRole('button', { name: /^Review & save$/ }).click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('1 field will be updated');
-    await expect(dialog).toContainText('balance.startBalance');
+    await expect(dialog).toContainText('Save 1 change to the base configuration?');
+    await expect(dialog).toContainText('Start balance');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await page.getByRole('button', { name: 'Discard' }).click();
   });
 
   test('Enter in a create dialog still submits that dialog', async ({ page }) => {
-    await openTab(page, 'custom');
+    await openConfigTab(page, 'custom');
     await page
       .getByRole('button', { name: /Create endpoint/ })
       .first()
@@ -75,6 +76,10 @@ test.describe('Configuration: Enter never edits another field', () => {
     const dialog = page.getByRole('dialog');
     await dialog.locator('#create-endpoint-name').fill('Enter Endpoint');
     await dialog.locator('#create-endpoint-apiKey').fill('key');
+    const models = dialog.getByPlaceholder(/Add models/);
+    await models.fill('enter-model');
+    await models.press('Enter');
+    await expect(dialog).toHaveCount(1);
     const baseURL = dialog.locator('#create-endpoint-baseURL');
     await baseURL.fill('https://enter.example.com/v1');
     await baseURL.press('Enter');
@@ -86,7 +91,7 @@ test.describe('Configuration: Enter never edits another field', () => {
 
 test.describe('Configuration: delete buttons', () => {
   test('every delete button is announced as "Delete <item>"', async ({ page }) => {
-    await openTab(page, 'custom');
+    await openConfigTab(page, 'custom');
     const deleteButtons = page.locator('form button.icon-btn-danger');
     test.skip((await deleteButtons.count()) === 0, 'No custom endpoints to delete');
     await expect(page.locator('form button[aria-label="trash"]')).toHaveCount(0);
@@ -105,12 +110,16 @@ test.describe('Configuration: delete buttons', () => {
   test('keyboard Enter on a card trash button deletes the entry without toggling the card', async ({
     page,
   }) => {
-    await openTab(page, 'custom');
-    const headers = page.locator('form [role=button][aria-expanded]');
+    await openConfigTab(page, 'custom');
+    const headers = page.locator('form [data-entry-card] button[aria-expanded]');
     const before = await headers.count();
     test.skip(before === 0, 'No custom endpoints to delete');
-    const header = headers.first();
-    const trash = header.locator('button.icon-btn-danger');
+    const trashes = page.locator('form [data-entry-card] button[aria-label^="Delete "]');
+    test.skip(
+      (await trashes.count()) === 0,
+      'Every custom endpoint comes from librechat.yaml (D1)',
+    );
+    const trash = trashes.first();
     await trash.focus();
     await page.keyboard.press('Enter');
     await expect(headers).toHaveCount(before - 1);

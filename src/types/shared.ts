@@ -27,6 +27,9 @@ export interface KebabMenuItem {
   label: string;
   icon?: MenuIconName;
   danger?: boolean;
+  disabled?: boolean;
+  /** Tooltip, e.g. why the item is disabled. */
+  title?: string;
   onClick: () => void;
 }
 
@@ -60,6 +63,8 @@ export interface FormDialogProps {
   submitDisabled?: boolean;
   saving?: boolean;
   error?: string;
+  /** Muted footer text shown while there is no error (e.g. what is still needed to submit). */
+  hint?: string;
   size?: 'sm' | 'lg';
   onSubmit: () => void;
   onClose: () => void;
@@ -93,13 +98,22 @@ export interface StickyActionBarProps {
   saveLabel: string;
   onDiscard: () => void;
   onSave: () => void;
-  message?: string;
+  message?: ReactNode;
+  /** Accessible name of the bar's region. */
+  label?: string;
 }
 
 export interface StatusToggleProps {
   id: string;
   isActive: boolean;
   onChange: (isActive: boolean) => void;
+  disabled?: boolean;
+}
+
+export interface CloseButtonProps {
+  onClick: () => void;
+  /** The accessible name and tooltip ("Close review"). */
+  label: string;
   disabled?: boolean;
 }
 
