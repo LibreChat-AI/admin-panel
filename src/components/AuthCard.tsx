@@ -7,6 +7,7 @@ import { Alert, Title, Panel, Button, Separator, TextField, Container } from '@c
 import type * as t from '@/types';
 import { adminLoginFn, adminVerify2FAFn, openIdCheckOptions, openidLoginFn } from '@/server';
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from './InputOTP';
+import { rememberPostLoginRedirect } from '@/utils';
 import { PasswordInput } from './PasswordInput';
 import { useLocalize } from '@/hooks';
 import aimoLogo from '@/assets/logo.svg';
@@ -67,6 +68,7 @@ export function AuthCard({
         if (redirectTo && redirectTo !== '/') {
           authUrl.searchParams.set('redirectTo', redirectTo);
         }
+        rememberPostLoginRedirect(redirectTo);
         window.location.href = authUrl.toString();
       })
       .catch(() => {
@@ -202,6 +204,7 @@ export function AuthCard({
         return;
       }
       if (result.authUrl) {
+        rememberPostLoginRedirect(redirectTo);
         window.location.href = result.authUrl;
       }
     } catch {
