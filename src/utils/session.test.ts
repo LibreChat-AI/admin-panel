@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { rememberPostLoginRedirect, takePostLoginRedirect, watchGatewaySessionEnd } from './session';
+import {
+  pollGatewaySession,
+  watchGatewaySessionEnd,
+  takePostLoginRedirect,
+  rememberPostLoginRedirect,
+} from './session';
 
 function jsonResponse(body: object, status: number) {
   return new Response(JSON.stringify(body), {
@@ -53,6 +58,87 @@ describe('watchGatewaySessionEnd', () => {
     watchGatewaySessionEnd(target);
     await target.fetch('/_serverFn/verify');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('pollGatewaySession', () => {
+  function createPollTarget(respond: () => Response) {
+    const windowEvents = new EventTarget();
+    const documentEvents = new EventTarget();
+    const reload = vi.fn();
+    const fetchMock = vi.fn(async () => respond());
+    const document = {
+      visibilityState: 'visible' as DocumentVisibilityState,
+      addEventListener: documentEvents.addEventListener.bind(documentEvents),
+      removeEventListener: documentEvents.removeEventListener.bind(documentEvents),
+    };
+    const target = {
+      fetch: fetchMock as typeof fetch,
+      location: { reload },
+      document,
+      addEventListener: windowEvents.addEventListener.bind(windowEvents),
+      removeEventListener: windowEvents.removeEventListener.bind(windowEvents),
+    };
+    watchGatewaySessionEnd(target);
+    const stop = pollGatewaySession(target);
+    return { reload, fetchMock, document, windowEvents, documentEvents, stop };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    return () => vi.useRealTimers();
+  });
+
+  it('checks the gateway session every thirty seconds without reloading an active page', async () => {
+    const { fetchMock, reload, stop } = createPollTarget(() => new Response(null, { status: 204 }));
+    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledWith('/_sso/session', { cache: 'no-store' });
+    expect(reload).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('reloads once the gateway reports the session ended', async () => {
+    const { reload, stop } = createPollTarget(() =>
+      jsonResponse({ code: 'AUTHENTICATION_REQUIRED' }, 401),
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(reload).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('keeps the page while the sign-in service is unavailable', async () => {
+    const { reload, stop } = createPollTarget(() =>
+      jsonResponse({ code: 'AUTHENTICATION_SERVICE_UNAVAILABLE' }, 503),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reload).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('checks when the window regains focus or the tab becomes visible', async () => {
+    const { fetchMock, document, windowEvents, documentEvents, stop } = createPollTarget(
+      () => new Response(null, { status: 204 }),
+    );
+    windowEvents.dispatchEvent(new Event('focus'));
+    document.visibilityState = 'hidden';
+    documentEvents.dispatchEvent(new Event('visibilitychange'));
+    document.visibilityState = 'visible';
+    documentEvents.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('stops polling once stopped', async () => {
+    const { fetchMock, windowEvents, stop } = createPollTarget(
+      () => new Response(null, { status: 204 }),
+    );
+    stop();
+    windowEvents.dispatchEvent(new Event('focus'));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

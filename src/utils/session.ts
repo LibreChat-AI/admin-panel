@@ -1,7 +1,11 @@
 const GATEWAY_AUTHENTICATION_REQUIRED = 'AUTHENTICATION_REQUIRED';
 const POST_LOGIN_REDIRECT_KEY = 'admin-panel:post-login-redirect';
+/** Served by the governance SSO gateway (nginx), not by the admin panel */
+const GATEWAY_SESSION_PATH = '/_sso/session';
+const GATEWAY_SESSION_CHECK_INTERVAL_MS = 30_000;
 
 const watchedTargets = new WeakSet<object>();
+const polledTargets = new WeakSet<object>();
 
 async function isGatewaySessionEnded(response: Response): Promise<boolean> {
   if (response.status !== 401) return false;
@@ -31,6 +35,36 @@ export function watchGatewaySessionEnd(
     reloadStarted = true;
     target.location.reload();
     return response;
+  };
+}
+
+/**
+ * An idle page sends no requests, so ask the gateway whether the session is still
+ * active. The check never refreshes tokens, so Keycloak's idle timeout still ends
+ * the session; the fetch wrapper from watchGatewaySessionEnd then reloads into login.
+ * Returns a function that stops polling.
+ */
+export function pollGatewaySession(
+  target: Pick<Window, 'fetch' | 'addEventListener' | 'removeEventListener'> & {
+    document: Pick<Document, 'visibilityState' | 'addEventListener' | 'removeEventListener'>;
+  },
+): () => void {
+  if (polledTargets.has(target)) return () => {};
+  polledTargets.add(target);
+  const check = () => {
+    target.fetch(GATEWAY_SESSION_PATH, { cache: 'no-store' }).catch(() => undefined);
+  };
+  const checkWhenVisible = () => {
+    if (target.document.visibilityState === 'visible') check();
+  };
+  const interval = setInterval(check, GATEWAY_SESSION_CHECK_INTERVAL_MS);
+  target.addEventListener('focus', check);
+  target.document.addEventListener('visibilitychange', checkWhenVisible);
+  return () => {
+    clearInterval(interval);
+    target.removeEventListener('focus', check);
+    target.document.removeEventListener('visibilitychange', checkWhenVisible);
+    polledTargets.delete(target);
   };
 }
 
