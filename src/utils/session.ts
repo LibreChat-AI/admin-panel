@@ -3,6 +3,7 @@ const POST_LOGIN_REDIRECT_KEY = 'admin-panel:post-login-redirect';
 /** Served by the governance SSO gateway (nginx), not by the admin panel */
 const GATEWAY_SESSION_PATH = '/_sso/session';
 const GATEWAY_SESSION_CHECK_INTERVAL_MS = 30_000;
+const GATEWAY_SESSION_CHECK_TIMEOUT_MS = 10_000;
 
 const watchedTargets = new WeakSet<object>();
 const polledTargets = new WeakSet<object>();
@@ -51,8 +52,19 @@ export function pollGatewaySession(
 ): () => void {
   if (polledTargets.has(target)) return () => {};
   polledTargets.add(target);
+  let inFlight = false;
   const check = () => {
-    target.fetch(GATEWAY_SESSION_PATH, { cache: 'no-store' }).catch(() => undefined);
+    if (inFlight) return;
+    inFlight = true;
+    target
+      .fetch(GATEWAY_SESSION_PATH, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(GATEWAY_SESSION_CHECK_TIMEOUT_MS),
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        inFlight = false;
+      });
   };
   const checkWhenVisible = () => {
     if (target.document.visibilityState === 'visible') check();

@@ -62,11 +62,11 @@ describe('watchGatewaySessionEnd', () => {
 });
 
 describe('pollGatewaySession', () => {
-  function createPollTarget(respond: () => Response) {
+  function createPollTarget(respond: (init?: RequestInit) => Response | Promise<Response>) {
     const windowEvents = new EventTarget();
     const documentEvents = new EventTarget();
     const reload = vi.fn();
-    const fetchMock = vi.fn(async () => respond());
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => respond(init));
     const document = {
       visibilityState: 'visible' as DocumentVisibilityState,
       addEventListener: documentEvents.addEventListener.bind(documentEvents),
@@ -86,7 +86,10 @@ describe('pollGatewaySession', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    return () => vi.useRealTimers();
+    return () => {
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+    };
   });
 
   it('checks the gateway session every thirty seconds without reloading an active page', async () => {
@@ -94,7 +97,10 @@ describe('pollGatewaySession', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(90_000);
     expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock).toHaveBeenCalledWith('/_sso/session', { cache: 'no-store' });
+    expect(fetchMock).toHaveBeenCalledWith('/_sso/session', {
+      cache: 'no-store',
+      signal: expect.any(AbortSignal),
+    });
     expect(reload).not.toHaveBeenCalled();
     stop();
   });
@@ -122,12 +128,56 @@ describe('pollGatewaySession', () => {
       () => new Response(null, { status: 204 }),
     );
     windowEvents.dispatchEvent(new Event('focus'));
+    await vi.advanceTimersByTimeAsync(0);
     document.visibilityState = 'hidden';
     documentEvents.dispatchEvent(new Event('visibilitychange'));
     document.visibilityState = 'visible';
     documentEvents.dispatchEvent(new Event('visibilitychange'));
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it('shares one request between focus and visibility events', async () => {
+    const { fetchMock, windowEvents, documentEvents, stop } = createPollTarget(
+      () => new Response(null, { status: 204 }),
+    );
+    windowEvents.dispatchEvent(new Event('focus'));
+    documentEvents.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('skips checks while one is still pending', async () => {
+    const { fetchMock, windowEvents, stop } = createPollTarget(() => new Promise(() => undefined));
+    await vi.advanceTimersByTimeAsync(9_000);
+    windowEvents.dispatchEvent(new Event('focus'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('gives up on a hung check so later checks still run', async () => {
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException('Timed out', 'TimeoutError')), ms);
+      return controller.signal;
+    });
+    const { fetchMock, reload, stop } = createPollTarget(
+      (init) =>
+        new Promise((_, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(30_000);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init?.signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(init?.signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(reload).not.toHaveBeenCalled();
     stop();
   });
 
