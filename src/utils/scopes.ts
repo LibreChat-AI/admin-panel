@@ -5,6 +5,7 @@ import { BASE_PRINCIPAL, KEYED_COLLECTIONS, getScopeGateReason } from '@/constan
 import { flattenObject, getValueAtPath, isConfigRecord } from './format';
 import { getEntryKey, getKeyedCollection } from './collections';
 import { isSecretPath, isSecretPreviewPath } from './secrets';
+import { entryIdentityOf, parseKeyedPath } from './keyed';
 
 /** The skip reason a save in a profile gets when its section is gated (`getScopeGateReason`). */
 const GATE_SKIP_REASONS: Readonly<Record<t.ScopeGateReason, t.SkipReason>> = {
@@ -186,7 +187,17 @@ export function listScopeOverrideItems(
     if (item) item.paths.push(path);
     else items.set(itemPath, { path: itemPath, paths: [path], hidden: false });
   }
-  const hidden = (scope.tombstones ?? []).map((path) => ({ path, paths: [path], hidden: true }));
+  const hidden = (scope.tombstones ?? []).map((path): t.ScopeOverrideItem => {
+    const keyed = parseKeyedPath(path);
+    if (!keyed) return { path, paths: [path], hidden: true };
+    const { collection, key: name, rest } = keyed;
+    return {
+      path,
+      paths: [path],
+      hidden: true,
+      keyed: { collection: collection.path, name, rest },
+    };
+  });
   return [...items.values(), ...hidden];
 }
 
@@ -290,11 +301,34 @@ function isAtOrUnder(path: string, entryPath: string): boolean {
   return path === entryPath || path.startsWith(`${entryPath}.`);
 }
 
+/**
+ * The keyed tombstones (`keyedTombstones`) a profile holds for entry
+ * `identity` of a list merged by key: whether it hides the entry, and
+ * whether it removes values inside it.
+ */
+function keyedHidesOf(
+  scope: t.ConfigScope,
+  collection: t.KeyedCollection,
+  identity: string,
+): t.EntryKeyedHides {
+  const result: t.EntryKeyedHides = { hidden: false, inside: false };
+  const target = entryIdentityOf(collection, identity);
+  for (const path of scope.tombstones ?? []) {
+    const keyed = parseKeyedPath(path);
+    if (keyed?.collection.path !== collection.path) continue;
+    if (entryIdentityOf(collection, keyed.key) !== target) continue;
+    if (keyed.rest) result.inside = true;
+    else result.hidden = true;
+  }
+  return result;
+}
+
 /** How one profile overrides or hides collection entry `identity`, or null when it doesn't. */
 function entryOverrideOf(
   scope: t.ConfigScope,
   collection: string,
   identity: string,
+  keyedTombstones: boolean,
 ): t.EntryOverride | null {
   const stored = scope.storedSecrets ?? [];
   const keyed = getKeyedCollection(collection);
@@ -304,9 +338,13 @@ function entryOverrideOf(
       entry?.collection === collection && entry.identity === identity ? [path] : [],
     );
     const listed = (scope.overrideEntries?.[collection] ?? []).includes(identity);
-    if (secrets.length === 0 && !listed) return null;
+    const { hidden, inside } = keyedTombstones
+      ? keyedHidesOf(scope, keyed, identity)
+      : { hidden: false, inside: false };
+    const overrides = secrets.length > 0 || listed || inside;
+    if (!overrides && !hidden) return null;
     const settings = scope.overrideEntryPaths?.[collection]?.[identity] ?? [];
-    return { scope, overrides: true, secrets, settings, hidden: false };
+    return { scope, overrides, secrets, settings, hidden };
   }
   const entryPath = `${collection}.${identity}`;
   const inside = (path: string) => path.slice(entryPath.length + 1);
@@ -342,8 +380,11 @@ export function findEntryOverrides(
   scopes: readonly t.ConfigScope[],
   collection: string,
   identity: string,
+  keyedTombstones = false,
 ): t.EntryOverride[] {
-  return scopes.flatMap((scope) => entryOverrideOf(scope, collection, identity) ?? []);
+  return scopes.flatMap(
+    (scope) => entryOverrideOf(scope, collection, identity, keyedTombstones) ?? [],
+  );
 }
 
 const SCOPE_INDEX_CACHE = new WeakMap<t.ConfigScope[], t.ScopeIndex>();

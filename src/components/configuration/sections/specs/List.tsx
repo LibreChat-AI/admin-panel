@@ -2,7 +2,7 @@ import { Button } from '@clickhouse/click-ui';
 import { useRef, useMemo, useState, useEffect, useCallback, useContext } from 'react';
 import type * as t from '@/types';
 import { CollectionEditsContext } from '@/contexts/CollectionEditsContext';
-import { useLocalize, useValuesScope, useFieldState } from '@/hooks';
+import { useLocalize, useValuesScope, useFieldState, useHiddenEntries } from '@/hooks';
 import { ListOwnershipNotice } from '../../renderer/Collections';
 import { ArrayObjectField } from '../../fields/ArrayObjectField';
 import { SpecLeading, SpecSummary, specTitle } from './Summary';
@@ -12,7 +12,7 @@ import { CountBadge } from '@/components/shared';
 import { SPEC_LIST_PATH } from './validation';
 import { SpecListContext } from './context';
 import { sourceLabel } from '../../values';
-import { isConfigRecord } from '@/utils';
+import { isConfigRecord, selectsHiddenEndpoint } from '@/utils';
 import { SpecEditor } from './Editor';
 import { SpecNote } from './Note';
 
@@ -119,6 +119,12 @@ export function SpecList({
   const inheritedOnly = scope != null && !ownsList && !isPending && !customizing;
   const editable = canEdit && !inheritedOnly && !isPendingReset;
   const savedNames = useMemo(() => namesOf(listState.effective), [listState.effective]);
+  /** Specs LibreChat leaves out for the profile, since it hides the endpoint they select (`keyedTombstones`). */
+  const { hidden: hiddenEndpoints } = useHiddenEntries('endpoints.custom');
+  const hiddenSpecs = useMemo(() => {
+    const identities = new Set(hiddenEndpoints.keys());
+    return items.filter((item) => selectsHiddenEndpoint(item, identities));
+  }, [items, hiddenEndpoints]);
   const listEdit = useContext(CollectionEditsContext)[SPEC_LIST_PATH];
   const addedIndexes = useMemo(
     () => addedIndexesOf(items, listEdit, savedNames),
@@ -257,6 +263,14 @@ export function SpecList({
         <p className="settings-help m-0 basis-full">{localize('com_config_specs_list_desc')}</p>
       </div>
       {!rowFilter && notice}
+      {!rowFilter && hiddenSpecs.length > 0 && (
+        <SpecNote tone="warning">
+          {localize('com_config_specs_hidden_endpoint', {
+            name: scopeName,
+            specs: hiddenSpecs.map((spec) => specTitle(spec, localize)).join(', '),
+          })}
+        </SpecNote>
+      )}
       <SpecListContext.Provider value={contextValue}>
         <ArrayObjectField
           id="modelSpecs-list"

@@ -562,6 +562,8 @@ export interface PatchFieldsResponse {
   server?: string;
   /** With `server`: the settings the write changed that decide where the secret is sent. */
   fields?: string[];
+  /** `CONFIG_RENAME_INVALID`: why a `renames` hint can't apply (`duplicate_source`, `target_exists`, …). */
+  reason?: string;
 }
 
 /** Body of a `POST …/changes` reply (`changesBatch`): the stored document's revision and what the batch did. */

@@ -6,6 +6,7 @@ import {
   getValueAtPath,
   withScopeLayer,
   createBaseLayers,
+  keyedEntriesOf,
   overlayPendingEdits,
   overriddenEntryKeys,
 } from '@/utils';
@@ -18,7 +19,7 @@ import {
 import { collectFieldPaths, withLangfuseConfiguredPath } from '@/components/configuration/counts';
 import { mergeIndexedArrayEdits } from '@/components/configuration/edits';
 import { getFieldMeta } from '@/components/configuration/meta';
-import { useConfigWriteRules } from './contract';
+import { useConfigFeatures, useConfigWriteRules } from './contract';
 import { KEYED_COLLECTIONS } from '@/constants';
 
 const INDEXED_EDIT_PATH = /\.\d+$/;
@@ -75,11 +76,15 @@ export function useConfigLayers({
   const fieldPaths = useMemo(() => collectFieldPaths(schemaTree), [schemaTree]);
   const schemaPathSet = useMemo(() => new Set(fieldPaths), [fieldPaths]);
 
+  const { keyedTombstones } = useConfigFeatures();
+
   /** Base-mode layers: librechat.yaml (raw paths and processed), base overrides and tombstones, effective base. */
   const baseLayers = useMemo(
     () =>
-      baseConfigData ? createBaseLayers(baseConfigData, schemaPathSet, runtimeDefaultAt) : null,
-    [baseConfigData, schemaPathSet],
+      baseConfigData
+        ? createBaseLayers(baseConfigData, schemaPathSet, runtimeDefaultAt, keyedTombstones)
+        : null,
+    [baseConfigData, schemaPathSet, keyedTombstones],
   );
 
   const dbOverridePaths = useMemo(
@@ -113,8 +118,23 @@ export function useConfigLayers({
   const valueLayers = useMemo((): t.ValueLayers | null => {
     if (!baseLayers || !isEditingScope) return baseLayers;
     if (!openScope || !scopeData) return null;
-    return withScopeLayer(baseLayers, openScope, scopeData, schemaPathSet, writeRules);
-  }, [baseLayers, isEditingScope, openScope, scopeData, schemaPathSet, writeRules]);
+    return withScopeLayer(
+      baseLayers,
+      openScope,
+      scopeData,
+      schemaPathSet,
+      writeRules,
+      keyedTombstones,
+    );
+  }, [
+    baseLayers,
+    isEditingScope,
+    openScope,
+    scopeData,
+    schemaPathSet,
+    writeRules,
+    keyedTombstones,
+  ]);
 
   /**
    * Overridden entries of each keyed list, by the edit target: Base's
@@ -138,10 +158,14 @@ export function useConfigLayers({
         storedList,
         getValueAtPath(lower, collection.path),
       );
+      const tombstones = scopeLayer?.tombstones ?? valueLayers?.baseTombstones ?? [];
+      for (const keyed of keyedTombstones ? keyedEntriesOf(tombstones, collection) : []) {
+        keys.add(keyed);
+      }
       counts.set(collection.path, keys.size);
     }
     return counts;
-  }, [valueLayers, dbOverrides, baseConfigData?.yamlConfig]);
+  }, [valueLayers, dbOverrides, baseConfigData?.yamlConfig, keyedTombstones]);
 
   const baseActiveConfigValues = isEditingScope ? (valueLayers?.effective ?? null) : configValues;
   const flatBaseline = useMemo(

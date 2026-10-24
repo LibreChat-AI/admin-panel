@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest';
 import type * as t from '@/types';
 import {
   toBatchOps,
+  orderTombstones,
   verifyWrite,
   planConfigChanges,
   mergedBackChanges,
   parseIndexedArrayPath,
 } from './changes';
 import { validateEntry, validateSection, validateField } from './validation';
-import { BUNDLED_CONFIG_FEATURES } from '@/constants';
+import { BUNDLED_CONFIG_FEATURES, BUNDLED_CONFIG_LIMITS, BUNDLED_WRITE_RULES } from '@/constants';
 import { getValueAtPath } from './format';
 
 const yaml: t.ConfigRecord = {
@@ -1223,5 +1224,635 @@ describe('planConfigChanges — secrets of renamed and duplicated entries', () =
     ]);
     const older = planConfigChanges(ops, snapshot(endpoints));
     expect(older.issues.map((issue) => issue.code)).toEqual(['SECRET_REQUIRED_FOR_RENAME']);
+  });
+});
+
+describe('planConfigChanges — keyed tombstones', () => {
+  const keyed: t.ConfigFeatures = {
+    ...BUNDLED_CONFIG_FEATURES,
+    changesBatch: true,
+    expectedRevision: true,
+    prunesEmptyParents: true,
+    keyedTombstones: true,
+  };
+  const before: t.ConfigFeatures = { ...keyed, keyedTombstones: false };
+  const gpt = yaml.endpoints as t.ConfigRecord;
+  const base: t.ConfigRecord = {
+    endpoints: {
+      custom: [
+        ...(gpt.custom as t.ConfigValue[]),
+        {
+          name: 'Gateway',
+          apiKey: '${GW_KEY}',
+          baseURL: 'https://gw',
+          models: { default: ['m'] },
+          headers: { 'X-Team': 'blue', 'X-Org': 'acme' },
+        },
+      ],
+    },
+  };
+  const profile = (stored: t.ConfigRecord = {}, tombstones: string[] = []): t.WriteSnapshot => ({
+    stored,
+    tombstones,
+    lower: base,
+    lowerKind: 'inherited',
+  });
+  const own: t.ConfigRecord = {
+    endpoints: {
+      custom: [
+        { name: 'GPT', titleModel: 'gpt-4o' },
+        { name: 'Mine', apiKey: 'sk-1', baseURL: 'https://mine', models: { default: ['x'] } },
+      ],
+    },
+  };
+  const gatewayHide = 'endpoints.custom["Gateway"]';
+  const teamHeader = 'endpoints.custom["Gateway"].headers.X-Team';
+
+  it('hides an inherited endpoint, leaving out its edits and its own override', () => {
+    const stored: t.ConfigRecord = {
+      endpoints: {
+        custom: [
+          { name: 'Gateway', titleModel: 'm' },
+          { name: 'Mine', apiKey: 'sk-1', baseURL: 'https://mine', models: { default: ['x'] } },
+        ],
+      },
+    };
+    const plan = planConfigChanges(
+      [
+        { op: 'tombstone', path: gatewayHide },
+        {
+          op: 'upsertEntry',
+          path: 'endpoints.custom',
+          key: 'Gateway',
+          identity: 'Gateway',
+          value: { name: 'Gateway', titleModel: 'other' },
+        },
+        {
+          op: 'upsertEntry',
+          path: 'endpoints.custom',
+          key: 'Mine',
+          identity: 'Mine',
+          value: { name: 'Mine', baseURL: 'https://mine2', models: { default: ['x'] } },
+          baseline: { name: 'Mine', baseURL: 'https://mine', models: { default: ['x'] } },
+        },
+      ],
+      profile(stored),
+      keyed,
+    );
+    expect(plan.issues).toEqual([]);
+    expect(plan.skipped).toEqual([
+      { fieldPath: 'endpoints.custom.Gateway', reason: 'hiddenBySave' },
+    ]);
+    expect(toBatchOps(plan)).toEqual([
+      { op: 'tombstone', fieldPath: gatewayHide },
+      {
+        op: 'set',
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'Mine', apiKey: 'sk-1', baseURL: 'https://mine2', models: { default: ['x'] } },
+        ],
+      },
+    ]);
+    const custom = getValueAtPath(plan.storedAfter, 'endpoints.custom');
+    expect(custom).toEqual([
+      { name: 'Mine', apiKey: 'sk-1', baseURL: 'https://mine2', models: { default: ['x'] } },
+    ]);
+  });
+
+  it('never writes an endpoint the profile hides already, unless the same save unhides it', () => {
+    const write: t.ConfigChange = {
+      op: 'set',
+      path: 'endpoints.custom',
+      value: [{ name: 'Gateway', titleModel: 'other' }],
+    };
+    const hidden = planConfigChanges([write], profile({}, [gatewayHide]), keyed);
+    expect(hidden.skipped).toEqual([
+      { fieldPath: 'endpoints.custom.Gateway', reason: 'hiddenEntry' },
+    ]);
+    expect(toBatchOps(hidden)).toEqual([]);
+    const shown = planConfigChanges(
+      [{ op: 'untombstone', path: gatewayHide }, write],
+      profile({}, [gatewayHide]),
+      keyed,
+    );
+    expect(shown.skipped).toEqual([]);
+    expect(toBatchOps(shown)).toEqual([
+      { op: 'unset', fieldPath: gatewayHide },
+      {
+        op: 'set',
+        fieldPath: 'endpoints.custom',
+        value: [{ name: 'Gateway', titleModel: 'other' }],
+      },
+    ]);
+    const older = planConfigChanges([write], profile({}, [gatewayHide]), before);
+    expect(older.skipped).toEqual([]);
+    expect(older.sets).toEqual([
+      { fieldPath: 'endpoints.custom', value: [{ name: 'Gateway', titleModel: 'other' }] },
+    ]);
+  });
+
+  it('resets a reverted override by key instead of writing the list again', () => {
+    const lowerGpt = ((base.endpoints as t.ConfigRecord).custom as t.ConfigValue[])[0];
+    const revert: t.ConfigChange = {
+      op: 'upsertEntry',
+      path: 'endpoints.custom',
+      key: 'GPT',
+      identity: 'GPT',
+      value: lowerGpt,
+      baseline: { ...(lowerGpt as t.ConfigRecord), titleModel: 'gpt-4o' },
+    };
+    const plan = planConfigChanges([revert], profile(own, [gatewayHide]), keyed);
+    expect(plan.issues).toEqual([]);
+    expect(toBatchOps(plan)).toEqual([{ op: 'unset', fieldPath: 'endpoints.custom["GPT"]' }]);
+    const older = planConfigChanges([revert], profile(own, [gatewayHide]), before);
+    expect(toBatchOps(older)).toEqual([
+      {
+        op: 'set',
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'Mine', apiKey: 'sk-1', baseURL: 'https://mine', models: { default: ['x'] } },
+        ],
+      },
+    ]);
+  });
+
+  it("writes the list instead of a reset by key for a name longer than the server's maxEntryKeyLength", () => {
+    const lowerGpt = ((base.endpoints as t.ConfigRecord).custom as t.ConfigValue[])[0];
+    const revert: t.ConfigChange = {
+      op: 'upsertEntry',
+      path: 'endpoints.custom',
+      key: 'GPT',
+      identity: 'GPT',
+      value: lowerGpt,
+      baseline: { ...(lowerGpt as t.ConfigRecord), titleModel: 'gpt-4o' },
+    };
+    const snapshot = profile(own, [gatewayHide]);
+    const limits = { ...BUNDLED_CONFIG_LIMITS, maxEntryKeyLength: 2 };
+    const plan = planConfigChanges([revert], snapshot, keyed, BUNDLED_WRITE_RULES, limits);
+    expect(plan.issues).toEqual([]);
+    expect(toBatchOps(plan)).toEqual([
+      {
+        op: 'set',
+        fieldPath: 'endpoints.custom',
+        value: [
+          { name: 'Mine', apiKey: 'sk-1', baseURL: 'https://mine', models: { default: ['x'] } },
+        ],
+      },
+    ]);
+  });
+
+  it('refuses a new entry under a name LibreChat could not remove by key, and keeps one already saved', () => {
+    const added = {
+      name: '$proxy',
+      apiKey: 'sk-2',
+      baseURL: 'https://p',
+      models: { default: ['y'] },
+    };
+    const legacy = {
+      name: '__old',
+      apiKey: 'sk-3',
+      baseURL: 'https://o',
+      models: { default: ['z'] },
+    };
+    const list = (own.endpoints as t.ConfigRecord).custom as t.ConfigValue[];
+    const stored: t.ConfigRecord = { endpoints: { custom: [...list, legacy] } };
+    const write = (value: t.ConfigValue[], features: t.ConfigFeatures) =>
+      planConfigChanges(
+        [{ op: 'set', path: 'endpoints.custom', value }],
+        profile(stored),
+        features,
+      );
+    expect(write([...list, legacy, added], keyed).issues).toEqual([
+      expect.objectContaining({
+        path: 'endpoints.custom',
+        code: 'entry_key_unaddressable',
+        entryIdentity: '$proxy',
+        params: { name: '$proxy', max: BUNDLED_CONFIG_LIMITS.maxEntryKeyLength },
+      }),
+    ]);
+    expect(write([...list, { ...legacy, titleModel: 'z' }], keyed).issues).toEqual([]);
+    expect(write([...list, legacy, added], before).issues).toEqual([]);
+  });
+
+  it('refuses a first override of an inherited entry whose name LibreChat could not remove by key', () => {
+    const limits = { ...BUNDLED_CONFIG_LIMITS, maxEntryKeyLength: 3 };
+    const list = (own.endpoints as t.ConfigRecord).custom as t.ConfigValue[];
+    const plan = planConfigChanges(
+      [
+        {
+          op: 'set',
+          path: 'endpoints.custom',
+          value: [...list, { name: 'Gateway', titleModel: 'm' }],
+        },
+      ],
+      profile(own),
+      keyed,
+      BUNDLED_WRITE_RULES,
+      limits,
+    );
+    expect(plan.issues).toEqual([
+      expect.objectContaining({
+        code: 'entry_key_unaddressable',
+        entryIdentity: 'Gateway',
+        params: { name: 'Gateway', max: 3 },
+      }),
+    ]);
+  });
+
+  it('never resets the whole list when its last own entry goes, which would drop every hide under it', () => {
+    const remove: t.ConfigChange = {
+      op: 'removeEntry',
+      path: 'endpoints.custom',
+      key: 'Mine',
+      identity: 'Mine',
+    };
+    const stored: t.ConfigRecord = {
+      endpoints: { custom: [((own.endpoints as t.ConfigRecord).custom as t.ConfigValue[])[1]] },
+    };
+    const plan = planConfigChanges([remove], profile(stored, [gatewayHide]), keyed);
+    expect(toBatchOps(plan)).toEqual([{ op: 'unset', fieldPath: 'endpoints.custom["Mine"]' }]);
+    const older = planConfigChanges([remove], profile(stored, [gatewayHide]), before);
+    expect(toBatchOps(older)).toEqual([{ op: 'unset', fieldPath: 'endpoints.custom' }]);
+  });
+
+  it('takes back a removal inside an inherited endpoint when it is reverted', () => {
+    const lowerGateway = ((base.endpoints as t.ConfigRecord).custom as t.ConfigValue[])[2];
+    const plan = planConfigChanges(
+      [
+        {
+          op: 'upsertEntry',
+          path: 'endpoints.custom',
+          key: 'Gateway',
+          identity: 'Gateway',
+          value: lowerGateway,
+          baseline: { ...(lowerGateway as t.ConfigRecord), headers: { 'X-Org': 'acme' } },
+        },
+      ],
+      profile({}, [teamHeader]),
+      keyed,
+    );
+    expect(toBatchOps(plan)).toEqual([{ op: 'unset', fieldPath: teamHeader }]);
+    expect(plan.effective).toBe(1);
+  });
+
+  describe('an inherited endpoint whose last own setting is cleared', () => {
+    const lowerGateway = ((base.endpoints as t.ConfigRecord).custom as t.ConfigRecord[])[2];
+    const shown = { ...lowerGateway, headers: { 'X-Org': 'acme' } };
+    const stored: t.ConfigRecord = {
+      endpoints: { custom: [{ name: 'Gateway', titleModel: 'm' }] },
+    };
+    const cleared: t.ConfigChange = {
+      op: 'upsertEntry',
+      path: 'endpoints.custom',
+      key: 'Gateway',
+      identity: 'Gateway',
+      value: shown,
+      baseline: { ...shown, titleModel: 'm' },
+    };
+    const gptHide = 'endpoints.custom["GPT"]';
+    const orgHeader = 'endpoints.custom["Gateway"].headers.X-Org';
+
+    it('keeps the removals inside it, written again after the reset that would take them along', () => {
+      const plan = planConfigChanges([cleared], profile(stored, [teamHeader, gptHide]), keyed);
+      expect(plan.issues).toEqual([]);
+      expect(toBatchOps(plan)).toEqual([
+        { op: 'unset', fieldPath: gatewayHide },
+        { op: 'tombstone', fieldPath: teamHeader },
+      ]);
+      expect(plan.effective).toBe(1);
+      expect(getValueAtPath(plan.storedAfter, 'endpoints.custom')).toEqual([]);
+    });
+
+    it('keeps a removal the same save adds inside it', () => {
+      const plan = planConfigChanges(
+        [
+          { op: 'tombstone', path: orgHeader },
+          { ...cleared, value: { ...shown, headers: {} } },
+        ],
+        profile(stored, [teamHeader]),
+        keyed,
+      );
+      expect(plan.issues).toEqual([]);
+      expect(toBatchOps(plan)).toEqual([
+        { op: 'unset', fieldPath: gatewayHide },
+        { op: 'tombstone', fieldPath: orgHeader },
+        { op: 'tombstone', fieldPath: teamHeader },
+      ]);
+      expect(plan.effective).toBe(2);
+    });
+
+    it('takes back a removal the same save restores, and all of them on Remove overrides', () => {
+      const restored = planConfigChanges(
+        [
+          { op: 'untombstone', path: teamHeader },
+          { ...cleared, value: lowerGateway, baseline: { ...lowerGateway, titleModel: 'm' } },
+        ],
+        profile(stored, [teamHeader]),
+        keyed,
+      );
+      expect(toBatchOps(restored)).toEqual([
+        { op: 'unset', fieldPath: teamHeader },
+        { op: 'unset', fieldPath: gatewayHide },
+      ]);
+      const reverted = planConfigChanges(
+        [{ ...cleared, value: lowerGateway }],
+        profile(stored, [teamHeader]),
+        keyed,
+      );
+      expect(toBatchOps(reverted)).toEqual([{ op: 'unset', fieldPath: gatewayHide }]);
+    });
+
+    it('drops the removals inside a deleted endpoint the layer beneath does not define', () => {
+      const mine = ((own.endpoints as t.ConfigRecord).custom as t.ConfigValue[])[1];
+      const plan = planConfigChanges(
+        [{ op: 'removeEntry', path: 'endpoints.custom', key: 'Mine', identity: 'Mine' }],
+        profile({ endpoints: { custom: [mine] } }, ['endpoints.custom["Mine"].headers.X-Team']),
+        keyed,
+      );
+      expect(toBatchOps(plan)).toEqual([{ op: 'unset', fieldPath: 'endpoints.custom["Mine"]' }]);
+    });
+
+    it('sends them after the reset on field writes too, and leaves them alone without the flag', () => {
+      const fields = planConfigChanges([cleared], profile(stored, [teamHeader]), {
+        ...keyed,
+        changesBatch: false,
+        expectedRevision: false,
+      });
+      expect(fields.resets).toEqual([gatewayHide]);
+      expect(orderTombstones(fields)).toEqual({ early: [], late: [teamHeader] });
+      const older = planConfigChanges([cleared], profile(stored, [teamHeader]), before);
+      expect(older.tombstones).toEqual([]);
+      expect(orderTombstones(older)).toEqual({ early: [], late: [] });
+    });
+  });
+
+  describe('a removed key the endpoint holds again', () => {
+    const lowerGateway = ((base.endpoints as t.ConfigRecord).custom as t.ConfigRecord[])[2];
+    const stored: t.ConfigRecord = {
+      endpoints: { custom: [{ name: 'Gateway', titleModel: 'm', headers: { 'X-Own': 'o' } }] },
+    };
+    const shown = {
+      ...lowerGateway,
+      titleModel: 'm',
+      headers: { 'X-Org': 'acme', 'X-Own': 'o' },
+    };
+    const holding = (headers: t.ConfigRecord): t.ConfigChange => ({
+      op: 'upsertEntry',
+      path: 'endpoints.custom',
+      key: 'Gateway',
+      identity: 'Gateway',
+      value: { ...lowerGateway, titleModel: 'm', headers },
+      baseline: shown,
+    });
+
+    it('takes the removal back when the key is back as the layer beneath sets it', () => {
+      const plan = planConfigChanges(
+        [holding({ 'X-Team': 'blue', 'X-Org': 'acme' })],
+        profile(stored, [teamHeader]),
+        keyed,
+      );
+      expect(plan.issues).toEqual([]);
+      expect(toBatchOps(plan)).toEqual([
+        {
+          op: 'set',
+          fieldPath: 'endpoints.custom',
+          value: [{ name: 'Gateway', titleModel: 'm' }],
+        },
+        { op: 'unset', fieldPath: teamHeader },
+      ]);
+      expect(getValueAtPath(plan.storedAfter, 'endpoints.custom')).toEqual([
+        { name: 'Gateway', titleModel: 'm' },
+      ]);
+    });
+
+    it('keeps it under a value of its own, which LibreChat uses over the removal', () => {
+      const plan = planConfigChanges(
+        [holding({ 'X-Team': 'red', 'X-Org': 'acme' })],
+        profile(stored, [teamHeader]),
+        keyed,
+      );
+      expect(toBatchOps(plan)).toEqual([
+        {
+          op: 'set',
+          fieldPath: 'endpoints.custom',
+          value: [{ name: 'Gateway', titleModel: 'm', headers: { 'X-Team': 'red' } }],
+        },
+      ]);
+    });
+
+    it('keeps it when the same save removes the key again', () => {
+      const plan = planConfigChanges(
+        [{ op: 'tombstone', path: teamHeader }, holding({ 'X-Team': 'blue', 'X-Org': 'acme' })],
+        profile(stored, [teamHeader]),
+        keyed,
+      );
+      expect(toBatchOps(plan)).toEqual([
+        { op: 'tombstone', fieldPath: teamHeader },
+        {
+          op: 'set',
+          fieldPath: 'endpoints.custom',
+          value: [{ name: 'Gateway', titleModel: 'm' }],
+        },
+      ]);
+    });
+
+    it('leaves the stored tombstone alone before the server applies keyed tombstones', () => {
+      const plan = planConfigChanges(
+        [holding({ 'X-Team': 'blue', 'X-Org': 'acme' })],
+        profile(stored, [teamHeader]),
+        before,
+      );
+      expect(plan.resets).toEqual([]);
+    });
+  });
+
+  it("resets the target's own value with an unhide by key, as LibreChat does", () => {
+    const stored: t.ConfigRecord = {
+      endpoints: { custom: [{ name: 'Gateway', titleModel: 'm', headers: { 'X-Team': 'red' } }] },
+    };
+    const plan = planConfigChanges(
+      [{ op: 'untombstone', path: teamHeader }],
+      profile(stored, [teamHeader]),
+      keyed,
+    );
+    expect(toBatchOps(plan)).toEqual([{ op: 'unset', fieldPath: teamHeader }]);
+    expect(getValueAtPath(plan.storedAfter, 'endpoints.custom')).toEqual([
+      { name: 'Gateway', titleModel: 'm', headers: {} },
+    ]);
+    const older = planConfigChanges(
+      [{ op: 'untombstone', path: teamHeader }],
+      profile(stored, [teamHeader]),
+      before,
+    );
+    expect(older.storedAfter).toEqual(stored);
+  });
+
+  it('stores the value the same save writes under an unhide by key, after the reset', () => {
+    const stored: t.ConfigRecord = {
+      endpoints: { custom: [{ name: 'Gateway', headers: { 'X-Team': 'red' } }] },
+    };
+    const write: t.ConfigChange = {
+      op: 'upsertEntry',
+      path: 'endpoints.custom',
+      key: 'Gateway',
+      identity: 'Gateway',
+      value: { name: 'Gateway', headers: { 'X-Team': 'green', 'X-Org': 'acme' } },
+    };
+    for (const snapshot of [profile(stored, [teamHeader]), profile({}, [teamHeader])]) {
+      const plan = planConfigChanges(
+        [{ op: 'untombstone', path: teamHeader }, write],
+        snapshot,
+        keyed,
+      );
+      expect(toBatchOps(plan)).toEqual([
+        { op: 'unset', fieldPath: teamHeader },
+        {
+          op: 'set',
+          fieldPath: 'endpoints.custom',
+          value: [{ name: 'Gateway', headers: { 'X-Team': 'green' } }],
+        },
+      ]);
+      expect(getValueAtPath(plan.storedAfter, 'endpoints.custom')).toEqual([
+        { name: 'Gateway', headers: { 'X-Team': 'green' } },
+      ]);
+    }
+  });
+
+  it('removes an inherited header by key, and its own value from a list the save writes', () => {
+    const stored: t.ConfigRecord = {
+      endpoints: { custom: [{ name: 'Gateway', headers: { 'X-Team': 'red' } }] },
+    };
+    const plan = planConfigChanges(
+      [
+        { op: 'tombstone', path: teamHeader },
+        {
+          op: 'upsertEntry',
+          path: 'endpoints.custom',
+          key: 'Gateway',
+          identity: 'Gateway',
+          value: { name: 'Gateway', headers: { 'X-Team': 'red' }, titleModel: 'm' },
+          baseline: { name: 'Gateway', headers: { 'X-Team': 'red' } },
+        },
+      ],
+      profile(stored),
+      keyed,
+    );
+    expect(plan.issues).toEqual([]);
+    expect(toBatchOps(plan)).toEqual([
+      { op: 'tombstone', fieldPath: teamHeader },
+      {
+        op: 'set',
+        fieldPath: 'endpoints.custom',
+        value: [{ name: 'Gateway', headers: {}, titleModel: 'm' }],
+      },
+    ]);
+  });
+
+  it('drops a reset by key that removes nothing', () => {
+    const plan = planConfigChanges(
+      [{ op: 'reset', path: 'endpoints.custom["Claude"]' }],
+      profile(own, [gatewayHide]),
+      keyed,
+    );
+    expect(toBatchOps(plan)).toEqual([]);
+    const shown = planConfigChanges(
+      [{ op: 'untombstone', path: gatewayHide }],
+      profile(own, [gatewayHide]),
+      keyed,
+    );
+    expect(toBatchOps(shown)).toEqual([{ op: 'unset', fieldPath: gatewayHide }]);
+    expect(shown.changed).toEqual(['endpoints.custom.Gateway']);
+  });
+
+  it('keeps a removal inside an endpoint it shows again, which the unhide would reset', () => {
+    const plan = planConfigChanges(
+      [{ op: 'untombstone', path: gatewayHide }],
+      profile({}, [gatewayHide, teamHeader, 'mcpServers.github']),
+      keyed,
+    );
+    expect(toBatchOps(plan)).toEqual([
+      { op: 'unset', fieldPath: gatewayHide },
+      { op: 'tombstone', fieldPath: teamHeader },
+    ]);
+    expect(plan.effective).toBe(1);
+    const both = planConfigChanges(
+      [
+        { op: 'untombstone', path: gatewayHide },
+        { op: 'untombstone', path: teamHeader },
+      ],
+      profile({}, [gatewayHide, teamHeader]),
+      keyed,
+    );
+    expect(toBatchOps(both)).toEqual([
+      { op: 'unset', fieldPath: gatewayHide },
+      { op: 'unset', fieldPath: teamHeader },
+    ]);
+  });
+});
+
+describe('planConfigChanges — endpoint rename hints', () => {
+  const stored: t.ConfigRecord = {
+    endpoints: {
+      custom: [
+        {
+          name: 'Secret EP',
+          baseURL: 'https://s',
+          models: { default: ['m1'] },
+          apiKeyPreview: '...1234',
+        },
+      ],
+    },
+  };
+  const rename: t.ConfigChange = {
+    op: 'upsertEntry',
+    path: 'endpoints.custom',
+    key: 'Renamed EP',
+    identity: 'Secret EP',
+    value: { name: 'Renamed EP', baseURL: 'https://s', models: { default: ['m1'] } },
+  };
+
+  it('carries the stored key through the PATCH hint before change batches (renameHints)', () => {
+    const plan = planConfigChanges([rename], snapshot(stored), {
+      ...BUNDLED_CONFIG_FEATURES,
+      renameHints: true,
+    });
+    expect(plan.issues).toEqual([]);
+    expect(plan.renames).toEqual([]);
+    expect(plan.renameHints).toEqual([
+      { path: 'endpoints.custom', previousName: 'Secret EP', name: 'Renamed EP' },
+    ]);
+    expect(plan.sets).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [{ name: 'Renamed EP', baseURL: 'https://s', models: { default: ['m1'] } }],
+      },
+    ]);
+    expect(getValueAtPath(plan.storedAfter, 'endpoints.custom')).toEqual([
+      {
+        name: 'Renamed EP',
+        baseURL: 'https://s',
+        models: { default: ['m1'] },
+        apiKeyPreview: '...1234',
+      },
+    ]);
+  });
+
+  it('asks for the key again where nothing carries it', () => {
+    const plan = planConfigChanges([rename], snapshot(stored));
+    expect(plan.renameHints).toEqual([]);
+    expect(plan.issues.map((issue) => issue.code)).toEqual(['SECRET_REQUIRED_FOR_RENAME']);
+  });
+
+  it('asks for it again when the renamed endpoint sends it elsewhere (secretRebinding)', () => {
+    const moved: t.ConfigChange = {
+      ...rename,
+      value: { name: 'Renamed EP', baseURL: 'https://elsewhere', models: { default: ['m1'] } },
+    };
+    const plan = planConfigChanges([moved], snapshot(stored), {
+      ...BUNDLED_CONFIG_FEATURES,
+      renameHints: true,
+      secretRebinding: true,
+    });
+    expect(plan.issues.map((issue) => issue.code)).toContain('secret_reentry_required');
   });
 });

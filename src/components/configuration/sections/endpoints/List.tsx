@@ -179,6 +179,14 @@ function rowDetails(row: t.EndpointRow, localize: t.LocalizeFn): string {
   return parts.join(' · ');
 }
 
+/** Why an endpoint the layer beneath defines can't be deleted, pointing at Hide where the row offers it. */
+function deleteLockKey(row: t.EndpointRow, hides: boolean): string {
+  if (row.origin !== 'inherited') return 'com_config_ce_delete_locked';
+  return hides
+    ? 'com_config_ce_delete_locked_inherited_hide'
+    : 'com_config_ce_delete_locked_inherited';
+}
+
 /** Whether a row can be deleted here: endpoints the layer beneath defines can't (D1). */
 export function isDeletable(row: Pick<t.EndpointRow, 'origin'>): boolean {
   return row.origin === 'admin' || row.origin === 'scope';
@@ -234,6 +242,7 @@ function EndpointListRow({
   onDelete,
   onRevert,
   override,
+  hide,
 }: t.EndpointListRowProps) {
   const localize = useLocalize();
   const rowRef = useRef<HTMLLIElement>(null);
@@ -267,6 +276,17 @@ function EndpointListRow({
       onClick: () => onRevert(row),
     });
   }
+  const hides = !disabled && hide?.offers(row) === true;
+  if (hide && hides) {
+    const reason = hide.disabledReason(row);
+    menu.push({
+      label: hide.label,
+      icon: 'eye-closed',
+      disabled: reason !== undefined,
+      title: reason,
+      onClick: () => hide.onSelect(row),
+    });
+  }
   if (!disabled) {
     const deletable = isDeletable(row);
     menu.push({
@@ -274,13 +294,7 @@ function EndpointListRow({
       icon: 'trash',
       danger: deletable,
       disabled: !deletable,
-      title: deletable
-        ? undefined
-        : localize(
-            row.origin === 'inherited'
-              ? 'com_config_ce_delete_locked_inherited'
-              : 'com_config_ce_delete_locked',
-          ),
+      title: deletable ? undefined : localize(deleteLockKey(row, hides)),
       onClick: () => onDelete(row),
     });
   }
@@ -351,6 +365,7 @@ export function EndpointList({
   onDelete,
   onRevert,
   override,
+  hide,
   onUndoRemoval,
   removalNotes,
   idPrefix,
@@ -387,6 +402,7 @@ export function EndpointList({
             onOpen={onOpen}
             onReveal={onReveal}
             override={override}
+            hide={hide}
             onDelete={onDelete}
             onRevert={onRevert}
           />

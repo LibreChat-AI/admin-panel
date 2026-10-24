@@ -7,6 +7,7 @@ const ISSUE_KEYS: Readonly<Record<t.EndpointIssueCode, string>> = {
   nameSimilar: 'com_config_ce_issue_name_similar',
   nameMerged: 'com_config_ce_issue_name_merged',
   nameReserved: 'com_config_ce_issue_name_reserved',
+  nameUnaddressable: 'com_config_ce_issue_name_unaddressable',
   apiKeyRequired: 'com_config_ce_issue_api_key_required',
   baseUrlRequired: 'com_config_ce_issue_base_url_required',
   baseUrlInvalid: 'com_config_ce_issue_base_url_invalid',

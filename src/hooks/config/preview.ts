@@ -48,7 +48,7 @@ function serverErrorKey(
  * principal's own profile (`estimateConfigPreview`), as the editor does.
  */
 export function useConfigPreview(target: t.PreviewTarget): t.PreviewState {
-  const { resolvedApi } = useConfigFeatures();
+  const { resolvedApi, keyedTombstones } = useConfigFeatures();
   const rules = useConfigWriteRules();
   const principal = previewPrincipal(target);
   const isBase = target.type === 'BASE';
@@ -66,8 +66,14 @@ export function useConfigPreview(target: t.PreviewTarget): t.PreviewState {
   const estimate = useMemo(() => {
     if (resolvedApi || !base.data) return undefined;
     if (!isBase && (!scopes.data || (scope && !own.data))) return undefined;
-    return estimateConfigPreview({ base: base.data, scope, own: own.data, rules });
-  }, [resolvedApi, base.data, isBase, scopes.data, scope, own.data, rules]);
+    return estimateConfigPreview({
+      base: base.data,
+      scope,
+      own: own.data,
+      rules,
+      keyedTombstones,
+    });
+  }, [resolvedApi, base.data, isBase, scopes.data, scope, own.data, rules, keyedTombstones]);
 
   if (resolvedApi) {
     const result = server.data;

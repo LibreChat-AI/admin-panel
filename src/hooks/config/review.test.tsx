@@ -8,12 +8,13 @@ import type { ReactNode } from 'react';
 import type * as t from '@/types';
 import { extractSchemaTree, getSchemaPathSet } from '@/server/config';
 import { ConfigContractContext } from '@/contexts/ContractContext';
+import { ReviewList } from '@/components/configuration/review';
 import { createServerContract } from '@/test/fixtures';
 import { BUNDLED_CONFIG_CONTRACT } from '@/constants';
 import { applyConfigChangesFn } from '@/server';
-import { useChangeReview } from './review';
+import { useChangeReview, useBaseOverrides } from './review';
 import { useConfigEdits } from './edits';
-import { flattenObject } from '@/utils';
+import { flattenObject, createBaseLayers } from '@/utils';
 import { useConfigSave } from './save';
 
 vi.mock('@/server', () => ({ applyConfigChangesFn: vi.fn(), resetBaseConfigFn: vi.fn() }));
@@ -89,7 +90,7 @@ function renderPage(
 }
 
 /** The review's rows, entry rows included, in order. */
-function reviewRows(review: t.ChangeReviewState): t.ReviewRow[] {
+function reviewRows(review: Pick<t.ChangeReviewState, 'model'>): t.ReviewRow[] {
   return review.model.tabs.flatMap((tab) =>
     tab.sections.flatMap((section) => [
       ...section.rows,
@@ -645,5 +646,394 @@ describe('saving against the loaded revision (changesBatch)', () => {
     expect(result.current.review.open).toBe(false);
     expect(result.current.edits.editedValues).toEqual({});
     expect(applyMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('hides and removals by key (keyedTombstones)', () => {
+  const keyed = createServerContract({
+    changesBatch: true,
+    expectedRevision: true,
+    keyedTombstones: true,
+  });
+  const gateway = {
+    name: 'Gateway',
+    apiKey: '${GW_KEY}',
+    baseURL: 'https://gw',
+    models,
+    headers: { 'X-Team': 'blue' },
+  };
+  const withSpec: t.ConfigRecord = {
+    endpoints: { custom: [moonshot, gateway] },
+    modelSpecs: {
+      list: [{ name: 'gw-spec', label: 'GW Spec', preset: { endpoint: 'Gateway', model: 'm' } }],
+    },
+  };
+
+  it('lists a hidden endpoint as one entry row, with the model specs it hides and what it deletes', () => {
+    const stored = {
+      endpoints: { custom: [{ name: 'Gateway', titleModel: 'm', apiKeyPreview: 'sk-...9' }] },
+    };
+    const config = {
+      ...withSpec,
+      endpoints: { custom: [moonshot, { ...gateway, titleModel: 'm' }] },
+    };
+    const { result } = renderPage(config, stored, withSpec, keyed);
+    act(() => result.current.edits.handleHideField('endpoints.custom["Gateway"]'));
+    const rows = reviewRows(result.current.review);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].noun).toBeDefined();
+    expect(rows[0].item).toMatchObject({
+      kind: 'hidden',
+      path: 'endpoints.custom.Gateway',
+      entryIdentity: 'Gateway',
+      sourcePath: 'endpoints.custom["Gateway"]',
+      hiddenUses: { specs: ['GW Spec'], addedEndpoints: 'none', allowedProviders: 'none' },
+      warnings: ['hideDeletesOwn'],
+    });
+    expect(rows[0].item.dropped?.map((part) => [part.path, part.secret])).toEqual([
+      ['endpoints.custom.1.titleModel', undefined],
+      ['endpoints.custom.1.apiKey', true],
+    ]);
+    act(() => result.current.review.revertRow(rows[0]));
+    expect(result.current.edits.visibilityEdits).toEqual({});
+  });
+
+  it('says an allow-list naming only the endpoints the save hides allows none', () => {
+    const config: t.ConfigRecord = {
+      ...withSpec,
+      endpoints: {
+        custom: [moonshot, gateway],
+        agents: { allowedProviders: ['Gateway', 'Moonshot'] },
+      },
+    };
+    const { result } = renderPage(config, {}, config, keyed);
+    act(() => result.current.edits.handleHideField('endpoints.custom["Gateway"]'));
+    const usesOf = () => reviewRows(result.current.review).map((row) => row.item.hiddenUses);
+    expect(usesOf()).toEqual([expect.objectContaining({ allowedProviders: 'dropped' })]);
+    act(() => result.current.edits.handleHideField('endpoints.custom["Moonshot"]'));
+    expect(usesOf()).toEqual([
+      expect.objectContaining({ allowedProviders: 'only' }),
+      expect.objectContaining({ allowedProviders: 'only' }),
+    ]);
+  });
+
+  describe('a header the target also sets itself', () => {
+    const own = { endpoints: { custom: [{ name: 'Gateway', headers: { 'X-Team': 'red' } }] } };
+    const config: t.ConfigRecord = {
+      ...withSpec,
+      endpoints: { custom: [moonshot, { ...gateway, headers: { 'X-Team': 'red' } }] },
+    };
+    const header = 'endpoints.custom["Gateway"].headers.X-Team';
+
+    it('removing it by key reads as its own value removed, which the removal deletes', () => {
+      const { result } = renderPage(config, own, withSpec, keyed);
+      act(() => result.current.edits.handleHideField(header));
+      expect(reviewRows(result.current.review).map((row) => row.item)).toEqual([
+        expect.objectContaining({
+          kind: 'hidden',
+          path: 'endpoints.custom.1.headers.X-Team',
+          before: 'red',
+          warnings: ['deletesOwnValue'],
+          revertTarget: { value: 'blue', source: 'yaml' },
+        }),
+      ]);
+    });
+
+    it('keeps the row as it was where the server stores keyed tombstones without effect', () => {
+      const { result } = renderPage(config, own, withSpec, BUNDLED_CONFIG_CONTRACT);
+      act(() => result.current.edits.handleUnhideField(header));
+      const [row] = reviewRows(result.current.review);
+      expect(row.item).toMatchObject({
+        kind: 'unhidden',
+        path: 'endpoints.custom.1.headers.X-Team',
+      });
+      expect(row.item.before).toBeUndefined();
+      expect(row.item.warnings).toBeUndefined();
+    });
+
+    it('showing it again with another value the same save writes reads with that value, in one row', () => {
+      const { result } = renderPage(config, own, withSpec, keyed);
+      act(() => {
+        result.current.edits.handleUnhideField(header);
+        result.current.edits.handleFieldChange('endpoints.custom.1', {
+          ...gateway,
+          headers: { 'X-Team': 'green' },
+        });
+      });
+      const [row, ...rest] = reviewRows(result.current.review);
+      expect(rest).toEqual([]);
+      expect(row.item).toMatchObject({
+        kind: 'unhidden',
+        path: 'endpoints.custom.1.headers.X-Team',
+        before: 'red',
+        after: 'green',
+      });
+      expect(row.item.warnings).toBeUndefined();
+    });
+
+    it('showing it again with the value the layer beneath sets still reads as inherited', () => {
+      const { result } = renderPage(config, own, withSpec, keyed);
+      act(() => {
+        result.current.edits.handleUnhideField(header);
+        result.current.edits.handleFieldChange('endpoints.custom.1', gateway);
+      });
+      expect(reviewRows(result.current.review).map((row) => row.item)).toEqual([
+        expect.objectContaining({
+          kind: 'unhidden',
+          before: 'red',
+          after: undefined,
+          revertTarget: { value: 'blue', source: 'yaml' },
+          warnings: ['deletesOwnValue'],
+        }),
+      ]);
+    });
+
+    it('showing the inherited one again reads as its own value replaced, in one row', () => {
+      const { result } = renderPage(config, own, withSpec, keyed);
+      act(() => {
+        result.current.edits.handleUnhideField(header);
+        result.current.edits.handleFieldChange('endpoints.custom.1', { ...gateway, headers: {} });
+      });
+      expect(reviewRows(result.current.review).map((row) => row.item)).toEqual([
+        expect.objectContaining({
+          kind: 'unhidden',
+          path: 'endpoints.custom.1.headers.X-Team',
+          before: 'red',
+          warnings: ['deletesOwnValue'],
+        }),
+      ]);
+    });
+  });
+
+  it('restoring a removed header and adding it again with another value reads with that value', () => {
+    const removed: t.ConfigRecord = {
+      ...withSpec,
+      endpoints: { custom: [moonshot, { ...gateway, headers: {} }] },
+    };
+    const { result } = renderPage(removed, {}, withSpec, keyed);
+    act(() => {
+      result.current.edits.handleUnhideField('endpoints.custom["Gateway"].headers.X-Team');
+      result.current.edits.handleFieldChange('endpoints.custom.1', {
+        ...gateway,
+        headers: { 'X-Team': 'green' },
+      });
+    });
+    const rows = reviewRows(result.current.review);
+    expect(rows.map((row) => row.item)).toEqual([
+      expect.objectContaining({
+        kind: 'unhidden',
+        path: 'endpoints.custom.1.headers.X-Team',
+        before: undefined,
+        after: 'green',
+      }),
+    ]);
+    render(<ReviewList tabs={result.current.review.model.tabs} isScope={false} />);
+    expect(screen.getByText('green')).toBeTruthy();
+    expect(screen.queryByText(/inherits/)).toBeNull();
+  });
+
+  describe('an object-valued additional parameter', () => {
+    const provider = 'endpoints.custom["Gateway"].addParams.provider';
+    const params = { provider: { order: ['a', 'b'] }, plain: 'x' };
+    const yamlParams: t.ConfigRecord = {
+      endpoints: { custom: [moonshot, { ...gateway, addParams: params }] },
+    };
+    const gatewayWith = (addParams: t.ConfigRecord): t.ConfigRecord => ({ ...gateway, addParams });
+    const withParams = (addParams: t.ConfigRecord): t.ConfigRecord => ({
+      endpoints: { custom: [moonshot, gatewayWith(addParams)] },
+    });
+    const items = (review: t.ChangeReviewState) => reviewRows(review).map((row) => row.item);
+
+    it('restored and added again with another object reads with that object, in one row', () => {
+      const { result } = renderPage(withParams({ plain: 'x' }), {}, yamlParams, keyed);
+      act(() => {
+        result.current.edits.handleUnhideField(provider);
+        result.current.edits.handleFieldChange(
+          'endpoints.custom.1',
+          gatewayWith({ plain: 'x', provider: { order: ['c'] } }),
+        );
+      });
+      const [row, ...rest] = items(result.current.review);
+      expect(rest).toEqual([]);
+      expect(row).toMatchObject({
+        kind: 'unhidden',
+        path: 'endpoints.custom.1.addParams.provider',
+        before: undefined,
+        after: { order: ['c'] },
+      });
+      expect(row.warnings).toBeUndefined();
+      render(<ReviewList tabs={result.current.review.model.tabs} isScope={false} />);
+      expect(screen.getByText('{order: [c]}')).toBeTruthy();
+      expect(screen.queryByText(/inherits/)).toBeNull();
+    });
+
+    it('restored and added again as the layer beneath sets it still reads as inherited', () => {
+      const { result } = renderPage(withParams({ plain: 'x' }), {}, yamlParams, keyed);
+      act(() => {
+        result.current.edits.handleUnhideField(provider);
+        result.current.edits.handleFieldChange('endpoints.custom.1', gatewayWith(params));
+      });
+      expect(items(result.current.review)).toEqual([
+        expect.objectContaining({
+          kind: 'unhidden',
+          after: undefined,
+          revertTarget: { value: { order: ['a', 'b'] }, source: 'yaml' },
+        }),
+      ]);
+    });
+
+    it('shown again with one leaf of its own object changed reads with the whole object', () => {
+      const ownProvider = { order: ['a'], sort: 'price' };
+      const own = {
+        endpoints: { custom: [{ name: 'Gateway', addParams: { provider: ownProvider } }] },
+      };
+      const config = withParams({ plain: 'x', provider: ownProvider });
+      const { result } = renderPage(config, own, yamlParams, keyed);
+      act(() => {
+        result.current.edits.handleUnhideField(provider);
+        result.current.edits.handleFieldChange(
+          'endpoints.custom.1',
+          gatewayWith({ plain: 'x', provider: { ...ownProvider, order: ['c'] } }),
+        );
+      });
+      const [row, ...rest] = items(result.current.review);
+      expect(rest).toEqual([]);
+      expect(row).toMatchObject({
+        kind: 'unhidden',
+        before: ownProvider,
+        after: { order: ['c'], sort: 'price' },
+      });
+      expect(row.warnings).toBeUndefined();
+    });
+
+    it('hidden with an edit of its own object pending reads as one hide row', () => {
+      const own = {
+        endpoints: { custom: [{ name: 'Gateway', addParams: { provider: { order: ['z'] } } }] },
+      };
+      const config = withParams({ plain: 'x', provider: { order: ['z'] } });
+      const { result } = renderPage(config, own, yamlParams, keyed);
+      act(() => {
+        result.current.edits.handleFieldChange(
+          'endpoints.custom.1',
+          gatewayWith({ plain: 'x', provider: { order: ['q'] } }),
+        );
+        result.current.edits.handleHideField(provider);
+      });
+      expect(items(result.current.review)).toEqual([
+        expect.objectContaining({
+          kind: 'hidden',
+          path: 'endpoints.custom.1.addParams.provider',
+          before: { order: ['z'] },
+          warnings: ['deletesOwnValue'],
+        }),
+      ]);
+    });
+  });
+
+  it('lists a removed inherited header as a field row of its endpoint, at its place in the list', () => {
+    const { result } = renderPage(withSpec, {}, withSpec, keyed);
+    act(() => result.current.edits.handleHideField('endpoints.custom["Gateway"].headers.X-Team'));
+    const rows = reviewRows(result.current.review);
+    expect(rows.map((row) => row.item)).toEqual([
+      expect.objectContaining({
+        kind: 'hidden',
+        path: 'endpoints.custom.1.headers.X-Team',
+        entryPath: 'endpoints.custom.1',
+        entryIdentity: 'Gateway',
+        revertTarget: { value: 'blue', source: 'yaml' },
+      }),
+    ]);
+  });
+});
+
+describe('"Revert all to librechat.yaml" with removals by key (keyedTombstones)', () => {
+  const gateway = {
+    name: 'Gateway',
+    apiKey: '${GW_KEY}',
+    baseURL: 'https://gw',
+    models,
+    headers: { 'X-Team': 'blue', 'X-Org': 'acme' },
+  };
+  const yamlConfig: t.ConfigRecord = { endpoints: { custom: [moonshot, gateway] } };
+  const removal = 'endpoints.custom["Gateway"].headers.X-Team';
+
+  function renderOverrides(
+    dbOverrides: t.ConfigRecord,
+    dbTombstones: string[],
+    contract: t.ConfigContract,
+  ) {
+    const config: t.ConfigRecord = {
+      endpoints: { custom: [moonshot, { ...gateway, headers: { 'X-Org': 'acme' } }] },
+    };
+    const data: t.BaseConfigData = {
+      config,
+      yamlConfig,
+      yamlPaths: Object.keys(flattenObject(yamlConfig)),
+      dbOverrides,
+      dbTombstones,
+      schemaDefaults: {},
+    };
+    const layers = {
+      configValues: config,
+      dbOverrides,
+      yamlConfig,
+      yamlMcpServers: {},
+      schemaDefaults: {},
+      schemaPathSet,
+      overridePaths: new Set(Object.keys(flattenObject(dbOverrides))),
+      valueLayers: createBaseLayers(
+        data,
+        schemaPathSet,
+        undefined,
+        contract.features.keyedTombstones,
+      ),
+      baseActiveConfigValues: config,
+    };
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ConfigContractContext.Provider value={contract}>{children}</ConfigContractContext.Provider>
+    );
+    return renderHook(() => useBaseOverrides({ schemaTree: tree, layers }), { wrapper });
+  }
+  const keyed = createServerContract({ keyedTombstones: true });
+
+  it('counts and lists a removal Base stores alone, which reverting takes back', () => {
+    const { result } = renderOverrides({}, [removal], keyed);
+    expect(result.current.count).toBe(1);
+    expect(reviewRows(result.current).map((row) => row.item)).toEqual([
+      expect.objectContaining({
+        kind: 'unhidden',
+        path: 'endpoints.custom.1.headers.X-Team',
+        entryIdentity: 'Gateway',
+        revertTarget: { value: 'blue', source: 'yaml' },
+      }),
+    ]);
+  });
+
+  it('lists a removal in the group of its endpoint, counting the endpoint once', () => {
+    const own = { endpoints: { custom: [{ name: 'Gateway', titleModel: 'm' }] } };
+    const { result } = renderOverrides(own, [removal], keyed);
+    expect(result.current.count).toBe(1);
+    const groups = result.current.model.tabs.flatMap((tab) =>
+      tab.sections.flatMap((section) => section.entries),
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0].rows.map((row) => [row.item.kind, row.item.path])).toEqual([
+      ['reverted', 'endpoints.custom.0.titleModel'],
+      ['unhidden', 'endpoints.custom.0.headers.X-Team'],
+    ]);
+  });
+
+  it('leaves a removal Base sets its own value over to the row of that value', () => {
+    const own = { endpoints: { custom: [{ name: 'Gateway', headers: { 'X-Team': 'red' } }] } };
+    const { result } = renderOverrides(own, [removal], keyed);
+    expect(reviewRows(result.current).map((row) => [row.item.kind, row.item.path])).toEqual([
+      ['reverted', 'endpoints.custom.0.headers.X-Team'],
+    ]);
+  });
+
+  it('lists nothing for a removal the server stores without effect', () => {
+    const { result } = renderOverrides({}, [removal], BUNDLED_CONFIG_CONTRACT);
+    expect(result.current.count).toBe(0);
+    expect(reviewRows(result.current)).toEqual([]);
   });
 });

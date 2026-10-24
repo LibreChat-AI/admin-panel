@@ -36,6 +36,8 @@ export const CONFIG_FEATURE_FLAGS: readonly t.ConfigFeatureFlag[] = [
   'yamlSecretPreview',
   'envAllowlist',
   'secretRebinding',
+  'keyedTombstones',
+  'renameHints',
   'writeReport',
   'issueParams',
   'resolvedApi',
@@ -54,6 +56,7 @@ export const BUNDLED_CONFIG_LIMITS: t.ConfigLimits = {
   maxChangeOps: 0,
   overrideCacheTtlMs: 60_000,
   catalogModelsTtlMs: 120_000,
+  maxEntryKeyLength: 256,
 };
 
 /** `expectedRevision` that makes a write apply only when the principal has no document. */
@@ -67,6 +70,21 @@ export const MCP_API_KEY_MISSING_CODE = 'MCP_API_KEY_MISSING';
 
 /** Pre-flight: a renamed MCP server uses a secret its saved name stores, which the save can't move. */
 export const MCP_SECRET_NOT_CARRIED_CODE = 'MCP_SECRET_NOT_CARRIED';
+
+/** The admin API refused a `renames` hint of a write; its `reason` says why. */
+export const RENAME_INVALID_CODE = 'CONFIG_RENAME_INVALID';
+
+/** The `reason`s of a refused `renames` hint the panel words (`com_config_issue_rename_<reason>`). */
+export const RENAME_REASON_CODES: ReadonlySet<string> = new Set([
+  'inherited_entry',
+  'source_not_found',
+  'target_exists',
+  'target_not_written',
+  'source_still_written',
+  'duplicate_source',
+  'duplicate_target',
+  'invalid_name',
+]);
 
 /** A save refused before anything is written: one section holds more changes than one batch takes (`maxChangeOps`). */
 export const TOO_MANY_CHANGES_CODE = 'TOO_MANY_CHANGES';

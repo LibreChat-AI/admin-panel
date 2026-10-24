@@ -148,3 +148,10 @@ export const BLANK_ENDPOINT_TEMPLATE: t.EndpointTemplate = {
   descriptionKey: 'com_config_ce_template_blank',
   entry: {},
 };
+
+/**
+ * Records of a custom endpoint whose inherited keys a target can remove one
+ * by one (`keyedTombstones`): its request headers and added body parameters
+ * (owner decision on removing inherited values: keys of record maps only).
+ */
+export const INHERITED_KEY_RECORDS: ReadonlySet<string> = new Set(['headers', 'addParams']);

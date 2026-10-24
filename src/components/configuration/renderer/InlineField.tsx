@@ -17,7 +17,7 @@ import { EntryFieldChipsContext } from '@/contexts/EntryFieldChipsContext';
 import { ConfiguredOnlyContext } from '@/contexts/ConfiguredOnlyContext';
 import { fieldMetaFor, fieldVariants, resolveControl } from './kinds';
 import { RevealTargetContext } from '@/contexts/RevealTargetContext';
-import { useFieldState, useLocalize, useValuesScope } from '@/hooks';
+import { useFieldState, useLocalize, useValuesScope, useRecordKeyRemoval } from '@/hooks';
 import { RecordObjectField } from '../fields/RecordObjectField';
 import { RowFilterContext } from '@/contexts/RowFilterContext';
 import { ArrayObjectField } from '../fields/ArrayObjectField';
@@ -495,6 +495,8 @@ function InlineFieldBody({
   };
   /** Keys of a record the layer beneath sets: their values can change, but they cannot be removed. */
   const lockedKeys = lowerRecordKeys(state.isOverride ? state.revertTarget?.value : lower?.value);
+  /** …except one by one, by key, where the entry's editor offers it (`keyedTombstones`). */
+  const keyRemoval = useRecordKeyRemoval(dataPath);
   const renderEntryChips = useContext(EntryFieldChipsContext);
   const entryChips = renderEntryChips?.({
     path: dataPath,
@@ -700,6 +702,7 @@ function InlineFieldBody({
           onClear={clearField}
           fieldDefault={ownsStoredSecret ? { ...fieldDefault, hasOwnValue: true } : fieldDefault}
           lockedKeys={lockedKeys}
+          keyRemoval={keyRemoval}
           disabled={disabled}
           required={required}
           secretPreview={secretPreview != null && stringValue === '' ? secretPreview : null}

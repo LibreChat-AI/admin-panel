@@ -124,6 +124,40 @@ describe('mergeScopeLayer', () => {
   });
 });
 
+describe('mergeScopeLayer — keyed tombstones', () => {
+  const base: t.ConfigRecord = {
+    endpoints: {
+      custom: [
+        { name: 'Ollama', baseURL: 'http://ollama' },
+        { name: 'Gateway', baseURL: 'https://gw', headers: { 'X-Team': 'blue', 'X-Org': 'acme' } },
+      ],
+    },
+  };
+  const tombstones = [
+    'endpoints.custom["ollama"]',
+    'endpoints.custom["Gateway"].headers.X-Team',
+    'endpoints.custom["Gateway"].headers.X-Org',
+  ];
+  const overrides: t.ConfigRecord = {
+    endpoints: { custom: [{ name: 'Gateway', headers: { 'X-Org': 'own' } }] },
+  };
+
+  it('hides an entry, or a key inside it, of Base before the overrides merge (keyedTombstones)', () => {
+    const merged = mergeScopeLayer(base, overrides, tombstones, undefined, true);
+    expect(getValueAtPath(merged, 'endpoints.custom')).toEqual([
+      { name: 'Gateway', baseURL: 'https://gw', headers: { 'X-Org': 'own' } },
+    ]);
+  });
+
+  it('leaves them alone on a server that stores them without effect', () => {
+    const merged = mergeScopeLayer(base, overrides, tombstones);
+    expect(getValueAtPath(merged, 'endpoints.custom')).toEqual([
+      { name: 'Ollama', baseURL: 'http://ollama' },
+      { name: 'Gateway', baseURL: 'https://gw', headers: { 'X-Team': 'blue', 'X-Org': 'own' } },
+    ]);
+  });
+});
+
 describe('removeConfigPath / setConfigPath', () => {
   it('removes a nested key without touching the original', () => {
     const tree = { a: { b: 1, c: 2 } };
@@ -306,6 +340,27 @@ describe('estimateConfigPreview', () => {
     });
     expect(preview.resolved).toBe(base.config);
     expect(preview.layers[1].isActive).toBe(false);
+  });
+
+  it('leaves out the specs of an endpoint the profile hides, where the server applies keyed tombstones', () => {
+    const foundry = { name: 'Azure Foundry', baseURL: 'https://foundry' };
+    const spec = { name: 'gpt', preset: { endpoint: 'Azure Foundry', model: 'gpt-5' } };
+    const withSpec: t.BaseConfigData = {
+      ...base,
+      config: { ...base.config, endpoints: { custom: [foundry] }, modelSpecs: { list: [spec] } },
+      yamlConfig: { endpoints: { custom: [foundry] }, modelSpecs: { list: [spec] } },
+    };
+    const hides: t.ResolvedConfigData = {
+      ...own,
+      overrides: {},
+      tombstones: ['endpoints.custom["Azure Foundry"]'],
+    };
+    const input = { base: withSpec, scope: profile, own: hides };
+    const keyed = estimateConfigPreview({ ...input, keyedTombstones: true });
+    expect(getValueAtPath(keyed.resolved, 'endpoints.custom')).toEqual([]);
+    expect(keyed.resolved.modelSpecs).toBeUndefined();
+    const older = estimateConfigPreview(input);
+    expect(getValueAtPath(older.resolved, 'modelSpecs.list')).toEqual([spec]);
   });
 
   it('lists no Base document when there is none', () => {

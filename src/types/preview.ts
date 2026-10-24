@@ -72,6 +72,8 @@ export interface PreviewEstimateInput {
   /** That profile's own overrides and tombstones. */
   own?: ResolvedConfigData;
   rules?: ConfigWriteRules;
+  /** The server applies tombstones that name an entry by its key (`keyedTombstones`). */
+  keyedTombstones?: boolean;
 }
 
 /** `getConfigPreviewFn`: the preview, or why the server refused it. */

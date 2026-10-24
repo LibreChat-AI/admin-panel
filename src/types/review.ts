@@ -9,7 +9,7 @@ import type {
 } from './config';
 import type { LocalizeFn, ConfigLayers, ConfigSaveState, ConfigEditsState } from './hooks';
 import type { ImportTab, SaveEntry, TargetMode, SkippedChange } from './config-ui';
-import type { ChangeSummaryItem, ChangeWarning, EntryKeyMove } from './changes';
+import type { ChangeSummaryItem, ChangeWarning, EntryKeyMove, VisibilityEdit } from './changes';
 import type { RevertTarget } from './values';
 import type { ConfigScope } from './scope';
 
@@ -305,12 +305,39 @@ export interface OverrideNoteOptions {
   sendsKeys: boolean;
   /** The configuration before the save, where a name already in use is no leftover. */
   before: ConfigValue;
+  /** Profiles hide custom endpoints, and remove values inside them, by key (`keyedTombstones`). */
+  keyedTombstones?: boolean;
+}
+
+/** The layers a pending hide or unhide by key (`endpoints.custom["Name"]…`) is described from in the review. */
+export interface KeyedVisibilityLayers {
+  /** The layer beneath the target: librechat.yaml for Base, Base for a profile. */
+  lower: ConfigValue;
+  /** The target's own stored overrides. */
+  own: ConfigValue;
+  /** The saved config the page shows. */
+  baseline: ConfigValue;
+  isScope: boolean;
+  /** The target's tombstones as stored. */
+  tombstones: Iterable<string>;
+  /** The pending hides and unhides. */
+  visibility: Readonly<Record<string, VisibilityEdit>>;
+  /** LibreChat applies keyed tombstones: a hide or unhide inside an entry deletes the target's own value there. */
+  keyedTombstones: boolean;
 }
 
 /** What a save's rows in Base are checked against for those profiles: the options, and the entries rows write. */
 export interface OverrideNoteContext extends OverrideNoteOptions {
   /** The entries a row writes under their name once the save is applied (`collection\u0000name`). */
   written: ReadonlySet<string>;
+}
+
+/** Props of a part of a review row that reads one change. */
+export type ChangeItemProps = Pick<ReviewRow, 'item'>;
+
+/** `ChangeItemProps` worded for the target: Base, or a profile (`isScope`). */
+export interface ScopedChangeItemProps extends ChangeItemProps {
+  isScope: boolean;
 }
 
 /** Props of a detail under a review row: a leaf of an added entry, or a part the change deletes with it. */
@@ -335,6 +362,16 @@ export type ImportSkipReason =
 export interface WithheldSecret {
   path: string;
   reason: 'hidden' | 'masked';
+}
+
+/**
+ * What an import leaves out of the merged lists it writes: the secrets it
+ * never writes, and the paths of the imported entries the target hides
+ * whole (`keyedTombstones`), since writing one would show it again.
+ */
+export interface ImportLeftOut {
+  withheld: WithheldSecret[];
+  hidden: string[];
 }
 
 /** An imported leaf that will not be written, and why (WS7). */
@@ -382,6 +419,8 @@ export interface ImportPreviewRow {
   unknown: boolean;
   /** Writing it replaces a whole list the target inherits (model specs). */
   replacesList?: boolean;
+  /** What the endpoints the target hides take from the imported value for its members, worded (`keyedTombstones`). */
+  hiddenNotes?: string[];
 }
 
 /** Imported leaves of one tab section (WS7). */

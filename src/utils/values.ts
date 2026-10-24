@@ -171,6 +171,8 @@ interface PathReader {
    * though their entry of the same name still serves as revert metadata.
    */
   replaces: (root: t.ConfigValue) => boolean;
+  /** Whether the path is inside an entry of a keyed list (not the entry itself). */
+  inEntry: boolean;
 }
 
 /**
@@ -226,6 +228,7 @@ function createReader(path: string, displayRoot: t.ConfigValue): PathReader {
         index.paths.has(path) ||
         (pathIndexOverlaps(index, path) && getValueAtPath(root, path) !== undefined),
       replaces: () => false,
+      inEntry: false,
     };
   }
   /** A redacted secret is returned as its preview companion (`apiKey` → `apiKeyPreview`). */
@@ -240,7 +243,26 @@ function createReader(path: string, displayRoot: t.ConfigValue): PathReader {
       (preview != null && keyedValue(root, preview) !== undefined),
     replaces: (root) =>
       location.replaced && Array.isArray(getValueAtPath(root, location.arrayPath)),
+    inEntry: location.rest !== '',
   };
+}
+
+/**
+ * `target`, what the layer beneath (`lower`) gives a path, as the edit
+ * target's own values merge over it: inside an entry the target removes
+ * values of by key (`ValueLayers.beneath`), without them, since removing
+ * the target's own value there leaves its removals in place. The entry
+ * itself keeps them: removing the override of a whole entry takes them back.
+ */
+function beneathTarget(
+  target: t.RevertTarget,
+  reader: PathReader,
+  layers: t.ValueLayers,
+  lower: t.ConfigValue,
+): t.RevertTarget {
+  if (!layers.beneath || !reader.inEntry) return target;
+  const value = reader.valueIn(layers.beneath);
+  return sameValue(value, reader.valueIn(lower)) ? target : { ...target, value };
 }
 
 /** What reaches users once a layer replaces the whole list: only the schema default. */
@@ -339,7 +361,10 @@ function deriveBaseModeState(
 ): t.FieldState {
   const reader = createReader(path, data.configValues ?? layers.effective);
   const base = readBase(path, layers, reader);
-  const revertTarget = base.isOverride || base.isHidden ? base.lower : undefined;
+  const revertTarget =
+    base.isOverride || base.isHidden
+      ? beneathTarget(base.lower, reader, layers, layers.yamlEffective)
+      : undefined;
   const revertValue = revertTarget ? revertTarget.value : base.effective;
   const pending = readPending(path, data.editedValues, revertValue);
   /** D5: LibreChat reads this section only from librechat.yaml, so a stored override has no effect. */
@@ -388,7 +413,12 @@ function deriveScopeModeState(
 ): t.FieldState {
   const reader = createReader(path, data.configValues ?? layers.effective);
   const base = readBase(path, layers, reader);
-  const inherited: t.RevertTarget = { value: base.effective, source: base.source };
+  const inherited = beneathTarget(
+    { value: base.effective, source: base.source },
+    reader,
+    layers,
+    layers.base,
+  );
   const isOverride = reader.sets(scope.overrides, scope.overridePaths);
   const visibility = data.visibilityEdits?.[path];
   const isHidden = visibility
@@ -512,7 +542,17 @@ export function deriveFieldValue(
 export function revertTargetAt(path: string, layers: t.ValueLayers): t.RevertTarget | undefined {
   const reader = createReader(path, layers.effective);
   const target: t.RevertTarget = layers.scope
-    ? { value: readBase(path, layers, reader).effective, source: 'inherited' }
-    : readLowerLayers(path, layers, reader, []).lower;
+    ? beneathTarget(
+        { value: readBase(path, layers, reader).effective, source: 'inherited' },
+        reader,
+        layers,
+        layers.base,
+      )
+    : beneathTarget(
+        readLowerLayers(path, layers, reader, []).lower,
+        reader,
+        layers,
+        layers.yamlEffective,
+      );
   return target.value === undefined ? undefined : target;
 }

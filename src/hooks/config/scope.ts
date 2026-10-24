@@ -156,7 +156,7 @@ export function useFieldProfiles(path?: string): t.ConfigScope[] | undefined {
  * override takes. None in a profile or outside the configuration page.
  */
 export function useEntryOverrideNotes(collection: string): t.EntryOverrideNotes {
-  const { secretRebinding } = useConfigFeatures();
+  const { secretRebinding, keyedTombstones } = useConfigFeatures();
   const context = useContext(ScopeActionsContext);
   const scopes = context && !context.editingScope ? context.index.scopes : undefined;
   return useMemo((): t.EntryOverrideNotes => {
@@ -164,7 +164,9 @@ export function useEntryOverrideNotes(collection: string): t.EntryOverrideNotes 
       change: t.EntryOverrideChange,
       affected: (found: t.EntryOverride[]) => t.EntryOverride[] = (found) => found,
     ): t.EntryOverrideNote[] => {
-      const found = scopes ? findEntryOverrides(scopes, collection, change.name) : [];
+      const found = scopes
+        ? findEntryOverrides(scopes, collection, change.name, keyedTombstones)
+        : [];
       const overrides = found.length > 0 ? affected(found) : found;
       return overrides.length > 0 ? [{ change, overrides }] : [];
     };
@@ -179,7 +181,7 @@ export function useEntryOverrideNotes(collection: string): t.EntryOverrideNotes 
           : [],
       took: (name) => describe({ kind: 'took', name, sendsKeys: !secretRebinding }),
     };
-  }, [scopes, collection, secretRebinding]);
+  }, [scopes, collection, secretRebinding, keyedTombstones]);
 }
 
 /**

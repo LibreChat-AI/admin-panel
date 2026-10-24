@@ -5,6 +5,7 @@ import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
 import type * as t from '@/types';
 import {
   toBatchOps,
+  orderTombstones,
   verifyWrite,
   countSectionChanges,
   findOversizedSections,
@@ -21,6 +22,9 @@ import {
   planConfigChanges,
   describeIssueCode,
   pathIndexOverlaps,
+  parseKeyedPath,
+  getKeyedValue,
+  isKeyedAtOrUnder,
   getKeyedCollection,
   getWriteSkipReason,
   classifyReportedIssue,
@@ -30,7 +34,9 @@ import {
 import {
   getWriteRules,
   getConfigSection,
+  RENAME_INVALID_CODE,
   MERGED_BACK_REASONS,
+  RENAME_REASON_CODES,
   VERSION_CONFLICT_CODE,
   TERMS_NOT_ACCEPTED_CODE,
   TERMS_NOT_ACCEPTED_ISSUE,
@@ -227,9 +233,10 @@ async function failureIssues(
   path: string,
   features: t.ConfigFeatures,
   batch: t.SaveEntry[] = [],
+  hints: readonly t.RenameHint[] = [],
 ): Promise<t.ConfigIssue[]> {
   const body = await readJson<t.PatchFieldsResponse & { section?: string }>(response);
-  return describeFailure(body, response.status, path, features, batch);
+  return describeFailure(body, response.status, path, features, batch, hints);
 }
 
 /** The MCP secret each re-entry code names, inside its server. */
@@ -275,6 +282,29 @@ function reentryIssues(body: t.PatchFieldsResponse, batch: t.SaveEntry[]): t.Con
   }));
 }
 
+/**
+ * A `renames` hint the admin API refused (`CONFIG_RENAME_INVALID`), shown
+ * on the name of each entry the refused write renamed, with why (`reason`:
+ * `duplicate_source`, `target_exists`, …). The reply names no hint, so each
+ * one the write carried gets it.
+ */
+function renameIssues(
+  body: t.PatchFieldsResponse,
+  hints: readonly t.RenameHint[],
+): t.ConfigIssue[] {
+  if (body.code !== RENAME_INVALID_CODE) return [];
+  const reason = typeof body.reason === 'string' ? body.reason : 'unknown';
+  const code = RENAME_REASON_CODES.has(reason) ? `rename_${reason}` : 'rename_invalid';
+  return hints.map(({ path, previousName, name }) => {
+    const params = { name, previous: previousName };
+    const message = describeIssueCode(code, params, body.error ?? 'Invalid rename hint');
+    if (getKeyedCollection(path)) {
+      return { path, code, message, params, entryIdentity: name, entryPath: 'name' };
+    }
+    return { path: `${path}.${name}`, code, message, params };
+  });
+}
+
 /** A refused write as issues: the values it rejected, else the refusal itself, located at `path`. */
 function describeFailure(
   body: t.PatchFieldsResponse & { section?: string },
@@ -282,9 +312,12 @@ function describeFailure(
   path: string,
   features: t.ConfigFeatures,
   batch: t.SaveEntry[],
+  hints: readonly t.RenameHint[] = [],
 ): t.ConfigIssue[] {
   const reentry = reentryIssues(body, batch);
   if (reentry && reentry.length > 0) return reentry;
+  const rename = renameIssues(body, hints);
+  if (rename.length > 0) return rename;
   if (Array.isArray(body.issues) && body.issues.length > 0) {
     return body.issues.map((issue) => attributeBackendIssue(issue, batch, features));
   }
@@ -337,13 +370,17 @@ function fileWriteReport(
 
 /**
  * The `renames` hints for a PATCH of `batch`: those whose entry it writes
- * (the admin API refuses a hint for an entry the PATCH leaves out).
+ * (the admin API refuses a hint for an entry the PATCH leaves out). A
+ * custom endpoint is written with its list (`endpoints.custom`).
  */
 function hintsFor(hints: readonly t.RenameHint[], batch: t.SaveEntry[]): t.RenameHint[] {
   return hints.filter(({ path, name }) => {
-    const target = `${path}.${name}`;
+    const target = getKeyedCollection(path) ? path : `${path}.${name}`;
     return batch.some(
-      ({ fieldPath }) => fieldPath === target || fieldPath.startsWith(`${target}.`),
+      ({ fieldPath }) =>
+        fieldPath === target ||
+        fieldPath.startsWith(`${target}.`) ||
+        target.startsWith(`${fieldPath}.`),
     );
   });
 }
@@ -372,7 +409,7 @@ async function patchFields(
       }),
     });
     if (!response.ok) {
-      outcome.failure = await failureIssues(response, batch[0].fieldPath, features, batch);
+      outcome.failure = await failureIssues(response, batch[0].fieldPath, features, batch, renames);
       return false;
     }
     const body = await readJson<t.PatchFieldsResponse>(response);
@@ -433,7 +470,9 @@ async function writeFieldOps(
 /**
  * Before `changesBatch`, writes a plan as separate field writes in a fixed
  * order: untombstones, tombstones, then every set (one PATCH per
- * `maxPatchEntries` entries), then resets. An untombstone removes everything
+ * `maxPatchEntries` entries), then resets, then the tombstones inside an
+ * entry a reset removes whole by key (`orderTombstones`), which that reset
+ * would remove too. An untombstone removes everything
  * at and under its path, so it goes first: after them, it would remove a set
  * or tombstone inside it (an MCP server shown again with its URL edited).
  * Tombstones precede sets because LibreChat validates a PATCH against the
@@ -451,11 +490,13 @@ async function executePlan(
   const outcome: WriteOutcome = { writes: [], dropped: [], reported: [] };
   const { features } = contract;
   const changed = createPathIndex(plan.changed);
+  const { early, late } = orderTombstones(plan);
   const steps = [
     () => writeFieldOps(target, 'untombstone', plan.untombstones, outcome, features, changed),
-    () => writeFieldOps(target, 'tombstone', plan.tombstones, outcome, features, changed),
+    () => writeFieldOps(target, 'tombstone', early, outcome, features, changed),
     () => patchFields(target, plan.sets, plan.renameHints, outcome, contract, changed),
     () => writeFieldOps(target, 'reset', plan.resets, outcome, features, changed),
+    () => writeFieldOps(target, 'tombstone', late, outcome, features, changed),
   ];
   try {
     for (const step of steps) {
@@ -485,12 +526,45 @@ async function restorePath(
   return response.ok;
 }
 
+/**
+ * Undoes a write by key (`endpoints.custom["Name"]`): a hide the target
+ * didn't hold is reset; the keyed tombstones it held there, which a reset
+ * or an unhide removes, are written again; and where the write removed
+ * what the target stored (a hide or reset, or an unhide of a value the
+ * target also sets), the list is written back as captured, after them,
+ * since a tombstone removes the target's own value at its path, and a write
+ * of the entry keeps the tombstones inside it. A tombstone the target held
+ * already (a removal written again after a reset) is otherwise left as it is.
+ */
+async function undoKeyedWrite(
+  target: t.WriteTargetRef,
+  write: t.AppliedWrite,
+  keyed: t.KeyedPath,
+  captured: t.WriteSnapshot,
+): Promise<boolean> {
+  const owned = getKeyedValue(captured.stored, keyed) !== undefined;
+  const held = captured.tombstones.includes(write.path);
+  if (write.kind === 'tombstone' && held && !owned) return true;
+  if (write.kind === 'tombstone' && !held) {
+    if (!(await fieldRequest(target, 'reset', write.path)).ok) return false;
+  }
+  for (const tombstone of captured.tombstones) {
+    if (!isKeyedAtOrUnder(tombstone, keyed)) continue;
+    if (!(await fieldRequest(target, 'tombstone', tombstone)).ok) return false;
+  }
+  if (write.kind === 'untombstone' && !owned) return true;
+  const list = getValueAtPath(captured.stored, keyed.collection.path);
+  return list === undefined || restorePath(target, keyed.collection.path, list);
+}
+
 async function undoWrite(
   target: t.WriteTargetRef,
   write: t.AppliedWrite,
-  captured: t.ConfigRecord,
+  captured: t.WriteSnapshot,
 ): Promise<boolean> {
-  const previous = getValueAtPath(captured, write.path);
+  const keyed = parseKeyedPath(write.path);
+  if (keyed) return undoKeyedWrite(target, write, keyed, captured);
+  const previous = getValueAtPath(captured.stored, write.path);
   if (write.kind === 'untombstone') return (await fieldRequest(target, 'tombstone', write.path)).ok;
   if (write.kind === 'reset' && previous === undefined) return true;
   if (write.kind === 'tombstone') {
@@ -502,14 +576,15 @@ async function undoWrite(
 }
 
 /**
- * Rolls written changes back to the overrides captured before the write, in
- * reverse order. Best effort: a stored secret cannot be restored, since the
- * admin API never returns it (a secret the failed batch wrote stays).
+ * Rolls written changes back to the overrides and tombstones captured before
+ * the write, in reverse order. Best effort: a stored secret cannot be
+ * restored, since the admin API never returns it (a secret the failed batch
+ * wrote stays).
  */
 async function compensate(
   target: t.WriteTargetRef,
   writes: t.AppliedWrite[],
-  captured: t.ConfigRecord,
+  captured: t.WriteSnapshot,
 ): Promise<boolean> {
   let restored = true;
   for (const write of [...writes].reverse()) {
@@ -601,7 +676,7 @@ async function applyFieldWrites(
 ): Promise<t.ApplyConfigChangesResult> {
   const outcome = await executePlan(target, plan, contract);
   if (outcome.failure) {
-    const compensated = await compensate(target, outcome.writes, snapshot.stored);
+    const compensated = await compensate(target, outcome.writes, snapshot);
     return { ...planResult(plan), failed: outcome.failure, compensated };
   }
   const reportedPaths = new Set(
@@ -682,7 +757,7 @@ function splitPlan(
   const batches = packSections(counts, size).map((sections) => {
     const included = new Set(sections);
     const own = changes.filter((change) => included.has(getConfigSection(change.path)));
-    return planConfigChanges(own, snapshot, contract.features, rules);
+    return planConfigChanges(own, snapshot, contract.features, rules, contract.limits);
   });
   const issues = batches.flatMap((batch) => batch.issues);
   if (issues.length > 0) return { ...planResult(plan), issues };
@@ -804,7 +879,7 @@ async function applyBatch(
     if (comparable && revision !== expectedRevision) {
       return conflictResult();
     }
-    const plan = planConfigChanges(changes, snapshot, contract.features, rules);
+    const plan = planConfigChanges(changes, snapshot, contract.features, rules, contract.limits);
     if (plan.issues.length > 0 || !hasWrites(plan)) return planResult(plan);
     const batches = splitPlan(changes, plan, snapshot, contract, rules);
     if (!Array.isArray(batches)) return batches;
@@ -846,7 +921,13 @@ export async function applyConfigChanges(
     return applyBatch(target, ops, contract, rules, expectedRevision);
   }
   const snapshot = await readWriteSnapshot(target);
-  const plan = planConfigChanges(sanitizeOps(ops), snapshot, contract.features, rules);
+  const plan = planConfigChanges(
+    sanitizeOps(ops),
+    snapshot,
+    contract.features,
+    rules,
+    contract.limits,
+  );
   if (plan.issues.length > 0 || !hasWrites(plan)) return planResult(plan);
   return applyFieldWrites(target, plan, snapshot, contract);
 }

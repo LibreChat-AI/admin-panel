@@ -119,6 +119,14 @@ export interface ValueLayers {
   baseTombstones: ReadonlySet<string>;
   /** The open profile, or null in base mode. */
   scope: ScopeLayer | null;
+  /**
+   * The layer beneath the edit target (librechat.yaml for Base, Base for a
+   * profile) as the target's own values merge over it, where LibreChat
+   * applies the target's removals inside entries by key (`keyedTombstones`):
+   * without the values they remove. What removing one of the target's own
+   * values inside such an entry goes back to. Absent: the layer as it is.
+   */
+  beneath?: ConfigRecord | null;
   /** What the edit target's users get: `base`, or Base merged with the open profile. */
   effective: ConfigRecord | null;
 }

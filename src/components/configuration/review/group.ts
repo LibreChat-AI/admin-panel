@@ -31,7 +31,14 @@ const SCOPE_TYPE_KEYS: Readonly<Record<string, string>> = {
 const TABS = [...CONFIG_TABS, OTHER_TAB];
 const TAB_ORDER = new Map(TABS.map((tab, i) => [tab.id, i]));
 const INDEX_SEGMENT_RE = /^\d+$/;
-const ENTRY_KINDS: ReadonlySet<t.ChangeKind> = new Set(['added', 'removed', 'renamed', 'reverted']);
+const ENTRY_KINDS: ReadonlySet<t.ChangeKind> = new Set([
+  'added',
+  'removed',
+  'renamed',
+  'reverted',
+  'hidden',
+  'unhidden',
+]);
 const BREADCRUMB = ' › ';
 
 /** Localized "Role" / "Group" / "User" for a principal type. */

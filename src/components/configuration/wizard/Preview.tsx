@@ -29,19 +29,19 @@ function PreviewEntry({
     />
   );
   const single = row.rows.length === 1 && row.rows[0].item.path === row.fieldPath;
-  const replaces = row.replacesList && (
-    <span className="flex items-start gap-1 pl-6 text-xs text-(--settings-warn-fg)">
-      <span aria-hidden="true" className="flex pt-0.5 text-(--settings-warn-mark)">
-        <Icon name="warning" size="xs" />
-      </span>
-      {localize(
-        isScope
-          ? 'com_config_review_warning_ownership_scope'
-          : 'com_config_review_warning_ownership',
-      )}
-    </span>
-  );
-  if (single && !row.unknown && !row.replacesList) {
+  const notes = [
+    ...(row.replacesList
+      ? [
+          localize(
+            isScope
+              ? 'com_config_review_warning_ownership_scope'
+              : 'com_config_review_warning_ownership',
+          ),
+        ]
+      : []),
+    ...(row.hiddenNotes ?? []),
+  ];
+  if (single && !row.unknown && notes.length === 0) {
     return (
       <ChangeRow
         row={{ ...row.rows[0], label: row.label }}
@@ -79,7 +79,14 @@ function PreviewEntry({
           </span>
         </span>
       )}
-      {replaces}
+      {notes.map((note) => (
+        <span key={note} className="flex items-start gap-1 pl-6 text-xs text-(--settings-warn-fg)">
+          <span aria-hidden="true" className="flex pt-0.5 text-(--settings-warn-mark)">
+            <Icon name="warning" size="xs" />
+          </span>
+          {note}
+        </span>
+      ))}
       {!row.unknown && row.rows.length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-0.5 p-0 pl-4">
           {row.rows.map((change) => (

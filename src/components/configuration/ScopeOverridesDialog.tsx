@@ -4,7 +4,9 @@ import { Badge, Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import {
   getEntryKey,
+  isKeyedEntry,
   flattenObject,
+  parseKeyedPath,
   getValueAtPath,
   isConfigRecord,
   findEntryIndex,
@@ -85,9 +87,59 @@ function formatEntryValue(
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
+/**
+ * The value the profile sets itself where it removes the inherited one by
+ * key (`endpoints.custom["Name"].headers.X-Team`): LibreChat uses it, so the
+ * removal changes nothing there.
+ */
+function keyedOwnValue(
+  values: Record<string, t.ConfigValue> | null | undefined,
+  item: t.ScopeOverrideItem,
+): t.ConfigValue {
+  const keyed = item.keyed?.rest ? parseKeyedPath(item.path) : null;
+  if (!keyed) return undefined;
+  const list = values?.[keyed.collection.path];
+  const entry = Array.isArray(list)
+    ? list.find((stored) => isKeyedEntry(keyed, stored))
+    : undefined;
+  return getValueAtPath(entry, keyed.rest);
+}
+
 /** The group a row is listed under: a list's entries under its tab ("Custom endpoints"), else the section. */
 function groupOf(item: t.ScopeOverrideItem): string {
+  if (item.keyed) return item.keyed.collection;
   return item.entry !== undefined ? item.path : getConfigSection(item.path);
+}
+
+/** A hide by key as its row names it: the entry ("Azure Foundry"), and the setting inside it ("Azure Foundry › Headers › X-Team"). */
+function keyedLabel(
+  keyed: t.ScopeOverrideKeyed,
+  fields: t.SchemaField[] | undefined,
+  localize: t.LocalizeFn,
+): string {
+  if (!keyed.rest) return keyed.name;
+  const entryPath = `${keyed.collection}.0`;
+  return `${keyed.name} › ${fieldLabel(`${entryPath}.${keyed.rest}`, entryPath, localize, fields)}`;
+}
+
+/** Where Go to field lands: an entry where the page lists it, a hide by key at its entry's setting. */
+function targetOf(
+  item: t.ScopeOverrideItem,
+  entryPath: string | undefined,
+  config: t.ConfigRecord | null | undefined,
+): string {
+  if (item.keyed) return keyedTarget(item.keyed, config);
+  return item.entry !== undefined ? (entryPath ?? item.path) : item.path;
+}
+
+/** Where Go to field lands for a hide by key: the entry's setting where the page lists the entry, else the list. */
+function keyedTarget(
+  keyed: t.ScopeOverrideKeyed,
+  config: t.ConfigRecord | null | undefined,
+): string {
+  const entryPath = entryPathIn(config, keyed.collection, keyed.name);
+  if (!entryPath) return keyed.collection;
+  return keyed.rest ? `${entryPath}.${keyed.rest}` : entryPath;
 }
 
 /**
@@ -144,7 +196,14 @@ export function ScopeOverridesDialog({
     if (item.entry !== undefined) {
       return formatEntryValue(values, item, entryPath ?? item.path, fields, localize);
     }
-    if (item.hidden) return undefined;
+    if (item.hidden) {
+      const own = keyedOwnValue(values, item);
+      if (own === undefined || !item.keyed) return undefined;
+      const path = `${item.keyed.collection}.0.${item.keyed.rest}`;
+      return localize('com_scope_overrides_hidden_own', {
+        value: formatValue(own, path, fields, localize) ?? '',
+      });
+    }
     if (values?.[item.path] !== undefined || item.paths.length === 0) {
       return formatValue(values?.[item.path], item.path, fields, localize);
     }
@@ -204,8 +263,11 @@ export function ScopeOverridesDialog({
                       entry !== undefined ? entryPathIn(config, item.path, entry) : undefined;
                     const pending = isPending(item);
                     const value = valueOf(item, entryPath);
-                    const label = entry ?? fieldLabel(item.path, section, localize, fields);
-                    const goToTarget = entry !== undefined ? (entryPath ?? item.path) : item.path;
+                    const { keyed } = item;
+                    const label = keyed
+                      ? keyedLabel(keyed, fields, localize)
+                      : (entry ?? fieldLabel(item.path, section, localize, fields));
+                    const goToTarget = targetOf(item, entryPath, config);
                     const canRevert =
                       entry !== undefined ? onRevertEntry != null : onRevert != null;
                     const revert = () => {

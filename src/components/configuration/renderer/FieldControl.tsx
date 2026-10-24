@@ -197,6 +197,7 @@ function ControlFor({
   hasPendingEdit,
   onCancelSecret,
   lockedKeys,
+  keyRemoval,
   'aria-describedby': ariaDescribedBy,
 }: t.FieldControlProps) {
   const localize = useLocalize();
@@ -511,6 +512,7 @@ function ControlFor({
           valueTypes={field.recordValueKVTypes}
           valueOptions={field.itemType ? getFieldOptions(field, localize) : undefined}
           lockedKeys={lockedKeys}
+          keyRemoval={keyRemoval}
         />
       );
     case 'text-record': {

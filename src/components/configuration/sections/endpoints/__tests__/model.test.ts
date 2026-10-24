@@ -31,6 +31,21 @@ describe('validateEndpoint', () => {
     expect(codes({ entry: complete })).toEqual([]);
   });
 
+  it('refuses a new or renamed name LibreChat could not remove or hide by key', () => {
+    for (const name of ['$proxy', '__proxy', 'constructor', 'x'.repeat(9)]) {
+      expect(codes({ entry: { ...complete, name }, maxKeyLength: 8 })).toEqual([
+        'nameUnaddressable',
+      ]);
+    }
+    expect(
+      codes({ entry: { ...complete, name: '$proxy' }, loadedName: 'Old', maxKeyLength: 8 }),
+    ).toEqual(['nameUnaddressable']);
+    expect(
+      codes({ entry: { ...complete, name: '$proxy' }, loadedName: '$proxy', maxKeyLength: 8 }),
+    ).toEqual([]);
+    expect(codes({ entry: { ...complete, name: '$proxy' } })).toEqual([]);
+  });
+
   it('flags a name-only endpoint as not served (custom-08)', () => {
     const issues = validateEndpoint({
       entry: { name: 'OnlyName' },

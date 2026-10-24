@@ -2,6 +2,8 @@ import type * as t from '@/types';
 import { BASE_PRINCIPAL, BUNDLED_WRITE_RULES, DEDICATED_CONFIG_SECTIONS } from '@/constants';
 import { deepSerializeKVPairs, getValueAtPath, isConfigRecord } from './format';
 import { collectLeafPaths, createPathIndex } from './paths';
+import { parseKeyedPath, removeKeyedValue } from './keyed';
+import { withoutUnservedEndpointUses } from './dependents';
 import { mapSecretPreviewPaths } from './secrets';
 
 /** Arrays LibreChat merges item by item on this key instead of replacing (`ARRAY_MERGE_KEYS`). */
@@ -157,12 +159,17 @@ function keepBaseValues(
  * profile cannot override (read-only by the server's write `rules`) and the
  * fields only librechat.yaml sets inside the others (`yamlManagedFields`: the
  * server's base-only and deployment-only paths) keep their Base values.
+ * With `keyedTombstones`, a tombstone naming an entry by its key
+ * (`endpoints.custom["Name"]`) hides that entry, or the path inside it, of
+ * Base before the overrides merge, as LibreChat applies it; before that, the
+ * server stored such a tombstone without effect.
  */
 export function mergeScopeLayer(
   base: t.ConfigRecord,
   overrides: t.ConfigRecord,
   tombstones: Iterable<string> = [],
   rules: t.ConfigWriteRules = BUNDLED_WRITE_RULES,
+  keyedTombstones = false,
 ): t.ConfigRecord {
   const readOnly = rules.readOnlySections;
   const applicable: t.ConfigRecord = {};
@@ -170,11 +177,16 @@ export function mergeScopeLayer(
     if (readOnly.has(section) || DEDICATED_CONFIG_SECTIONS.has(section)) continue;
     applicable[section] = value;
   }
-  let merged = mergeRecords(base, applicable, '');
+  const dotted: string[] = [];
+  let lower = base;
   for (const path of tombstones) {
     if (readOnly.has(path.split('.')[0])) continue;
-    merged = removeConfigPath(merged, path);
+    const keyed = parseKeyedPath(path);
+    if (!keyed) dotted.push(path);
+    else if (keyedTombstones) lower = removeKeyedValue(lower, keyed);
   }
+  let merged = mergeRecords(lower, applicable, '');
+  for (const path of dotted) merged = removeConfigPath(merged, path);
   return keepBaseValues(base, merged, rules.yamlManagedFields);
 }
 
@@ -216,8 +228,10 @@ export function createBaseLayers(
   data: t.BaseConfigData,
   schemaPaths: ReadonlySet<string>,
   runtimeDefaultAt?: (path: string) => t.ConfigValue,
+  keyedTombstones = false,
 ): t.ValueLayers {
   const overrides = data.dbOverrides ?? {};
+  const yaml = data.yamlConfig ?? null;
   return {
     schemaDefaults: data.schemaDefaults,
     runtimeDefaultAt,
@@ -230,8 +244,23 @@ export function createBaseLayers(
     ),
     baseTombstones: new Set(data.dbTombstones),
     scope: null,
+    ...(keyedTombstones && yaml && { beneath: withoutRemovalsInside(yaml, data.dbTombstones) }),
     effective: data.config,
   };
+}
+
+/**
+ * `root` without the values keyed tombstones remove inside entries
+ * (`endpoints.custom["Name"].headers.X-Team`), as LibreChat applies them
+ * before the target's own values merge; hides of whole entries are left.
+ */
+function withoutRemovalsInside(root: t.ConfigRecord, tombstones: Iterable<string>): t.ConfigRecord {
+  let result = root;
+  for (const path of tombstones) {
+    const keyed = parseKeyedPath(path);
+    if (keyed?.rest) result = removeKeyedValue(result, keyed);
+  }
+  return result;
 }
 
 /** `layers` with the open profile on top: its overrides merged over Base, minus its tombstones (EV-5). */
@@ -241,6 +270,7 @@ export function withScopeLayer(
   data: t.ResolvedConfigData,
   schemaPaths: ReadonlySet<string>,
   rules?: t.ConfigWriteRules,
+  keyedTombstones = false,
 ): t.ValueLayers {
   return {
     ...layers,
@@ -251,7 +281,16 @@ export function withScopeLayer(
       overridePaths: createPathIndex(mapSecretPreviewPaths(data.changedPaths, schemaPaths)),
       tombstones: new Set(data.tombstones),
     },
-    effective: mergeScopeLayer(layers.base ?? {}, data.overrides, data.tombstones, rules),
+    beneath: keyedTombstones
+      ? withoutRemovalsInside(layers.base ?? {}, data.tombstones)
+      : undefined,
+    effective: mergeScopeLayer(
+      layers.base ?? {},
+      data.overrides,
+      data.tombstones,
+      rules,
+      keyedTombstones,
+    ),
   };
 }
 
@@ -260,6 +299,8 @@ export function withScopeLayer(
  * does not resolve configs itself (no `resolvedApi`): Base (librechat.yaml
  * with the base overrides, as LibreChat serves it) with the principal's own
  * profile merged over it (`mergeScopeLayer`), unless the profile is inactive.
+ * With `keyedTombstones`, it leaves out what selects or names a custom
+ * endpoint the merge removed, as LibreChat does (`withoutUnservedEndpointUses`).
  * The profiles of a user's role and groups are not part of it, and nothing
  * says what LibreChat leaves out of a document.
  */
@@ -268,6 +309,7 @@ export function estimateConfigPreview({
   scope,
   own,
   rules,
+  keyedTombstones,
 }: t.PreviewEstimateInput): t.ConfigPreview {
   const layers: t.PreviewLayer[] =
     base.dbOverrides !== undefined || base.dbTombstones.length > 0
@@ -283,7 +325,19 @@ export function estimateConfigPreview({
         ]
       : [];
   const yaml = base.yamlConfig ?? {};
-  if (!scope || !own) return { source: 'panel', yaml, layers, resolved: base.config };
+  const defined = [
+    yaml,
+    base.dbOverrides ?? {},
+    ...(own && scope?.isActive ? [own.overrides] : []),
+  ];
+  const served = (config: t.ConfigRecord): t.ConfigRecord =>
+    keyedTombstones
+      ? withoutUnservedEndpointUses(
+          config,
+          defined.map((layer) => getValueAtPath(layer, 'endpoints.custom')),
+        )
+      : config;
+  if (!scope || !own) return { source: 'panel', yaml, layers, resolved: served(base.config) };
   const layer: t.PreviewLayer = {
     principalType: scope.principalType,
     principalId: scope.principalId,
@@ -297,8 +351,10 @@ export function estimateConfigPreview({
     source: 'panel',
     yaml,
     layers: [...layers, layer],
-    resolved: scope.isActive
-      ? mergeScopeLayer(base.config, own.overrides, own.tombstones, rules)
-      : base.config,
+    resolved: served(
+      scope.isActive
+        ? mergeScopeLayer(base.config, own.overrides, own.tombstones, rules, keyedTombstones)
+        : base.config,
+    ),
   };
 }

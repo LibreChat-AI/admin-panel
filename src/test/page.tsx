@@ -157,6 +157,7 @@ function TabPage({ tab, tree, yaml, overrides, expandAll, contract, state }: Har
       { stored: overrides, tombstones: [], lower: yaml, lowerKind: 'yaml' },
       contract.features,
       getWriteRules(contract),
+      contract.limits,
     );
   };
 

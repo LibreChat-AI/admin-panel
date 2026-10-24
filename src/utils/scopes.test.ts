@@ -78,6 +78,20 @@ describe('countScopeOverrides', () => {
       ['interface.customWelcome', undefined],
     ]);
   });
+
+  it('lists each hide by key under its list, with the entry and the path inside it', () => {
+    const s = scope({
+      principalId: 'USER',
+      tombstones: ['endpoints.custom["a.b"]', 'endpoints.custom["Gateway"].headers.X-Team'],
+    });
+    expect(listScopeOverrideItems(s).map(({ path, keyed }) => [path, keyed])).toEqual([
+      ['endpoints.custom["a.b"]', { collection: 'endpoints.custom', name: 'a.b', rest: '' }],
+      [
+        'endpoints.custom["Gateway"].headers.X-Team',
+        { collection: 'endpoints.custom', name: 'Gateway', rest: 'headers.X-Team' },
+      ],
+    ]);
+  });
 });
 
 describe('scopeOverrideEntries', () => {
@@ -284,6 +298,23 @@ describe('findEntryOverrides', () => {
     ]);
     expect(found('endpoints.custom', 'Acme')).toEqual([]);
     expect(found('mcpServers', 'acm')).toEqual([]);
+  });
+
+  it('finds the profiles that hide a custom endpoint or remove a value in it by key (keyedTombstones)', () => {
+    const hides = scope({ principalId: 'ops', tombstones: ['endpoints.custom["AcmeLLM"]'] });
+    const trims = scope({
+      principalId: 'qa',
+      tombstones: ['endpoints.custom["AcmeLLM"].headers.X-Team'],
+    });
+    const byKey = (keyedTombstones: boolean) =>
+      findEntryOverrides([hides, trims], 'endpoints.custom', 'AcmeLLM', keyedTombstones).map(
+        ({ scope: s, ...rest }) => [s.principalId, rest],
+      );
+    expect(byKey(true)).toEqual([
+      ['ops', { overrides: false, secrets: [], settings: [], hidden: true }],
+      ['qa', { overrides: true, secrets: [], settings: [], hidden: false }],
+    ]);
+    expect(byKey(false)).toEqual([]);
   });
 
   it('counts a secret a server without `recordSecrets` reads back as a plain value', () => {

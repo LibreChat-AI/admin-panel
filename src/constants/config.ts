@@ -215,6 +215,7 @@ export const SKIP_REASON_KEYS: Readonly<Record<t.SkipReason, string>> = {
   processServer: 'com_config_skip_process_server',
   secretRebinding: 'com_config_skip_secret_rebinding',
   hiddenBySave: 'com_config_skip_hidden_by_save',
+  hiddenEntry: 'com_config_skip_hidden_entry',
 };
 
 /**

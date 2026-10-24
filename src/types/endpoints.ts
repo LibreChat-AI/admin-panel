@@ -17,6 +17,7 @@ export type EndpointIssueCode =
   | 'nameSimilar'
   | 'nameMerged'
   | 'nameReserved'
+  | 'nameUnaddressable'
   | 'apiKeyRequired'
   | 'baseUrlRequired'
   | 'baseUrlInvalid'
@@ -49,6 +50,11 @@ export interface EndpointValidationInput {
   loadedName?: string;
   /** A rename keeps the stored key: the server moves it to the new name (`getSecretCarry`). */
   carriesKey?: boolean;
+  /**
+   * Where the server removes and hides entries by name (`keyedTombstones`), the longest name it
+   * addresses (`limits.maxEntryKeyLength`): a name it can't address could not be removed later.
+   */
+  maxKeyLength?: number;
 }
 
 /** One custom endpoint as the list shows it (WS10 CE-7). */
@@ -80,6 +86,67 @@ export interface EndpointRow {
   /** An encrypted key is stored for it; the read shows only its preview. */
   storedSecret: boolean;
   issues: EndpointIssue[];
+}
+
+/**
+ * How hiding custom endpoints changes a list that allows endpoints by name
+ * (`modelSpecs.addedEndpoints`, `endpoints.agents.allowedProviders`): it
+ * names none of them (`none`); it loses their names (`dropped`); or it names
+ * only endpoints the profile hides (`only`), which LibreChat keeps whole,
+ * since an empty list allows every endpoint, so it allows none.
+ */
+export type HiddenNameUse = 'none' | 'dropped' | 'only';
+
+/**
+ * What LibreChat hides along with custom endpoints a profile hides
+ * (`findHiddenEndpointUses`): the model specs that select one (by title),
+ * and how the added endpoints and the agents' allowed providers change.
+ */
+export interface HiddenEndpointUses {
+  specs: string[];
+  addedEndpoints: HiddenNameUse;
+  allowedProviders: HiddenNameUse;
+}
+
+/** The lists of `HiddenEndpointUses` that allow endpoints by name. */
+export type HiddenNameList = Exclude<keyof HiddenEndpointUses, 'specs'>;
+
+/** An entry of a keyed collection the open profile hides whole (`keyedTombstones`), saved or pending. */
+export interface HiddenEntry {
+  /** The entry's name, as the layer beneath spells it when it has the entry. */
+  name: string;
+  /** The keyed path of its tombstone (`endpoints.custom["Name"]`). */
+  path: string;
+  /** Hidden by a pending edit, not saved yet. */
+  pending: boolean;
+}
+
+/** The entries of a collection the open profile hides, and the hidden ones it is about to show again, by identity. */
+export interface HiddenEntries {
+  hidden: ReadonlyMap<string, HiddenEntry>;
+  unhiding: ReadonlyMap<string, HiddenEntry>;
+}
+
+/** A keyed tombstone inside an entry's record, as the record's editor reads it: its path, and whether it is pending. */
+export interface RecordRemovalRef {
+  /** The keyed path (`endpoints.custom["Name"].headers.X-Team`). */
+  path: string;
+  /** Removed by a pending hide, not saved yet. */
+  pending: boolean;
+}
+
+/** What `useEntryKeyRemoval` needs of the open endpoint. */
+export interface EntryKeyRemovalOptions {
+  /** `endpoints.custom` */
+  collectionPath: string;
+  /** The entry's data path on the page (`endpoints.custom.3`). */
+  entryPath: string;
+  /** The name it was loaded with; undefined for a new endpoint. */
+  name?: string;
+  /** The endpoint as the layer beneath defines it; undefined for one the target adds. */
+  lowerEntry?: ConfigRecord;
+  onHide?: (path: string) => void;
+  onUnhide?: (path: string) => void;
 }
 
 /** A saved endpoint a pending edit removes; Undo puts it back at `restoreIndex`. */
@@ -171,6 +238,11 @@ export interface EndpointEditorProps {
   /** Called with the full path once `revealField` is rendered, to scroll to and focus it. */
   onRevealed?: (path: string) => void;
   editSessionId?: number;
+  /** The name the endpoint was loaded with, which keyed tombstones name it by. */
+  loadedName?: string;
+  /** Hides or unhides a path (`keyedTombstones`: an inherited key of a record, by key). */
+  onHideField?: (path: string) => void;
+  onUnhideField?: (path: string) => void;
 }
 
 /** A starting point offered when creating a custom endpoint (WS10 CE-10). */
@@ -227,11 +299,44 @@ export interface EndpointListProps {
   onRevert: (row: EndpointRow) => void;
   /** In a profile: starts overriding an endpoint Base defines ("Override for Role: USER"). */
   override?: { label: string; onSelect: (row: EndpointRow) => void };
+  /** In a profile (`keyedTombstones`): hides an endpoint Base defines for the profile's members. */
+  hide?: EndpointHideAction;
   onUndoRemoval: (removal: EndpointRemoval) => void;
   /** What a removal leaves in the profiles that override the endpoint by name (`describeEntryOverrides`). */
   removalNotes?: (removal: EndpointRemoval) => readonly string[];
   /** Row ids are `${idPrefix}-${index}`, the ids the table of contents and deep links target. */
   idPrefix: string;
+}
+
+/** "Hide for Role: USER" of an endpoint's menu (`keyedTombstones`). */
+export interface EndpointHideAction {
+  label: string;
+  /** Whether the row offers Hide: an endpoint the layer beneath defines. */
+  offers: (row: EndpointRow) => boolean;
+  /** Why an offered Hide is unavailable (a name LibreChat can't hide by key), if it is. */
+  disabledReason: (row: EndpointRow) => string | undefined;
+  onSelect: (row: EndpointRow) => void;
+}
+
+/** One endpoint the open profile hides, or is about to show again, with what goes with it. */
+export interface EndpointHiddenItem {
+  identity: string;
+  entry: HiddenEntry;
+  /** A pending unhide: it is shown again once saved. */
+  unhiding: boolean;
+  uses: HiddenEndpointUses;
+}
+
+/** One row of `EndpointHiddenListProps`. */
+export interface EndpointHiddenRowProps extends Pick<EndpointHiddenListProps, 'onToggle'> {
+  item: EndpointHiddenItem;
+}
+
+/** The endpoints the open profile hides (`keyedTombstones`), listed under the others. */
+export interface EndpointHiddenListProps {
+  items: EndpointHiddenItem[];
+  /** Unhides a saved hide, or undoes a pending hide or unhide; absent when read-only. */
+  onToggle?: (item: EndpointHiddenItem) => void;
 }
 
 /** Props of a saved endpoint a pending edit removes, listed with Undo (D9). */
@@ -323,7 +428,7 @@ export interface EndpointServedBadgeProps {
 /** Props of one row of the endpoint list. */
 export interface EndpointListRowProps extends Pick<
   EndpointListProps,
-  'idPrefix' | 'disabled' | 'onOpen' | 'onReveal' | 'onDelete' | 'onRevert' | 'override'
+  'idPrefix' | 'disabled' | 'onOpen' | 'onReveal' | 'onDelete' | 'onRevert' | 'override' | 'hide'
 > {
   row: EndpointRow;
   isOpen: boolean;

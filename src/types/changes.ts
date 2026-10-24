@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { SaveEntry, WriteTarget, SaveContext, SavePayload, SkippedChange } from './config-ui';
 import type { ConfigValue, ConfigRecord, FlatConfigMap, ZodSchemaLike } from './config';
 import type { ConfigScope, EntryOverrideNote } from './scope';
+import type { HiddenEndpointUses } from './endpoints';
 import type { RevertTarget } from './values';
 
 /** One write operation of the save pipeline (WS1). */
@@ -308,6 +309,11 @@ export type ChangeWarning =
   | 'secretRestated'
   /** Hides a value the target also sets itself: the hide deletes the target's own value (`dropped`). */
   | 'hideDeletesOwn'
+  /**
+   * Removes a value inside an entry by key, or shows the inherited one
+   * again, where the target sets its own (`before`): LibreChat deletes it.
+   */
+  | 'deletesOwnValue'
   /** A duplicate uses a secret the server it copies stores, which the save doesn't copy (`keys`). */
   | 'secretNotCopied';
 
@@ -392,6 +398,8 @@ export interface ChangeSummaryItem {
    * or setting (by the secret, never its preview).
    */
   dropped?: ChangeSummaryItem[];
+  /** A hidden custom endpoint: the model specs and endpoint lists LibreChat hides it from too. */
+  hiddenUses?: HiddenEndpointUses;
   /**
    * In Base, the profiles that override the entry by name, for each way the
    * change affects them: a rename or removal leaves their overrides under the
@@ -425,6 +433,19 @@ export interface KeyedCollection {
   servedName?: (name: string) => string;
   /** Names LibreChat keeps for itself (its built-in endpoints). */
   reservedNames?: ReadonlySet<string>;
+}
+
+/**
+ * A keyed path (`endpoints.custom["Name"].headers.X-Team`), read: one entry
+ * of a collection merged by key, named by its key, and a dotted path inside
+ * it (`keyedTombstones`).
+ */
+export interface KeyedPath {
+  collection: KeyedCollection;
+  /** The entry's key as written; LibreChat matches it as it serves names (`servedName`). */
+  key: string;
+  /** The dotted path inside the entry; empty for the whole entry. */
+  rest: string;
 }
 
 /** Where the layer beneath the write target comes from (WS1). */
@@ -473,6 +494,17 @@ export interface WritePlan {
    * rather than the whole list a write sends.
    */
   changed: string[];
+}
+
+/** A plan's tombstones in the order a save sends them (`orderTombstones`). */
+export interface TombstoneOrder {
+  /** Sent after the unhides, before the sets and resets. */
+  early: string[];
+  /**
+   * Sent after the resets: at or inside what a reset by key removes
+   * (`endpoints.custom["Name"]`), which removes the keyed tombstones there too.
+   */
+  late: string[];
 }
 
 /** The parts of a zod (v3) issue the save pipeline reads (WS1). */

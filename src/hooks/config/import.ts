@@ -19,9 +19,14 @@ import {
   hasPathOrAncestor,
   planConfigChanges,
   setValueAtPath,
+  getEntryKey,
+  entryIdentityOf,
+  hiddenEntriesOf,
   getKeyedCollection,
   secretPreviewPath,
+  withoutKeyedTombstones,
   stripSecretPreviewValues,
+  describeImportedHiddenUses,
 } from '@/utils';
 import {
   locate,
@@ -42,7 +47,7 @@ import { isConfigValueEqual, normalizeForSave } from '@/components/configuration
 import { planImport, IMPORT_SKIP_KEYS } from '@/components/configuration/import';
 import { MERGED_BACK_REASONS, SECRET_PREVIEW_MASK } from '@/constants';
 import { findSchemaField } from '@/components/configuration/controls';
-import { useConfigFeatures, useConfigWriteRules } from './contract';
+import { useConfigContract, useConfigWriteRules } from './contract';
 import { describeIssues } from '@/components/configuration/issues';
 import { resolvedConfigOptions, runtimeDefaultAt } from './layers';
 import { useLocalize } from '../useLocalize';
@@ -55,6 +60,12 @@ const WITHHELD_REASON_KEYS: Readonly<Record<t.WithheldSecret['reason'], string>>
   hidden: 'com_config_review_import_skip_hidden_secret',
   masked: 'com_config_review_import_skip_masked_secret',
 };
+
+/** The list of custom endpoints, whose entries a profile can hide by name. */
+const CUSTOM_ENDPOINTS = 'endpoints.custom';
+
+/** No entry hidden: a merged list of a target without keyed tombstones. */
+const NO_HIDDEN: ReadonlySet<string> = new Set();
 
 /** An endpoint's parameter definitions: LibreChat expands librechat.yaml's at startup, never an override's. */
 const PARAM_DEFINITIONS = 'customParams.paramDefinitions';
@@ -158,32 +169,50 @@ function withheldLeaf(
   return withheldReason(value, previewAt(secretPreviewPath(path)) === SECRET_PREVIEW_MASK);
 }
 
+/** Whether `entry` is one the target hides whole (`hidden`, by identity as LibreChat matches names). */
+function isHiddenEntry(
+  collection: t.KeyedCollection | undefined,
+  entry: t.ConfigValue,
+  hidden: ReadonlySet<string>,
+): boolean {
+  if (!collection || hidden.size === 0) return false;
+  const name = getEntryKey(entry, collection.key);
+  return name !== undefined && hidden.has(entryIdentityOf(collection, name));
+}
+
 /**
  * The imported entries of a merged list that change what users get (each
  * merged over the effective entry of its name), definitions expanded; an
  * entry identical to the effective one is dropped, so it is neither shown
  * nor written as a change. A key the effective entry hides, or one that is
- * the mask itself, is left out (`withheld` gets its imported path):
+ * the mask itself, is left out (`left.withheld` gets its imported path):
  * importing librechat.yaml back would otherwise store its own key again as
- * an override.
+ * an override. An entry the target hides whole (`hidden`) is left out too
+ * (`left.hidden`): LibreChat takes a write of it as showing it again.
  */
 function changedEntries(
   path: string,
   effective: t.ConfigValue,
   incoming: t.ConfigValue,
-  withheld: t.WithheldSecret[],
+  hidden: ReadonlySet<string>,
+  left: t.ImportLeftOut,
 ): t.ConfigValue {
   if (!Array.isArray(incoming)) return incoming;
   const key = identityKeyFor(path, [...(Array.isArray(effective) ? effective : []), ...incoming]);
   if (!key) return incoming;
-  const secret = getKeyedCollection(path)?.secret;
+  const collection = getKeyedCollection(path);
+  const secret = collection?.secret;
   return incoming.flatMap((entry, index) => {
+    if (isHiddenEntry(collection, entry, hidden)) {
+      left.hidden.push(`${path}.${index}`);
+      return [];
+    }
     const match = matchOf(effective, entry, key);
     let expanded = withExpandedDefinitions(entry, match);
     if (secret && isConfigRecord(expanded) && expanded[secret.key] !== undefined) {
       const reason = withheldReason(expanded[secret.key], hidesSecret(match, secret));
       if (reason) {
-        withheld.push({ path: `${path}.${index}.${secret.key}`, reason });
+        left.withheld.push({ path: `${path}.${index}.${secret.key}`, reason });
         const { [secret.key]: _withheld, ...rest } = expanded;
         expanded = rest;
       }
@@ -268,7 +297,7 @@ export function useImportPreview({
   target,
 }: t.ImportPreviewOptions): t.ImportPreviewState {
   const localize = useLocalize();
-  const features = useConfigFeatures();
+  const { features, limits } = useConfigContract();
   const writeRules = useConfigWriteRules();
   const { data: base, isLoading: baseLoading } = useQuery(baseConfigOptions);
   const existingScope = target?.type === 'scope' && target.exists ? target.scope : undefined;
@@ -299,15 +328,52 @@ export function useImportPreview({
     return scopeData.overrides;
   }, [target, base, existingScope, scopeData]);
 
+  /** The target's stored tombstones: Base's, or the existing profile's. */
+  const tombstones = useMemo<string[]>(() => {
+    if (target?.type === 'base') return base?.dbTombstones ?? [];
+    return (existingScope && scopeData?.tombstones) || [];
+  }, [target, base, existingScope, scopeData]);
+
+  /** What a profile inherits: Base without what its keyed tombstones remove (`keyedTombstones`). */
+  const inherited = useMemo<t.ConfigRecord | undefined>(() => {
+    if (!base || target?.type === 'base' || !features.keyedTombstones) return base?.config;
+    return withoutKeyedTombstones(base.config ?? {}, tombstones);
+  }, [base, target, features.keyedTombstones, tombstones]);
+
+  /**
+   * What the target gets of a merged list now: Base's effective list, or a
+   * profile's entries merged over what it inherits, as LibreChat merges them.
+   */
+  const effectiveAt = useCallback(
+    (path: string): t.ConfigValue => {
+      if (target?.type === 'base') return getValueAtPath(base?.config ?? null, path);
+      return mergeConfigLayers(
+        getValueAtPath(inherited ?? null, path),
+        getValueAtPath(own, path),
+        path,
+      );
+    },
+    [base, target, inherited, own],
+  );
+
+  /** The entries of each merged list the target hides whole, by identity (`keyedTombstones`). */
+  const hiddenAt = useCallback(
+    (path: string): ReadonlySet<string> => {
+      const collection = getKeyedCollection(path);
+      if (!features.keyedTombstones || !collection) return NO_HIDDEN;
+      return new Set(hiddenEntriesOf(tombstones, collection).keys());
+    },
+    [features.keyedTombstones, tombstones],
+  );
+
   /**
    * The plan's entries as Apply writes them: each merged list narrowed to the
    * entries that change what users get now (a profile's merge over what it
    * inherits; Base's effective list), parameter definitions expanded.
    */
-  const { entries, withheld } = useMemo(() => {
-    const left: t.WithheldSecret[] = [];
-    if (!plan || !target || !base) return { entries: plan?.entries ?? [], withheld: left };
-    const isScope = target.type !== 'base';
+  const { entries, withheld, hidden } = useMemo(() => {
+    const left: t.ImportLeftOut = { withheld: [], hidden: [] };
+    if (!plan || !target || !base) return { entries: plan?.entries ?? [], ...left };
     /** What the target reads at a path: its own value, else the one it inherits or librechat.yaml's. */
     const previewAt = (path: string) =>
       getValueAtPath(own, path) ?? getValueAtPath(base.config ?? null, path);
@@ -320,18 +386,15 @@ export function useImportPreview({
       }
       const reason = withheldLeaf(path, entry.value, previewAt);
       if (reason) {
-        left.push({ path, reason });
+        left.withheld.push({ path, reason });
         return [];
       }
       if (!MERGED_COLLECTIONS.has(path)) return [entry];
-      const effective = isScope
-        ? mergeConfigLayers(getValueAtPath(base.config, path), getValueAtPath(own, path), path)
-        : getValueAtPath(base.config, path);
-      const value = changedEntries(path, effective, entry.value, left);
+      const value = changedEntries(path, effectiveAt(path), entry.value, hiddenAt(path), left);
       return Array.isArray(value) && value.length === 0 ? [] : [{ fieldPath: path, value }];
     });
-    return { entries: written, withheld: left };
-  }, [plan, target, base, own]);
+    return { entries: written, ...left };
+  }, [plan, target, base, own, effectiveAt, hiddenAt]);
 
   const groups = useMemo((): t.ImportPreviewGroup[] => {
     if (!plan || !target || !base) return [];
@@ -340,7 +403,7 @@ export function useImportPreview({
     const ownPaths = new Set(Object.keys(flattenObject(own)));
     const layers: t.LowerLayers = {
       isScope,
-      configValues: base.config ?? null,
+      configValues: inherited ?? null,
       yamlConfig: base.yamlConfig,
       schemaDefaults: base.schemaDefaults ?? {},
     };
@@ -358,17 +421,23 @@ export function useImportPreview({
     };
     const sections = new Map<string, t.ImportPreviewGroup>();
     const written = new Map(entries.map((entry) => [entry.fieldPath, entry]));
-    const left = new Set(withheld.map((secret) => secret.path));
+    /** The custom endpoints the target hides: LibreChat drops what selects them for its members. */
+    const hiddenEndpoints = hiddenAt(CUSTOM_ENDPOINTS);
+    const targetLabel = importTargetLabel(target, localize);
+    const left = new Set([...withheld.map((secret) => secret.path), ...hidden]);
+    /** A merged list whose imported entries the target all hides: each is listed as left out instead. */
+    const isAllLeftOut = ({ fieldPath, value }: t.SaveEntry) =>
+      Array.isArray(value) &&
+      value.length > 0 &&
+      value.every((_, index) => left.has(`${fieldPath}.${index}`));
     for (const imported of plan.entries) {
       /** A merged list whose entries all match what users get already is listed as unchanged. */
       const path = imported.fieldPath;
-      if (left.has(path)) continue;
+      if (left.has(path) || isAllLeftOut(imported)) continue;
       const entry = written.get(path) ?? { fieldPath: path, value: [] };
       const isMerged = MERGED_COLLECTIONS.has(path);
       /** What users get now: a profile's entries merge over the ones it inherits. */
-      const existing = isScope
-        ? mergeConfigLayers(getValueAtPath(base.config, path), getValueAtPath(own, path), path)
-        : getValueAtPath(baseline, path);
+      const existing = effectiveAt(path);
       /** Secret preview companions are read-only display values: neither side lists them. */
       const withoutPreviews = (value: t.ConfigValue) =>
         stripSecretPreviewValues(value, path, schemaPathSet);
@@ -418,11 +487,30 @@ export function useImportPreview({
         unchanged: items.length === 0 || (!isMerged && isInEffect(path, entry.value)),
         unknown: plan.unknown.has(path),
         replacesList: items.some((item) => item.warnings?.includes('ownershipChange')),
+        hiddenNotes:
+          items.length > 0
+            ? describeImportedHiddenUses(path, entry.value, hiddenEndpoints, targetLabel, localize)
+            : undefined,
       });
       sections.set(key, group);
     }
     return [...sections.values()];
-  }, [plan, entries, withheld, target, base, baseLayers, own, schemaTree, schemaPathSet, localize]);
+  }, [
+    plan,
+    entries,
+    withheld,
+    hidden,
+    target,
+    base,
+    baseLayers,
+    own,
+    inherited,
+    effectiveAt,
+    hiddenAt,
+    schemaTree,
+    schemaPathSet,
+    localize,
+  ]);
 
   const skipped = useMemo((): t.ReviewSkippedRow[] => {
     if (!plan) return [];
@@ -442,8 +530,20 @@ export function useImportPreview({
       label: describePath(path, ctx),
       reason: localize(WITHHELD_REASON_KEYS[reason]),
     }));
-    return [...rows, ...withheldRows];
-  }, [plan, withheld, appConfig, schemaTree, localize]);
+    const hiddenReason =
+      target && hidden.length > 0
+        ? localize('com_config_review_import_skip_hidden_entry', {
+            target: importTargetLabel(target, localize),
+          })
+        : '';
+    const hiddenRows = hidden.map((path) => ({
+      key: `hiddenEntry:${path}`,
+      path,
+      label: describePath(path, ctx),
+      reason: hiddenReason,
+    }));
+    return [...rows, ...withheldRows, ...hiddenRows];
+  }, [plan, withheld, hidden, target, appConfig, schemaTree, localize]);
 
   /** What Apply writes for the chosen leaves: merged collections upsert into the target's own list. */
   const entriesFor = useCallback(
@@ -467,18 +567,13 @@ export function useImportPreview({
     if (target.type === 'base') {
       return {
         stored: base.dbOverrides ?? {},
-        tombstones: base.dbTombstones,
+        tombstones,
         lower: base.yamlConfig ?? {},
         lowerKind: 'yaml',
       };
     }
-    return {
-      stored: own,
-      tombstones: (existingScope && scopeData?.tombstones) || [],
-      lower: base.config ?? {},
-      lowerKind: 'inherited',
-    };
-  }, [target, base, own, existingScope, scopeData]);
+    return { stored: own, tombstones, lower: base.config ?? {}, lowerKind: 'inherited' };
+  }, [target, base, own, tombstones]);
 
   /** The same pre-flight the write runs, so the preview refuses what Import would (an endpoint with only a name). */
   const issuesFor = useCallback(
@@ -488,10 +583,10 @@ export function useImportPreview({
         ({ fieldPath, value }): t.ConfigChange => ({ op: 'set', path: fieldPath, value }),
       );
       if (ops.length === 0) return [];
-      const { issues } = planConfigChanges(ops, snapshot, features, writeRules);
+      const { issues } = planConfigChanges(ops, snapshot, features, writeRules, limits);
       return describeIssues(issues, [], localize).summaries;
     },
-    [snapshot, entriesFor, features, writeRules, localize],
+    [snapshot, entriesFor, features, writeRules, limits, localize],
   );
 
   return {

@@ -207,6 +207,30 @@ describe('ScopeOverridesDialog', () => {
     expect(search({})).toEqual({ tab: 'custom', field: 'endpoints.custom.1' });
   });
 
+  it('says when the profile also sets its own value where it removes an inherited key', () => {
+    const onUnhide = vi.fn();
+    const shadowed = 'endpoints.custom["Claude"].headers.X-Team';
+    const removed = 'endpoints.custom["Claude"].headers.X-Org';
+    renderPage(
+      <ScopeOverridesDialog
+        open
+        scope={{
+          ...role,
+          overridePaths: ['endpoints.custom'],
+          overrideEntries: { 'endpoints.custom': ['Claude'] },
+          tombstones: [shadowed, removed],
+        }}
+        values={{ 'endpoints.custom': [{ name: 'Claude', headers: { 'X-Team': 'red' } }] }}
+        config={{ endpoints: { custom: [{ name: 'Claude' }] } }}
+        onClose={vi.fn()}
+        onUnhide={onUnhide}
+      />,
+    );
+    expect(screen.getAllByText('com_scope_overrides_hidden_own(value=red)')).toHaveLength(1);
+    fireEvent.click(screen.getAllByRole('button', { name: 'com_scope_overrides_unhide' })[0]);
+    expect(onUnhide).toHaveBeenCalledWith(shadowed);
+  });
+
   it('names the specs of a model spec list the profile owns, not its raw value', () => {
     renderPage(
       <ScopeOverridesDialog

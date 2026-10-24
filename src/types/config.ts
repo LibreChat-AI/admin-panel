@@ -206,7 +206,9 @@ export type SkipReason =
   | 'processServer'
   | 'secretRebinding'
   /** An edit under a value the same save hides: the hide removes it, so it is not sent. */
-  | 'hiddenBySave';
+  | 'hiddenBySave'
+  /** A write of an entry the target hides whole and the save does not unhide: it would show it again. */
+  | 'hiddenEntry';
 
 /** A record key the admin API cannot store, and the dot-path of the object holding it. */
 export interface UnsafeConfigKey {

@@ -1,11 +1,16 @@
 import type * as t from '@/types';
 import {
+  isKeyedEntry,
   isConfigRecord,
   getValueAtPath,
+  parseKeyedPath,
   setValueAtPath,
   validateSection,
+  isPathAtOrUnder,
   mergeConfigLayers,
   removeValueAtPath,
+  getKeyedCollection,
+  removeConfigPathValue,
 } from '@/utils';
 import { getConfigSection } from '@/constants';
 
@@ -57,18 +62,71 @@ function issueKey(issue: t.ConfigIssue): string {
   return `${issue.path}|${issue.code ?? ''}`;
 }
 
-/** Whether `path` is `ancestor` or lies inside it. */
+/** Whether `path` is `ancestor` or lies inside it, an entry key step included (`endpoints.custom["A"]`). */
 function isAtOrUnder(path: string, ancestor: string): boolean {
-  return path === ancestor || path.startsWith(`${ancestor}.`);
+  return isPathAtOrUnder(path, ancestor);
 }
 
 /**
- * Whether a write at `path` clears `tombstone`, as LibreChat's writes do: one
- * at the path or above it below the section, so a whole-section tombstone
- * survives a nested write.
+ * Whether a write of `value` at `path` clears `tombstone`, as LibreChat's
+ * writes do: one at the path or above it below the section, so a
+ * whole-section tombstone survives a nested write; and the hide of a whole
+ * entry (`endpoints.custom["A"]`) the write holds (`keyedTombstones`).
  */
-function clearsTombstone(path: string, tombstone: string): boolean {
+function clearsTombstone(path: string, tombstone: string, value?: t.ConfigValue): boolean {
+  const keyed = parseKeyedPath(tombstone);
+  if (keyed) {
+    if (keyed.rest || !isAtOrUnder(keyed.collection.path, path)) return false;
+    const list =
+      path === keyed.collection.path
+        ? value
+        : getValueAtPath(value, keyed.collection.path.slice(path.length + 1));
+    return Array.isArray(list) && list.some((entry) => isKeyedEntry(keyed, entry));
+  }
   return tombstone === path || (tombstone.includes('.') && isAtOrUnder(path, tombstone));
+}
+
+/** Overrides without what a tombstone or an unset removes; by key, an own entry left bare goes too. */
+function removeAt(overrides: t.ConfigRecord, path: string): t.ConfigRecord {
+  return removeConfigPathValue(overrides, path, true);
+}
+
+/**
+ * The written list with each entry a `renames` hint renames given the key
+ * the stored entry it comes from holds (`renameHints`), and the keyed
+ * tombstones of the old name moved to the new one.
+ */
+function carryEntryRenames(
+  stored: t.ConfigRecord,
+  overrides: t.ConfigRecord,
+  tombstones: string[],
+  renames: readonly t.RenameHint[],
+): { overrides: t.ConfigRecord; tombstones: string[] } {
+  let next = overrides;
+  let moved = tombstones;
+  for (const { path, previousName, name } of renames) {
+    const collection = getKeyedCollection(path);
+    if (!collection) continue;
+    const source = (getValueAtPath(stored, path) as t.ConfigValue[] | undefined)?.find(
+      (entry) => isConfigRecord(entry) && entry.name === previousName,
+    );
+    const list = getValueAtPath(next, path);
+    if (!Array.isArray(list)) continue;
+    next = setValueAtPath(
+      next,
+      path,
+      list.map((entry) =>
+        isConfigRecord(entry) && entry.name === name ? carrySecrets(source, entry) : entry,
+      ),
+    );
+    const from = `${path}[${JSON.stringify(previousName)}]`;
+    moved = moved.map((tombstone) =>
+      isAtOrUnder(tombstone, from)
+        ? `${path}[${JSON.stringify(name)}]${tombstone.slice(from.length)}`
+        : tombstone,
+    );
+  }
+  return { overrides: next, tombstones: moved };
 }
 
 /** Removes `path` and every object that leaves empty above it, stopping at arrays (`prunesEmptyParents`). */
@@ -242,7 +300,7 @@ export function createFakeAdminApi(yaml: t.ConfigRecord) {
     if (tombstone) {
       const fieldPath = String(body?.fieldPath);
       store(key, {
-        overrides: removeValueAtPath(current.overrides, fieldPath),
+        overrides: removeAt(current.overrides, fieldPath),
         tombstones: [...new Set([...current.tombstones, fieldPath])],
       });
       return written(request, { config: docs.get(key) });
@@ -251,8 +309,8 @@ export function createFakeAdminApi(yaml: t.ConfigRecord) {
       if (!doc) return reply(404, { error: 'Config not found' });
       const fieldPath = String(url.searchParams.get('fieldPath'));
       store(key, {
-        overrides: removeValueAtPath(doc.overrides, fieldPath),
-        tombstones: doc.tombstones.filter((p) => p !== fieldPath && !p.startsWith(`${fieldPath}.`)),
+        overrides: removeAt(doc.overrides, fieldPath),
+        tombstones: doc.tombstones.filter((p) => !isAtOrUnder(p, fieldPath)),
       });
       return written(request, { config: redact(docs.get(key)!.overrides) });
     }
@@ -271,18 +329,21 @@ export function createFakeAdminApi(yaml: t.ConfigRecord) {
         encryptAt(entry.fieldPath, entry.value, existing),
       );
     }
-    for (const { path: recordPath, previousName, name } of body?.renames ?? []) {
+    const renames = body?.renames ?? [];
+    for (const { path: recordPath, previousName, name } of renames) {
+      if (getKeyedCollection(recordPath)) continue;
       const source = getValueAtPath(current.overrides, `${recordPath}.${previousName}`);
       const targetPath = `${recordPath}.${name}`;
       const carried = carrySecrets(source, getValueAtPath(overrides, targetPath));
       overrides = setValueAtPath(overrides, targetPath, carried);
     }
-    const paths: string[] = (body?.entries ?? []).map((e: t.SaveEntry) => e.fieldPath);
-    store(key, {
-      overrides,
-      tombstones: current.tombstones.filter((p) => !paths.some((path) => clearsTombstone(path, p))),
-    });
-    return written(request, { config: { overrides: redact(overrides) } });
+    const sent: t.SaveEntry[] = body?.entries ?? [];
+    const kept = current.tombstones.filter(
+      (p) => !sent.some(({ fieldPath, value }) => clearsTombstone(fieldPath, p, value)),
+    );
+    const carried = carryEntryRenames(current.overrides, overrides, kept, renames);
+    store(key, carried);
+    return written(request, { config: { overrides: redact(carried.overrides) } });
   }
 
   /** A document's schema issues in `section`: its overrides over the layer beneath, without what it hides. */
@@ -332,7 +393,7 @@ export function createFakeAdminApi(yaml: t.ConfigRecord) {
           fieldPath,
           encryptAt(fieldPath, op.value, existing),
         ),
-        tombstones: current.tombstones.filter((p) => !clearsTombstone(fieldPath, p)),
+        tombstones: current.tombstones.filter((p) => !clearsTombstone(fieldPath, p, op.value)),
       };
     }
     if (op.op === 'rename') {
@@ -349,7 +410,9 @@ export function createFakeAdminApi(yaml: t.ConfigRecord) {
           );
       return { ...current, overrides: setValueAtPath(current.overrides, fieldPath, renamed) };
     }
-    const overrides = removePruned(current.overrides, fieldPath);
+    const overrides = parseKeyedPath(fieldPath)
+      ? removeAt(current.overrides, fieldPath)
+      : removePruned(current.overrides, fieldPath);
     const kept = current.tombstones.filter((p) => !isAtOrUnder(p, fieldPath));
     return { overrides, tombstones: op.op === 'tombstone' ? [...kept, fieldPath] : kept };
   }

@@ -8,7 +8,7 @@
 import { normalizeEndpointName } from 'librechat-data-provider';
 import type * as t from '@/types';
 import { RESERVED_ENDPOINT_NAMES } from '@/constants';
-import { isConfigRecord } from '@/utils';
+import { isConfigRecord, isAddressableEntryKey } from '@/utils';
 
 const USER_PROVIDED = 'user_provided';
 const ENV_PLACEHOLDER_RE = /\$\{[A-Za-z0-9_]+\}/;
@@ -65,7 +65,11 @@ export function isUsableBaseURL(baseURL: string): boolean {
   }
 }
 
-function nameIssues(name: t.ConfigValue, otherNames: readonly string[]): t.EndpointIssue[] {
+function nameIssues(
+  name: t.ConfigValue,
+  otherNames: readonly string[],
+  maxKeyLength?: number,
+): t.EndpointIssue[] {
   if (!hasText(name)) {
     return [{ field: 'name', code: 'nameRequired', severity: 'error', unserved: true }];
   }
@@ -73,6 +77,16 @@ function nameIssues(name: t.ConfigValue, otherNames: readonly string[]): t.Endpo
   if (trimmed !== name) return [{ field: 'name', code: 'nameWhitespace', severity: 'error' }];
   if (RESERVED_ENDPOINT_NAMES.has(trimmed)) {
     return [{ field: 'name', code: 'nameReserved', severity: 'error' }];
+  }
+  if (maxKeyLength !== undefined && !isAddressableEntryKey(trimmed, maxKeyLength)) {
+    return [
+      {
+        field: 'name',
+        code: 'nameUnaddressable',
+        severity: 'error',
+        params: { max: String(maxKeyLength) },
+      },
+    ];
   }
   if (otherNames.includes(name)) {
     return [{ field: 'name', code: 'nameTaken', severity: 'error', params: { name } }];
@@ -133,8 +147,12 @@ function modelIssues(entry: t.ConfigValue): t.EndpointIssue[] {
 export function validateEndpoint(input: t.EndpointValidationInput): t.EndpointIssue[] {
   const { entry, otherNames, fromLowerLayer, storedSecret, loadedName, carriesKey } = input;
   if (!isConfigRecord(entry)) return [];
-  const issues: t.EndpointIssue[] = fromLowerLayer ? [] : nameIssues(entry.name, otherNames);
   const renamed = loadedName !== undefined && loadedName !== entry.name;
+  /** A name already saved stays addressable or not as it is; only a new or changed one is judged. */
+  const maxKeyLength = loadedName === undefined || renamed ? input.maxKeyLength : undefined;
+  const issues: t.EndpointIssue[] = fromLowerLayer
+    ? []
+    : nameIssues(entry.name, otherNames, maxKeyLength);
   if (storedSecret && renamed && !carriesKey && !hasText(entry.apiKey)) {
     issues.push({ field: 'apiKey', code: 'renameNeedsKey', severity: 'error' });
   } else if (!fromLowerLayer && !storedSecret && !hasText(entry.apiKey)) {

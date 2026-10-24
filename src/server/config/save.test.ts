@@ -1761,3 +1761,183 @@ describe('applyConfigChanges — custom endpoint keys sent to a new destination'
     },
   );
 });
+
+describe('applyConfigChanges — custom endpoints by key (keyedTombstones, renameHints)', () => {
+  const scope: t.WriteTargetRef = {
+    type: 'scope',
+    scope: { principalType: 'group' as t.ConfigScope['principalType'], principalId: 'eng' },
+  };
+  const keyedMeta = (batch: boolean): t.AdminConfigMetaBody => ({
+    features: {
+      changesBatch: batch,
+      expectedRevision: batch,
+      prunesEmptyParents: true,
+      keyedTombstones: true,
+      renameHints: true,
+    },
+    limits: { maxChangeOps: 1000 },
+  });
+  const gptHide = 'endpoints.custom["GPT"]';
+  const header = 'endpoints.custom["Moonshot"].headers.X-Team';
+  const moonshot = customEntries[0];
+
+  it('hides an inherited endpoint by key in one batch, removing the profile own override of it', async () => {
+    api.current!.reportMeta(keyedMeta(true));
+    api.current!.seed('group/eng', {
+      endpoints: { custom: [{ name: 'GPT', titleModel: 'gpt-4o-mini' }] },
+    });
+    const result = await applyConfigChanges(scope, [{ op: 'tombstone', path: gptHide }]);
+    expect(result).toMatchObject({ applied: 1, issues: [], failed: [] });
+    expect(api.current!.writes()[0].body?.ops).toEqual([{ op: 'tombstone', fieldPath: gptHide }]);
+    expect(api.current!.tombstones('group/eng')).toEqual([gptHide]);
+    expect(api.current!.stored('group/eng')).toEqual({ endpoints: { custom: [] } });
+  });
+
+  it('removes and restores an inherited header by key through field writes before change batches', async () => {
+    api.current!.reportMeta(keyedMeta(false));
+    api.current!.seed('group/eng', {});
+    await applyConfigChanges(scope, [{ op: 'tombstone', path: header }]);
+    expect(api.current!.writes()[0]).toMatchObject({
+      method: 'POST',
+      path: '/api/admin/config/group/eng/fields/tombstone',
+      body: { fieldPath: header },
+    });
+    expect(api.current!.tombstones('group/eng')).toEqual([header]);
+    const restored = await applyConfigChanges(scope, [{ op: 'untombstone', path: header }]);
+    expect(restored).toMatchObject({ issues: [], failed: [] });
+    expect(api.current!.writes()[1]).toMatchObject({
+      method: 'DELETE',
+      path: `/api/admin/config/group/eng/fields?fieldPath=${encodeURIComponent(header)}`,
+    });
+    expect(api.current!.tombstones('group/eng')).toEqual([]);
+  });
+
+  it('takes the removals inside a reverted endpoint back by key, keeping the other hides', async () => {
+    api.current!.reportMeta(keyedMeta(true));
+    api.current!.seed('group/eng', {}, [header, gptHide]);
+    const withHeader = { ...moonshot, headers: { 'X-Team': 'blue' } };
+    api.current!.seed('role/__base__', { endpoints: { custom: [withHeader] } });
+    const result = await applyConfigChanges(scope, [
+      upsert('Moonshot', 'Moonshot', withHeader, moonshot),
+    ]);
+    expect(result).toMatchObject({ issues: [], failed: [] });
+    expect(api.current!.writes().at(-1)?.body?.ops).toEqual([{ op: 'unset', fieldPath: header }]);
+    expect(api.current!.tombstones('group/eng')).toEqual([gptHide]);
+  });
+
+  it.each([
+    ['one batch', true],
+    ['field writes', false],
+  ])(
+    'keeps a removal inside an endpoint whose last own setting is cleared (%s)',
+    async (_label, batch) => {
+      api.current!.reportMeta(keyedMeta(batch));
+      api.current!.seed(
+        'group/eng',
+        { endpoints: { custom: [{ name: 'Moonshot', titleModel: 'm' }] } },
+        [header, gptHide],
+      );
+      const withHeader = { ...moonshot, headers: { 'X-Team': 'blue' } };
+      api.current!.seed('role/__base__', { endpoints: { custom: [withHeader] } });
+      const result = await applyConfigChanges(scope, [
+        upsert('Moonshot', 'Moonshot', moonshot, { ...moonshot, titleModel: 'm' }),
+      ]);
+      expect(result).toMatchObject({ applied: 1, issues: [], failed: [], skipped: [] });
+      expect(api.current!.tombstones('group/eng').sort()).toEqual([gptHide, header].sort());
+      expect(api.current!.stored('group/eng')).not.toHaveProperty('endpoints.custom.0');
+    },
+  );
+
+  it('rolls a reset by key back with the removals inside it when writing one again fails', async () => {
+    api.current!.reportMeta(keyedMeta(false));
+    const own = { endpoints: { custom: [{ name: 'Moonshot', titleModel: 'm' }] } };
+    api.current!.seed('group/eng', own, [header, gptHide]);
+    const withHeader = { ...moonshot, headers: { 'X-Team': 'blue' } };
+    api.current!.seed('role/__base__', { endpoints: { custom: [withHeader] } });
+    let failed = false;
+    api.current!.setOverride((request) => {
+      if (failed || request.method !== 'POST' || !request.path.endsWith('/tombstone')) return;
+      failed = true;
+      return { status: 500, body: { error: 'boom' } };
+    });
+    const result = await applyConfigChanges(scope, [
+      upsert('Moonshot', 'Moonshot', moonshot, { ...moonshot, titleModel: 'm' }),
+    ]);
+    expect(result).toMatchObject({ compensated: true, failed: [{ code: 'WRITE_FAILED' }] });
+    expect(api.current!.stored('group/eng')).toEqual(own);
+    expect(api.current!.tombstones('group/eng').sort()).toEqual([gptHide, header].sort());
+  });
+
+  it('rolls an unhide by key back with the own value it reset when a later write fails', async () => {
+    api.current!.reportMeta(keyedMeta(false));
+    const own = {
+      endpoints: { custom: [{ name: 'Moonshot', titleModel: 'm', headers: { 'X-Team': 'red' } }] },
+    };
+    api.current!.seed('group/eng', own, [header]);
+    const withHeader = { ...moonshot, headers: { 'X-Team': 'blue' } };
+    api.current!.seed('role/__base__', { endpoints: { custom: [withHeader] } });
+    api.current!.setOverride((request) => {
+      if (request.method !== 'POST' || !request.path.endsWith('/tombstone')) return;
+      if (request.body?.fieldPath !== gptHide) return;
+      return { status: 500, body: { error: 'boom' } };
+    });
+    const result = await applyConfigChanges(scope, [
+      { op: 'untombstone', path: header },
+      { op: 'tombstone', path: gptHide },
+    ]);
+    expect(result).toMatchObject({ compensated: true, failed: [{ code: 'WRITE_FAILED' }] });
+    expect(api.current!.stored('group/eng')).toEqual(own);
+    expect(api.current!.tombstones('group/eng')).toEqual([header]);
+  });
+
+  it("carries a renamed endpoint's stored key through the PATCH hint before change batches", async () => {
+    api.current!.reportMeta(keyedMeta(false));
+    const stored = { name: 'Secret EP', baseURL: 'https://s', models, apiKey: 'enc:sk-ep' };
+    api.current!.seed('role/__base__', { endpoints: { custom: [stored] } });
+    const loaded = { name: 'Secret EP', baseURL: 'https://s', models, apiKeyPreview: 'sk-...' };
+    const result = await applyConfigChanges(base, [
+      upsert('Renamed EP', 'Secret EP', { ...loaded, name: 'Renamed EP' }, loaded),
+    ]);
+    expect(result).toMatchObject({ issues: [], failed: [], skipped: [] });
+    const [patch] = api.current!.writes();
+    expect(patch.body?.renames).toEqual([
+      { path: 'endpoints.custom', previousName: 'Secret EP', name: 'Renamed EP' },
+    ]);
+    expect(api.current!.stored()).toEqual({
+      endpoints: { custom: [{ ...stored, name: 'Renamed EP' }] },
+    });
+  });
+
+  it.each([
+    ['duplicate_source', 'rename_duplicate_source'],
+    ['duplicate_target', 'rename_duplicate_target'],
+    ['target_exists', 'rename_target_exists'],
+    ['something_new', 'rename_invalid'],
+  ])('shows a refused hint (%s) on the renamed endpoint name', async (reason, code) => {
+    api.current!.reportMeta(keyedMeta(false));
+    const stored = { name: 'Secret EP', baseURL: 'https://s', models, apiKey: 'enc:sk-ep' };
+    api.current!.seed('role/__base__', { endpoints: { custom: [stored] } });
+    api.current!.setOverride((request) =>
+      request.method === 'PATCH'
+        ? {
+            status: 400,
+            body: { error: 'Invalid rename hint', code: 'CONFIG_RENAME_INVALID', reason },
+          }
+        : undefined,
+    );
+    const loaded = { name: 'Secret EP', baseURL: 'https://s', models, apiKeyPreview: 'sk-...' };
+    const result = await applyConfigChanges(base, [
+      upsert('Renamed EP', 'Secret EP', { ...loaded, name: 'Renamed EP' }, loaded),
+    ]);
+    expect(result.failed).toEqual([
+      expect.objectContaining({
+        path: 'endpoints.custom',
+        code,
+        entryIdentity: 'Renamed EP',
+        entryPath: 'name',
+        params: { name: 'Renamed EP', previous: 'Secret EP' },
+      }),
+    ]);
+    expect(api.current!.stored()).toEqual({ endpoints: { custom: [stored] } });
+  });
+});

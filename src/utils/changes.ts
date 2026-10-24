@@ -39,6 +39,7 @@ import {
   getReadOnlyReason,
   TOO_MANY_CHANGES_CODE,
   BUNDLED_WRITE_RULES,
+  BUNDLED_CONFIG_LIMITS,
   BUNDLED_CONFIG_FEATURES,
 } from '@/constants';
 import {
@@ -57,6 +58,19 @@ import {
   valueOrSecretPreview,
   secretKeyForPreviewKey,
 } from './secrets';
+import {
+  isKeyedPath,
+  isKeyedEntry,
+  parseKeyedPath,
+  formatKeyedPath,
+  entryIdentityOf,
+  isPathAtOrUnder,
+  isKeyedAtOrUnder,
+  getKeyedValue,
+  getConfigPathValue,
+  isAddressableEntryKey,
+  removeConfigPathValue,
+} from './keyed';
 import { findYamlManagedValues, getWriteSkipReason } from './writes';
 import { isBlankText, findBlankText, findUnsafeKeys } from './keys';
 import { getSecretCarry, usesChangeBatch } from './contract';
@@ -165,6 +179,8 @@ interface PlanState {
   snapshot: t.WriteSnapshot;
   features: t.ConfigFeatures;
   rules: t.ConfigWriteRules;
+  /** The longest entry name a keyed path may hold (`limits.maxEntryKeyLength`). */
+  maxEntryKeyLength: number;
   sets: Map<string, t.ConfigValue>;
   resets: string[];
   tombstones: string[];
@@ -180,6 +196,10 @@ interface PlanState {
   effective: number;
   /** Entry identities each collection's ops touch (validated as whole entries). */
   touchedEntries: Map<string, Set<string>>;
+  /** Resets of entries by key a collection's changes resolve to, counted with those changes. */
+  entryResets: Set<string>;
+  /** Removals by key inside entries those resets remove, written again after them (`removalsKeptThrough`). */
+  keptRemovals: string[];
 }
 
 function addEntryOp(state: PlanState, op: t.EntryChange): void {
@@ -360,16 +380,317 @@ function resolveCollections(state: PlanState): void {
       carriesSecrets: getSecretCarry(state.features).endpointRename,
     });
     state.issues.push(...resolution.issues);
-    state.renames.push(...resolution.renames);
+    if (usesChangeBatch(state.features)) state.renames.push(...resolution.renames);
+    else state.renameHints.push(...resolution.renames.map(toRenameHint));
     state.warnings.push(...resolution.warnings);
     state.effective += resolution.effective;
     const next = keepRestatedKeys(state, collection, resolution.next, list);
     const restated = !isConfigValueEqual(next, resolution.next);
     if (restated && !resolution.changed) state.effective++;
-    if (!resolution.changed && !restated) continue;
+    const reverted = keyedResetsOfReverts(state, collection, list);
+    if (!resolution.changed && !restated) {
+      addEntryResets(state, reverted);
+      if (reverted.length > 0) state.effective++;
+      continue;
+    }
+    if (usesKeyedResets(state, collection)) {
+      writeByKey(state, collection, next, resolution.renames, reverted);
+      continue;
+    }
     if (next !== undefined) state.sets.set(path, next);
     else state.resets.push(path);
   }
+}
+
+/** A carried rename as the `renames` hint of the field PATCH that writes the renamed entry. */
+function toRenameHint({ path, from, to }: t.EntryRename): t.RenameHint {
+  return { path, previousName: from, name: to };
+}
+
+/** Whether a collection's own entries are reset by key (`keyedTombstones`), never by rewriting or resetting the list. */
+function usesKeyedResets(state: PlanState, collection: t.KeyedCollection): boolean {
+  return state.features.keyedTombstones && collection.merge === 'byKey';
+}
+
+/** An entry's identity as LibreChat matches it, or undefined for an entry without a key. */
+function identityIn(collection: t.KeyedCollection, entry: t.ConfigValue): string | undefined {
+  const name = getEntryKey(entry, collection.key);
+  return name === undefined ? undefined : entryIdentityOf(collection, name);
+}
+
+/** The entries of a collection that keyed tombstones in `paths` hide whole, by identity. */
+function hiddenIdentities(paths: readonly string[], collection: t.KeyedCollection): Set<string> {
+  const identities = new Set<string>();
+  for (const path of paths) {
+    const keyed = parseKeyedPath(path);
+    if (keyed && !keyed.rest && keyed.collection.path === collection.path) {
+      identities.add(entryIdentityOf(collection, keyed.key));
+    }
+  }
+  return identities;
+}
+
+/**
+ * The entries of a collection the target hides whole once the save is
+ * applied, each with why a change of it is not sent: hidden by the same
+ * save (`hiddenBySave`), or hidden already and not unhidden by it
+ * (`hiddenEntry`).
+ */
+function hiddenAfterSave(
+  state: PlanState,
+  collection: t.KeyedCollection,
+): Map<string, t.SkipReason> {
+  const shown = hiddenIdentities(state.untombstones, collection);
+  const hidden = new Map<string, t.SkipReason>();
+  for (const identity of hiddenIdentities(state.snapshot.tombstones, collection)) {
+    if (!shown.has(identity)) hidden.set(identity, 'hiddenEntry');
+  }
+  for (const identity of hiddenIdentities(state.tombstones, collection)) {
+    hidden.set(identity, 'hiddenBySave');
+  }
+  return hidden;
+}
+
+/**
+ * Entry changes of entries the target hides whole once the save is applied
+ * (`keyedTombstones`): LibreChat takes a write of a hidden entry as showing
+ * it again (and a hide removes what the target stores for it), so they are
+ * not sent; Unhide shows one again.
+ */
+function dropHiddenEntryOps(state: PlanState): void {
+  if (!state.features.keyedTombstones) return;
+  for (const [path, list] of state.entryOps) {
+    const collection = getKeyedCollection(path);
+    if (!collection) continue;
+    const hidden = hiddenAfterSave(state, collection);
+    if (hidden.size === 0) continue;
+    const kept = list.filter((op) => {
+      const name = op.identity ?? op.key;
+      const reason = hidden.get(entryIdentityOf(collection, name));
+      if (!reason) return true;
+      state.skipped.push({ fieldPath: entryLocation(path, name), reason });
+      return false;
+    });
+    state.entryOps.set(path, kept);
+  }
+}
+
+/** The keyed tombstones the target stores inside entry `identity` of a collection (`…["Name"].headers.X`). */
+function removalsInside(
+  state: PlanState,
+  collection: t.KeyedCollection,
+  identity: string,
+): string[] {
+  return state.snapshot.tombstones.filter((path) => {
+    const keyed = parseKeyedPath(path);
+    return (
+      keyed !== null &&
+      keyed.rest !== '' &&
+      keyed.collection.path === collection.path &&
+      entryIdentityOf(collection, keyed.key) === identity
+    );
+  });
+}
+
+/**
+ * The removals by key inside the inherited entries a save writes that its
+ * edits take back, each reset by its own path: every removal inside an
+ * entry set back to the layer beneath whole ("Remove overrides"), and each
+ * one whose value the entry holds again as the layer beneath sets it (a key
+ * added back as it was), so its users get what the edit shows. A write
+ * can't take one back: LibreChat keeps a removal under a write of its
+ * entry, and the write leaves out a value equal to the layer beneath's. A
+ * reset of the whole entry would also remove a key the target stores for
+ * it. A removal the save writes again (a pending removal) stays.
+ */
+function keyedResetsOfReverts(
+  state: PlanState,
+  collection: t.KeyedCollection,
+  ops: readonly t.EntryChange[],
+): string[] {
+  if (!usesKeyedResets(state, collection)) return [];
+  const rewritten = state.tombstones.flatMap((path) => parseKeyedPath(path) ?? []);
+  return ops.flatMap((op) => {
+    if (op.op !== 'upsertEntry' || op.identity === null || op.key !== op.identity) return [];
+    const identity = entryIdentityOf(collection, op.identity);
+    const inside = removalsInside(state, collection, identity).filter(
+      (removal) => !rewritten.some((keyed) => isKeyedAtOrUnder(removal, keyed)),
+    );
+    if (inside.length === 0) return [];
+    const lowerEntry = withoutEntryPreview(collection, lowerEntryOf(state, collection, identity));
+    const value = withoutEntryPreview(collection, op.value);
+    if (isConfigValueEqual(value, lowerEntry)) return inside;
+    return inside.filter((removal) => holdsLowerValue(removal, value, lowerEntry));
+  });
+}
+
+/** Whether `entry` holds the value of the layer beneath's entry at the path removal `path` removes inside it. */
+function holdsLowerValue(path: string, entry: t.ConfigValue, lowerEntry: t.ConfigValue): boolean {
+  const rest = parseKeyedPath(path)?.rest ?? '';
+  const held = getValueAtPath(entry, rest);
+  return held !== undefined && isConfigValueEqual(held, getValueAtPath(lowerEntry, rest));
+}
+
+/** The entry `identity` of a collection in the layer beneath the target, if it defines one. */
+function lowerEntryOf(
+  state: PlanState,
+  collection: t.KeyedCollection,
+  identity: string,
+): t.ConfigValue {
+  const lower = getValueAtPath(state.snapshot.lower, collection.path);
+  return (Array.isArray(lower) ? lower : []).find(
+    (entry) => identityIn(collection, entry) === identity,
+  );
+}
+
+/**
+ * The removals by key the target stores inside an inherited entry whose own
+ * entry the save resets by key (its last own setting cleared): that reset
+ * also removes every keyed tombstone of the entry, so those the save does not
+ * take back itself ("Remove overrides", Restore) are written again after it.
+ */
+function removalsKeptThrough(
+  state: PlanState,
+  collection: t.KeyedCollection,
+  identity: string,
+  reverted: readonly string[],
+): string[] {
+  if (lowerEntryOf(state, collection, identity) === undefined) return [];
+  const takenBack = [...reverted, ...state.untombstones].flatMap(
+    (path) => parseKeyedPath(path) ?? [],
+  );
+  return removalsInside(state, collection, identity).filter(
+    (removal) => !takenBack.some((keyed) => isKeyedAtOrUnder(removal, keyed)),
+  );
+}
+
+function addEntryResets(state: PlanState, paths: readonly string[]): void {
+  for (const path of paths) {
+    if (state.resets.includes(path)) continue;
+    state.resets.push(path);
+    state.entryResets.add(path);
+  }
+}
+
+/**
+ * A collection's resolved override, written by key (`keyedTombstones`): an
+ * own entry the save drops (a reverted override, a deleted entry) is reset
+ * by its key, which also removes the target's keyed tombstones inside it, so
+ * the removals of an inherited entry the save keeps are written again after
+ * it; the list is written only for what else changes, and never reset whole,
+ * which would also remove every keyed tombstone under it (another entry's
+ * hide among them). An entry the save hides is left out of the list (its
+ * hide removes it, and a write of it would show it again), and so is one an
+ * unhide resets by key already.
+ */
+function writeByKey(
+  state: PlanState,
+  collection: t.KeyedCollection,
+  next: t.ConfigValue[] | undefined,
+  renames: readonly t.EntryRename[],
+  reverted: readonly string[],
+): void {
+  const { path } = collection;
+  const hidden = hiddenIdentities(state.tombstones, collection);
+  const shown = hiddenIdentities(state.untombstones, collection);
+  const renamedFrom = new Set(renames.map(({ from }) => entryIdentityOf(collection, from)));
+  const written = withoutKeyedRemovals(
+    state,
+    collection,
+    (next ?? []).filter((entry) => !hidden.has(identityIn(collection, entry) ?? '')),
+  );
+  const writtenIds = new Set(written.map((entry) => identityIn(collection, entry)));
+  const stored = getValueAtPath(state.snapshot.stored, path);
+  const own = withoutKeyedRemovals(
+    state,
+    collection,
+    (Array.isArray(stored) ? stored : []).map((entry) => withoutEntryPreview(collection, entry)),
+  );
+  refuseUnaddressableEntries(state, collection, written, own);
+  const kept: t.ConfigValue[] = [];
+  const resets: string[] = [...reverted];
+  for (const entry of own) {
+    const identity = identityIn(collection, entry);
+    const name = getEntryKey(entry, collection.key);
+    const goes =
+      identity !== undefined &&
+      name !== undefined &&
+      !writtenIds.has(identity) &&
+      !renamedFrom.has(identity) &&
+      isAddressableEntryKey(name, state.maxEntryKeyLength);
+    if (!goes) {
+      if (!hidden.has(identity ?? '')) kept.push(entry);
+      continue;
+    }
+    if (hidden.has(identity) || shown.has(identity)) continue;
+    resets.push(formatKeyedPath(path, name));
+    state.keptRemovals.push(...removalsKeptThrough(state, collection, identity, reverted));
+  }
+  addEntryResets(state, resets);
+  if (isConfigValueEqual(written, kept)) return;
+  state.sets.set(path, written);
+}
+
+/** An entry a save adds by a name LibreChat can't address by key, so it could not be removed later. */
+const ENTRY_KEY_UNADDRESSABLE = 'entry_key_unaddressable';
+
+/**
+ * Refuses the entries a by-key save adds to the target (`written`, not already stored by it in
+ * `own`) under a name a keyed path can't hold (`isAddressableEntryKey`): LibreChat removes and
+ * hides entries of such a list only by key, so one stored under that name could never be removed
+ * or reverted again. That includes a first override of an entry defined beneath the target under
+ * such a name. An entry the target already stores under such a name stays as it is.
+ */
+function refuseUnaddressableEntries(
+  state: PlanState,
+  collection: t.KeyedCollection,
+  written: readonly t.ConfigValue[],
+  own: readonly t.ConfigValue[],
+): void {
+  const known = new Set(own.map((entry) => identityIn(collection, entry)));
+  for (const entry of written) {
+    const name = getEntryKey(entry, collection.key);
+    if (name === undefined || known.has(identityIn(collection, entry))) continue;
+    if (isAddressableEntryKey(name, state.maxEntryKeyLength)) continue;
+    const params = { name, max: state.maxEntryKeyLength };
+    state.issues.push({
+      path: collection.path,
+      code: ENTRY_KEY_UNADDRESSABLE,
+      params,
+      message: describeIssueCode(ENTRY_KEY_UNADDRESSABLE, params, ENTRY_KEY_UNADDRESSABLE),
+      entryIdentity: name,
+      entryPath: collection.key,
+    });
+  }
+}
+
+/**
+ * `entries` without the values the save removes inside them by key
+ * (`endpoints.custom["Name"].headers.X-Team`): LibreChat removes the
+ * target's own value there with the tombstone, and a list written with it
+ * would set it again. An entry left with only its key goes.
+ */
+function withoutKeyedRemovals(
+  state: PlanState,
+  collection: t.KeyedCollection,
+  entries: t.ConfigValue[],
+): t.ConfigValue[] {
+  let root: t.ConfigRecord = setValueAtPath({}, collection.path, entries);
+  for (const tombstone of state.tombstones) {
+    const keyed = parseKeyedPath(tombstone);
+    if (keyed?.rest && keyed.collection.path === collection.path) {
+      root = removeConfigPathValue(root, tombstone, true);
+    }
+  }
+  const result = getValueAtPath(root, collection.path);
+  return Array.isArray(result) ? result : [];
+}
+
+function withoutEntryPreview(collection: t.KeyedCollection, entry: t.ConfigValue): t.ConfigValue {
+  const preview = collection.secret?.preview;
+  if (!preview || !isConfigRecord(entry) || !(preview in entry)) return entry;
+  const { [preview]: _omit, ...rest } = entry;
+  return rest;
 }
 
 /**
@@ -637,6 +958,7 @@ function foldResets(state: PlanState): void {
 function dropNoopResets(state: PlanState): void {
   const { stored, lower } = state.snapshot;
   state.resets = state.resets.filter((path) => {
+    if (isKeyedPath(path)) return keepsKeyedReset(state, path);
     if (valueOrSecretPreview(stored, path) !== undefined) {
       state.effective++;
       return true;
@@ -649,12 +971,50 @@ function dropNoopResets(state: PlanState): void {
   });
 }
 
+/**
+ * Whether a reset by key (`endpoints.custom["Name"]`) removes anything: the
+ * target's own entry or value there, or a keyed tombstone at or inside it.
+ * One a collection's changes resolved to is counted with those changes.
+ */
+function keepsKeyedReset(state: PlanState, path: string): boolean {
+  const keyed = parseKeyedPath(path);
+  const removes =
+    keyed !== null &&
+    (getKeyedValue(state.snapshot.stored, keyed) !== undefined ||
+      state.snapshot.tombstones.some((tombstone) => isKeyedAtOrUnder(tombstone, keyed)));
+  if (removes && !state.entryResets.has(path)) state.effective++;
+  return removes;
+}
+
+/**
+ * An unhide of a whole entry by key (`endpoints.custom["Name"]`) also resets
+ * the keyed tombstones inside it (a removed header), so those the save keeps
+ * are written again after it: Unhide shows the entry, as it was before the
+ * hide. So are the removals a reset of the target's own entry would take
+ * along (`removalsKeptThrough`). They are not counted as changes of their own.
+ */
+function keepRemovalsInside(state: PlanState): void {
+  if (!state.features.keyedTombstones) return;
+  const keep = (tombstone: string) => {
+    if (state.untombstones.includes(tombstone) || state.tombstones.includes(tombstone)) return;
+    state.tombstones.push(tombstone);
+  };
+  for (const shown of state.untombstones) {
+    const keyed = parseKeyedPath(shown);
+    if (!keyed || keyed.rest) continue;
+    for (const tombstone of state.snapshot.tombstones) {
+      if (tombstone !== shown && isKeyedAtOrUnder(tombstone, keyed)) keep(tombstone);
+    }
+  }
+  state.keptRemovals.forEach(keep);
+}
+
 function parentPath(path: string): string {
   return path.slice(0, Math.max(0, path.lastIndexOf('.')));
 }
 
 function isAtOrUnder(path: string, ancestor: string): boolean {
-  return path === ancestor || path.startsWith(`${ancestor}.`);
+  return isPathAtOrUnder(path, ancestor);
 }
 
 /**
@@ -684,6 +1044,7 @@ function emptiedAncestor(
   path: string,
   tombstones: readonly string[],
 ): string {
+  if (isKeyedPath(path)) return path;
   let current = path;
   const leftEmpty = getValueAtPath(storedAfter, current);
   if (isConfigRecord(leftEmpty) && Object.keys(leftEmpty).length > 0) return current;
@@ -699,8 +1060,13 @@ function emptiedAncestor(
   return current;
 }
 
-/** Removes `path` from stored overrides, with a secret's preview companion (LibreChat removes both). */
+/**
+ * Removes `path` from stored overrides, with a secret's preview companion
+ * (LibreChat removes both); a keyed path by its entry, which goes once it
+ * holds nothing but its key.
+ */
 function removeStored(stored: t.ConfigRecord, path: string): t.ConfigRecord {
+  if (isKeyedPath(path)) return removeConfigPathValue(stored, path, true);
   const removed = removeValueAtPath(stored, path);
   return isSecretPath(path) ? removeValueAtPath(removed, secretPreviewPath(path)) : removed;
 }
@@ -732,13 +1098,26 @@ function keepOmittedSecrets(previous: t.ConfigValue, next: t.ConfigValue): t.Con
 }
 
 /**
+ * `stored` without what the plan's unhides by key reset
+ * (`endpoints.custom["Name"].headers.X-Team`): LibreChat removes the
+ * target's own value there with the tombstone, before anything else
+ * (`keyedTombstones`; before it, such an unset touched no stored value).
+ */
+function withoutKeyedUnhides(state: PlanState, stored: t.ConfigRecord): t.ConfigRecord {
+  if (!state.features.keyedTombstones) return stored;
+  return state.untombstones
+    .filter(isKeyedPath)
+    .reduce((current, path) => removeStored(current, path), stored);
+}
+
+/**
  * The target's stored overrides once the plan is applied as LibreChat
- * applies it: renames, sets (a stored secret an object omits is kept), the
- * secrets `renames` hints carry from the stored entry each names, then
- * removals.
+ * applies it: unhides by key (which reset what the target stores there),
+ * renames, sets (a stored secret an object omits is kept), the secrets
+ * `renames` hints carry from the stored entry each names, then removals.
  */
 function applyToStored(state: PlanState): t.ConfigRecord {
-  let stored = state.snapshot.stored;
+  let stored = withoutKeyedUnhides(state, state.snapshot.stored);
   for (const { path, from, to } of state.renames) {
     const record = getValueAtPath(stored, path);
     if (isConfigRecord(record)) stored = setValueAtPath(stored, path, renameKey(record, from, to));
@@ -747,6 +1126,17 @@ function applyToStored(state: PlanState): t.ConfigRecord {
     stored = setValueAtPath(stored, path, keepOmittedSecrets(getValueAtPath(stored, path), value));
   }
   for (const { path, previousName, name } of state.renameHints) {
+    const collection = getKeyedCollection(path);
+    if (collection) {
+      stored = withCarriedEntrySecret(
+        stored,
+        state.snapshot.stored,
+        collection,
+        previousName,
+        name,
+      );
+      continue;
+    }
     const target = `${path}.${name}`;
     const server = getValueAtPath(stored, target);
     if (!isConfigRecord(server)) continue;
@@ -755,6 +1145,33 @@ function applyToStored(state: PlanState): t.ConfigRecord {
   }
   for (const path of [...state.resets, ...state.tombstones]) stored = removeStored(stored, path);
   return stored;
+}
+
+/**
+ * `stored` with the masked preview of the key entry `from` stores (in
+ * `source`) on entry `to`, which a `renames` hint carries it to: LibreChat
+ * moves the encrypted key to the renamed entry when the write omits one.
+ */
+function withCarriedEntrySecret(
+  stored: t.ConfigRecord,
+  source: t.ConfigRecord,
+  collection: t.KeyedCollection,
+  from: string,
+  to: string,
+): t.ConfigRecord {
+  const secret = collection.secret;
+  const list = getValueAtPath(stored, collection.path);
+  const sourceList = getValueAtPath(source, collection.path);
+  if (!secret || !Array.isArray(list) || !Array.isArray(sourceList)) return stored;
+  const preview = asConfigRecord(
+    sourceList.find((entry) => getEntryKey(entry, collection.key) === from),
+  )[secret.preview];
+  if (typeof preview !== 'string' || preview === '') return stored;
+  const next = list.map((entry) => {
+    if (getEntryKey(entry, collection.key) !== to || !isConfigRecord(entry)) return entry;
+    return secret.key in entry ? entry : { ...entry, [secret.preview]: preview };
+  });
+  return setValueAtPath(stored, collection.path, next);
 }
 
 /**
@@ -794,6 +1211,7 @@ function validateCollectionSet(
       .filter((entry) => hasHiddenSecret(entry, collection))
       .map((entry) => getEntryKey(entry, collection.key)),
     ...state.renames.filter(({ path }) => path === collection.path).map(({ to }) => to),
+    ...state.renameHints.filter(({ path }) => path === collection.path).map(({ name }) => name),
   ]);
   return value.flatMap((entry, index) => {
     const identity = getEntryKey(entry, collection.key);
@@ -852,10 +1270,20 @@ function isInCollection(path: string): boolean {
   return findKeyedCollectionEntry(path) !== undefined;
 }
 
-/** The layer beneath without the values `tombstones` hide. */
-function hideAll(lower: t.ConfigRecord, tombstones: Iterable<string>): t.ConfigRecord {
+/**
+ * The layer beneath without the values `tombstones` hide; a keyed one only
+ * where LibreChat applies it (`keyedTombstones`).
+ */
+function hideAll(
+  lower: t.ConfigRecord,
+  tombstones: Iterable<string>,
+  keyedTombstones: boolean,
+): t.ConfigRecord {
   let result = lower;
-  for (const path of tombstones) result = removeValueAtPath(result, path);
+  for (const path of tombstones) {
+    if (!isKeyedPath(path)) result = removeValueAtPath(result, path);
+    else if (keyedTombstones) result = removeConfigPathValue(result, path);
+  }
   return result;
 }
 
@@ -868,9 +1296,26 @@ function tombstonesAfter(state: PlanState, sets: readonly string[]): string[] {
   const kept = state.snapshot.tombstones.filter(
     (tombstone) =>
       !removals.some((path) => isAtOrUnder(tombstone, path)) &&
-      !sets.some((path) => isAtOrUnder(path, tombstone)),
+      !sets.some(
+        (path) => isAtOrUnder(path, tombstone) || writesHiddenEntry(state, path, tombstone),
+      ),
   );
   return [...new Set([...kept, ...state.tombstones])];
+}
+
+/**
+ * Whether the set at `path` writes the entry a whole-entry keyed tombstone
+ * hides, which LibreChat takes as showing it again.
+ */
+function writesHiddenEntry(state: PlanState, path: string, tombstone: string): boolean {
+  const keyed = parseKeyedPath(tombstone);
+  if (!keyed || keyed.rest || !isAtOrUnder(keyed.collection.path, path)) return false;
+  const value = state.sets.get(path);
+  const list =
+    path === keyed.collection.path
+      ? value
+      : getValueAtPath(value, keyed.collection.path.slice(path.length + 1));
+  return Array.isArray(list) && list.some((entry) => isKeyedEntry(keyed, entry));
 }
 
 /**
@@ -888,15 +1333,16 @@ function validationFloors(
   sets: readonly string[],
 ): { before: t.ConfigRecord; after: t.ConfigRecord } {
   const { lower, tombstones } = state.snapshot;
+  const { keyedTombstones } = state.features;
   if (usesChangeBatch(state.features)) {
     return {
-      before: hideAll(lower, tombstones),
-      after: hideAll(lower, tombstonesAfter(state, sets)),
+      before: hideAll(lower, tombstones, keyedTombstones),
+      after: hideAll(lower, tombstonesAfter(state, sets), keyedTombstones),
     };
   }
   const setSections = new Set(sets.map(getConfigSection));
   const hidden = state.tombstones.filter((path) => setSections.has(getConfigSection(path)));
-  return { before: lower, after: hideAll(lower, hidden) };
+  return { before: lower, after: hideAll(lower, hidden, keyedTombstones) };
 }
 
 /**
@@ -908,7 +1354,7 @@ function validationFloors(
  */
 function validateSections(state: PlanState, blocked: ReadonlySet<string>): void {
   const sets = [...state.sets.keys()].filter((path) => !blocked.has(path));
-  let storedAfter = state.snapshot.stored;
+  let storedAfter = withoutKeyedUnhides(state, state.snapshot.stored);
   for (const path of sets) storedAfter = setValueAtPath(storedAfter, path, state.sets.get(path));
   for (const path of [...state.resets, ...state.tombstones]) {
     storedAfter = removeStored(storedAfter, path);
@@ -963,6 +1409,11 @@ function findMergedBackKeys(state: PlanState): void {
 function changedLocations(state: PlanState): string[] {
   const paths = [...state.sets.keys(), ...state.resets, ...state.tombstones, ...state.untombstones];
   return paths.flatMap((path) => {
+    const keyed = parseKeyedPath(path);
+    if (keyed) {
+      const entry = entryLocation(keyed.collection.path, keyed.key);
+      return [keyed.rest ? `${entry}.${keyed.rest}` : entry];
+    }
     const entries = state.touchedEntries.get(path);
     return entries ? [...entries].map((name) => entryLocation(path, name)) : [path];
   });
@@ -1001,10 +1452,11 @@ function findUncopiedCopies(state: PlanState, storedAfter: t.ConfigRecord): void
 function findBindingChanges(state: PlanState, storedAfter: t.ConfigRecord): void {
   const renamedIn = (record: string) =>
     state.renames.filter(({ path }) => path === record).map(({ from, to }) => [to, from] as const);
-  const origins = new Map([
-    ...renamedIn('mcpServers'),
-    ...state.renameHints.map(({ previousName, name }) => [name, previousName] as const),
-  ]);
+  const hintedIn = (record: string) =>
+    state.renameHints
+      .filter(({ path }) => path === record)
+      .map(({ previousName, name }) => [name, previousName] as const);
+  const origins = new Map([...renamedIn('mcpServers'), ...hintedIn('mcpServers')]);
   const input: t.CredentialBindingInput = {
     stored: state.snapshot.stored,
     storedAfter,
@@ -1014,7 +1466,7 @@ function findBindingChanges(state: PlanState, storedAfter: t.ConfigRecord): void
       after: tombstonesAfter(state, [...state.sets.keys()]),
     },
     origins,
-    endpointOrigins: new Map(renamedIn('endpoints.custom')),
+    endpointOrigins: new Map([...renamedIn('endpoints.custom'), ...hintedIn('endpoints.custom')]),
   };
   state.issues.push(...findSecretReentryIssues(input, state.features));
   state.warnings.push(...findRebindingWarnings(input, state.features));
@@ -1023,8 +1475,8 @@ function findBindingChanges(state: PlanState, storedAfter: t.ConfigRecord): void
 /**
  * Resolves a batch of changes against the target's stored overrides and the
  * layer beneath it, into the admin API writes that implement it, by the
- * server's contract `features` and write `rules` (the bundled ones: an older
- * server). Everything
+ * server's contract `features`, write `rules` and `limits` (the bundled ones:
+ * an older server). Everything
  * is checked before anything may be written: write rules (read-only and
  * YAML-managed paths, process-backed MCP fields, unsafe keys), field and
  * entry schemas, whole sections, and the keyed collection rules. The client
@@ -1036,11 +1488,13 @@ export function planConfigChanges(
   snapshot: t.WriteSnapshot,
   features: t.ConfigFeatures = BUNDLED_CONFIG_FEATURES,
   rules: t.ConfigWriteRules = BUNDLED_WRITE_RULES,
+  limits: Pick<t.ConfigLimits, 'maxEntryKeyLength'> = BUNDLED_CONFIG_LIMITS,
 ): t.WritePlan {
   const state: PlanState = {
     snapshot,
     features,
     rules,
+    maxEntryKeyLength: limits.maxEntryKeyLength,
     sets: new Map(),
     resets: [],
     tombstones: [],
@@ -1055,8 +1509,11 @@ export function planConfigChanges(
     warnings: [],
     effective: 0,
     touchedEntries: new Map(),
+    entryResets: new Set(),
+    keptRemovals: [],
   };
   collectOps(state, ops);
+  dropHiddenEntryOps(state);
   addRestatedEntries(state);
   resolveCollections(state);
   resolveCarries(state);
@@ -1065,6 +1522,7 @@ export function planConfigChanges(
   dropNoopResets(state);
   resolveServerRestates(state);
   state.effective += state.tombstones.length + state.untombstones.length;
+  keepRemovalsInside(state);
   const storedAfter = pruneEmptyParents(state);
   validateSections(state, validateSets(state));
   findMergedBackKeys(state);
@@ -1158,9 +1616,33 @@ function toUnsetOp(fieldPath: string): t.ConfigBatchOp {
   return { op: 'unset', fieldPath };
 }
 
+function toTombstoneOp(fieldPath: string): t.ConfigBatchOp {
+  return { op: 'tombstone', fieldPath };
+}
+
+/**
+ * A plan's tombstones split by when they are sent: those at or inside what
+ * a reset of the plan removes by key (`endpoints.custom["Name"]`) go after
+ * the resets (`late`), since that reset removes every keyed tombstone there
+ * (a removed header the save keeps, or one it adds there); the rest go
+ * before the sets (`early`).
+ */
+export function orderTombstones(
+  plan: Pick<t.WritePlan, 'resets' | 'tombstones'>,
+): t.TombstoneOrder {
+  const keyedResets = plan.resets.flatMap((path) => parseKeyedPath(path) ?? []);
+  const order: t.TombstoneOrder = { early: [], late: [] };
+  for (const tombstone of plan.tombstones) {
+    const late = keyedResets.some((keyed) => isKeyedAtOrUnder(tombstone, keyed));
+    (late ? order.late : order.early).push(tombstone);
+  }
+  return order;
+}
+
 /**
  * A plan as the changes of one `POST …/changes` batch: unhides, hides,
- * renames, sets, then resets, one `unset` per path a hide or set does not
+ * renames, sets, resets, then the hides inside an entry a reset removes
+ * whole (`orderTombstones`), one `unset` per path a hide or set does not
  * already write (a batch refuses two changes at one path). An unhide removes
  * everything at and under its path, so it goes first: after them, it would
  * remove a set or hide inside it (an MCP server shown again with its URL
@@ -1173,14 +1655,16 @@ export function toBatchOps(plan: t.WritePlan): t.ConfigBatchOp[] {
   const unhides = [...new Set(plan.untombstones)].filter((path) => !written.has(path));
   const removed = new Set([...written, ...unhides]);
   const resets = [...new Set(plan.resets)].filter((path) => !removed.has(path));
+  const { early, late } = orderTombstones(plan);
   return [
     ...unhides.map(toUnsetOp),
-    ...plan.tombstones.map((fieldPath): t.ConfigBatchOp => ({ op: 'tombstone', fieldPath })),
+    ...early.map(toTombstoneOp),
     ...plan.renames.map(
       ({ path, from, to }): t.ConfigBatchOp => ({ op: 'rename', fieldPath: path, from, to }),
     ),
     ...plan.sets.map(({ fieldPath, value }): t.ConfigBatchOp => ({ op: 'set', fieldPath, value })),
     ...resets.map(toUnsetOp),
+    ...late.map(toTombstoneOp),
   ];
 }
 
@@ -1240,6 +1724,7 @@ function storesWrite(intended: t.ConfigRecord, stored: t.ConfigRecord, path: str
 
 /** Whether `stored` still holds something at `path`: a value, or for a secret its masked preview. */
 function holdsAt(stored: t.ConfigRecord, path: string): boolean {
+  if (isKeyedPath(path)) return getConfigPathValue(stored, path) !== undefined;
   const value = getValueAtPath(stored, path);
   if (isConfigRecord(value) || !isSecretPath(path)) return value !== undefined;
   return holdsSecretAt(stored, path);

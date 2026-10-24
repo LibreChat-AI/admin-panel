@@ -23,12 +23,15 @@ const META = {
     roleRenameMovesProfile: true,
     resolvedApi: true,
     catalogApi: true,
+    keyedTombstones: true,
+    renameHints: true,
   },
   limits: {
     maxPatchEntries: 100,
     maxChangeOps: 1000,
     overrideCacheTtlMs: 60000,
     catalogModelsTtlMs: 90000,
+    maxEntryKeyLength: 128,
   },
   rules: {
     arrayMergeKeys: { 'endpoints.custom': 'name', 'endpoints.azureOpenAI.groups': 'group' },
@@ -60,6 +63,8 @@ describe('readConfigContract', () => {
       roleRenameMovesProfile: true,
       resolvedApi: true,
       catalogApi: true,
+      keyedTombstones: true,
+      renameHints: true,
       envStatus: false,
       changesBatch: false,
     });

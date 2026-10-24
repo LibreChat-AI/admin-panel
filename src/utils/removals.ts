@@ -65,9 +65,14 @@ function keepsSecret(secret: t.StoredSecret, plan: t.WritePlan): boolean {
   const { collection, identity } = secret.entry;
   const key = getKeyedCollection(collection)?.key;
   if (key === undefined) return false;
-  const renamed = plan.renames
-    .filter((rename) => rename.path === collection && rename.from === identity)
-    .map((rename) => rename.to);
+  const renamed = [
+    ...plan.renames
+      .filter((rename) => rename.path === collection && rename.from === identity)
+      .map((rename) => rename.to),
+    ...plan.renameHints
+      .filter((hint) => hint.path === collection && hint.previousName === identity)
+      .map((hint) => hint.name),
+  ];
   const list = getValueAtPath(plan.storedAfter, collection);
   return [identity, ...renamed].some((name) => findEntryIndex(list, key, name) >= 0);
 }

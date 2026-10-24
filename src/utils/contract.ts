@@ -60,12 +60,13 @@ export function usesChangeBatch(features: t.ConfigFeatures): boolean {
  * which the panel never reads (`SecretCarry`). A change batch renames a
  * stored entry whole (`rename`), MCP servers once their secrets are in the
  * registry (`recordSecrets`); a field PATCH carries an MCP server's secrets
- * to a new name, a copy included, through its `renames` hint.
+ * to a new name, a copy included, through its `renames` hint, and a custom
+ * endpoint's key once the hint takes endpoints (`renameHints`).
  */
 export function getSecretCarry(features: t.ConfigFeatures): t.SecretCarry {
   const batch = usesChangeBatch(features);
   return {
-    endpointRename: batch,
+    endpointRename: batch || features.renameHints,
     mcpRename: features.recordSecrets,
     mcpCopy: features.recordSecrets && !batch,
   };

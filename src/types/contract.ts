@@ -26,6 +26,8 @@ export type ConfigFeatureFlag =
   | 'yamlSecretPreview'
   | 'envAllowlist'
   | 'secretRebinding'
+  | 'keyedTombstones'
+  | 'renameHints'
   | 'writeReport'
   | 'issueParams'
   | 'resolvedApi'
@@ -44,6 +46,8 @@ export interface ConfigLimits {
   overrideCacheTtlMs: number;
   /** How long `GET /catalog` reuses a scope's model lists while its endpoint config is unchanged (`catalogApi`). */
   catalogModelsTtlMs: number;
+  /** Longest entry name a keyed path (`keyedTombstones`) can name. */
+  maxEntryKeyLength: number;
 }
 
 /** A secret config field: encrypted at rest, omitted from reads, kept when a write omits it. */
@@ -151,7 +155,7 @@ export interface ConfigWriteRules {
 
 /** Which renames and duplicates keep the secrets their source stores (see `getSecretCarry`). */
 export interface SecretCarry {
-  /** A renamed custom endpoint keeps its stored API key. */
+  /** A renamed custom endpoint keeps its stored API key: a batch `rename`, or a field PATCH's `renames` hint (`renameHints`). */
   endpointRename: boolean;
   /** A renamed MCP server keeps its stored API key and OAuth client secret. */
   mcpRename: boolean;

@@ -8,6 +8,18 @@ import type { FieldRendererProps } from './config-ui';
  */
 export type SpecSelectionMode = 'enforce' | 'prioritize' | 'endpoints';
 
+/** What the "Users will see" line of the spec list is worded from (`previewText`). */
+export interface SpecsPreviewInput {
+  /** The specs the target's members get. */
+  items: ConfigValue[];
+  mode: SpecSelectionMode;
+  menuOn: boolean;
+  /** The labels of the endpoints the menu adds that the members get. */
+  added: string[];
+  /** The menu's added endpoints are all hidden for the members, so it adds none (`keyedTombstones`). */
+  addsNone?: boolean;
+}
+
 /** Which "new chat" default a spec is: none, the soft default, or the default (one of each per list). */
 export type SpecDefaultKind = 'none' | 'soft' | 'default';
 

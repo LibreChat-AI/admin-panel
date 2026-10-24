@@ -112,6 +112,8 @@ const ISSUE_MESSAGES: Readonly<Record<string, string>> = {
   too_big_items: 'must have at most {{maximum}} items',
   union_dropped_key: "isn't valid for this kind of value",
   duplicate_merge_key: 'repeats a name another entry already uses',
+  entry_key_unaddressable:
+    'is named "{{name}}", which LibreChat could not remove or hide later: use at most {{max}} characters, not starting with $ or __, and not constructor or prototype',
   missing_merge_key: 'needs a name',
   indexed_merge_key_write: 'must be saved as a whole list',
   invalid_document: 'is not a valid configuration',

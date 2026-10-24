@@ -115,12 +115,15 @@ export function baseLayersFixture(data: t.BaseConfigData = baseConfigFixture()):
 export function scopeLayersFixture(
   scope: t.ResolvedConfigData = scopeConfigFixture(),
   base: t.BaseConfigData = baseConfigFixture(),
+  keyedTombstones = false,
 ): t.ValueLayers {
   return withScopeLayer(
     baseLayersFixture(base),
     { principalType: PrincipalType.ROLE, name: 'USER' },
     scope,
     FIXTURE_SCHEMA_PATHS,
+    undefined,
+    keyedTombstones,
   );
 }
 

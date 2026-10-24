@@ -17,6 +17,7 @@ import {
   hasConfigValue,
   isConfigValueEqual,
   findMovedEndpointKey,
+  findKeyedCollectionEntry,
 } from '@/utils';
 import {
   NameRow,
@@ -32,7 +33,8 @@ import { SecretNotSentNotice } from '../../fields/SecretField';
 import { renderInlineField, toFieldId } from '../../renderer';
 import { RestatesContext } from '@/contexts/RestatesContext';
 import { ParamDefinitionsRow } from './ParamDefinitions';
-import { useLocalize, useConfigFeatures } from '@/hooks';
+import { useLocalize, useConfigFeatures, useEntryKeyRemoval } from '@/hooks';
+import { EntryKeyRemovalContext } from '@/contexts/EntryKeyRemovalContext';
 import { UnknownSettings } from '../../UnknownSettings';
 import { FieldChips, ShadowChip } from './Chips';
 import { HeaderPlaceholders } from './Request';
@@ -148,9 +150,20 @@ export function EndpointEditor({
   revealField,
   onRevealed,
   editSessionId,
+  loadedName,
+  onHideField,
+  onUnhideField,
 }: t.EndpointEditorProps) {
   const localize = useLocalize();
   const { yamlSecretPreview, secretRebinding } = useConfigFeatures();
+  const keyRemoval = useEntryKeyRemoval({
+    collectionPath: findKeyedCollectionEntry(path)?.collection.path ?? '',
+    entryPath: path,
+    name: loadedName,
+    lowerEntry,
+    onHide: onHideField,
+    onUnhide: onUnhideField,
+  });
   const pageErrors = useContext(ConfigErrorsContext);
   const { restates } = useContext(RestatesContext);
   const index = useMemo(() => indexFields(fields), [fields]);
@@ -429,92 +442,96 @@ export function EndpointEditor({
 
   return (
     <ConfigErrorsProvider value={errors}>
-      <EntryFieldChipsContext.Provider value={renderChips}>
-        <div className="flex flex-col gap-6">
-          {!essentialsOnly && layout.length > 1 && (
-            <EndpointSectionNav
-              idPrefix={toFieldId(path)}
-              sections={layout.map(({ section }) => ({
-                id: section.id,
-                label: localize(section.labelKey),
-                errorCount: errorCount(section.id),
-              }))}
-            />
-          )}
-          {layout.map(({ section, visible, hidden, warnings: sectionWarnings }) => {
-            const headingId = `${sectionDomId(section.id)}-heading`;
-            return (
-              <section
-                key={section.id}
-                id={sectionDomId(section.id)}
-                aria-labelledby={headingId}
-                className="flex scroll-mt-14 flex-col gap-2"
-              >
-                <header className="flex flex-col gap-0.5 px-(--settings-row-px)">
-                  <h3
-                    id={headingId}
-                    className="m-0 text-sm font-semibold text-(--cui-color-text-default)"
-                  >
-                    {localize(section.labelKey)}
-                  </h3>
-                  {section.descriptionKey && (
-                    <p className="m-0 text-xs text-(--cui-color-text-muted)">
-                      {localize(section.descriptionKey)}
+      <EntryKeyRemovalContext.Provider value={keyRemoval}>
+        <EntryFieldChipsContext.Provider value={renderChips}>
+          <div className="flex flex-col gap-6">
+            {!essentialsOnly && layout.length > 1 && (
+              <EndpointSectionNav
+                idPrefix={toFieldId(path)}
+                sections={layout.map(({ section }) => ({
+                  id: section.id,
+                  label: localize(section.labelKey),
+                  errorCount: errorCount(section.id),
+                }))}
+              />
+            )}
+            {layout.map(({ section, visible, hidden, warnings: sectionWarnings }) => {
+              const headingId = `${sectionDomId(section.id)}-heading`;
+              return (
+                <section
+                  key={section.id}
+                  id={sectionDomId(section.id)}
+                  aria-labelledby={headingId}
+                  className="flex scroll-mt-14 flex-col gap-2"
+                >
+                  <header className="flex flex-col gap-0.5 px-(--settings-row-px)">
+                    <h3
+                      id={headingId}
+                      className="m-0 text-sm font-semibold text-(--cui-color-text-default)"
+                    >
+                      {localize(section.labelKey)}
+                    </h3>
+                    {section.descriptionKey && (
+                      <p className="m-0 text-xs text-(--cui-color-text-muted)">
+                        {localize(section.descriptionKey)}
+                      </p>
+                    )}
+                  </header>
+                  {sectionWarnings.map((warning) => (
+                    <Banner key={warning} tone="warning" role="status">
+                      {warning}
+                    </Banner>
+                  ))}
+                  {visible.length > 0 ? (
+                    <div className="flex flex-col">
+                      {visible.map((def) => renderField(def.key))}
+                    </div>
+                  ) : (
+                    <p className="m-0 px-(--settings-row-px) text-sm text-(--cui-color-text-muted)">
+                      {localize('com_config_ce_section_nothing_set')}
                     </p>
                   )}
-                </header>
-                {sectionWarnings.map((warning) => (
-                  <Banner key={warning} tone="warning" role="status">
-                    {warning}
-                  </Banner>
-                ))}
-                {visible.length > 0 ? (
-                  <div className="flex flex-col">{visible.map((def) => renderField(def.key))}</div>
-                ) : (
-                  <p className="m-0 px-(--settings-row-px) text-sm text-(--cui-color-text-muted)">
-                    {localize('com_config_ce_section_nothing_set')}
-                  </p>
-                )}
-                {hidden.length > 0 && (
-                  <div className="px-(--settings-row-px)">
-                    <div className="w-64 max-w-full">
-                      <SelectField
-                        id={`${sectionDomId(section.id)}-add`}
-                        value={undefined}
-                        options={hidden.map((def) => ({
-                          value: def.key,
-                          label: labelForPath(`${path}.${def.key}`, localize),
-                        }))}
-                        placeholder={localize('com_config_ce_add_setting')}
-                        onChange={(key) => {
-                          setShown((prev) => new Set(prev).add(key));
-                          setFocusKey(key);
-                        }}
-                        aria-label={localize('com_config_ce_add_setting_a11y', {
-                          section: localize(section.labelKey),
-                        })}
-                      />
+                  {hidden.length > 0 && (
+                    <div className="px-(--settings-row-px)">
+                      <div className="w-64 max-w-full">
+                        <SelectField
+                          id={`${sectionDomId(section.id)}-add`}
+                          value={undefined}
+                          options={hidden.map((def) => ({
+                            value: def.key,
+                            label: labelForPath(`${path}.${def.key}`, localize),
+                          }))}
+                          placeholder={localize('com_config_ce_add_setting')}
+                          onChange={(key) => {
+                            setShown((prev) => new Set(prev).add(key));
+                            setFocusKey(key);
+                          }}
+                          aria-label={localize('com_config_ce_add_setting_a11y', {
+                            section: localize(section.labelKey),
+                          })}
+                        />
+                      </div>
                     </div>
-                  </div>
-                )}
-              </section>
-            );
-          })}
-          {!essentialsOnly && (
-            <>
-              <UnknownSettings fields={fields} value={value} path={path} />
-              {placedGroups(index).map((group) => (
-                <UnknownSettings
-                  key={group.key}
-                  fields={group.children ?? []}
-                  value={value[group.key]}
-                  path={`${path}.${group.key}`}
-                />
-              ))}
-            </>
-          )}
-        </div>
-      </EntryFieldChipsContext.Provider>
+                  )}
+                </section>
+              );
+            })}
+            {!essentialsOnly && (
+              <>
+                <UnknownSettings fields={fields} value={value} path={path} />
+                {placedGroups(index).map((group) => (
+                  <UnknownSettings
+                    key={group.key}
+                    fields={group.children ?? []}
+                    value={value[group.key]}
+                    path={`${path}.${group.key}`}
+                  />
+                ))}
+              </>
+            )}
+          </div>
+        </EntryFieldChipsContext.Provider>
+      </EntryKeyRemovalContext.Provider>
     </ConfigErrorsProvider>
   );
 }

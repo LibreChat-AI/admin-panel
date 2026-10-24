@@ -339,8 +339,8 @@ export function useConfigSave({
   );
 
   const plan = useMemo(
-    () => planConfigChanges(ops, snapshot, features, writeRules),
-    [ops, snapshot, features, writeRules],
+    () => planConfigChanges(ops, snapshot, features, writeRules, limits),
+    [ops, snapshot, features, writeRules, limits],
   );
 
   /**

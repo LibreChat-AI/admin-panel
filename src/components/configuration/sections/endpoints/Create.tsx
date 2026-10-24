@@ -2,7 +2,13 @@ import { useMemo, useState } from 'react';
 import { Button } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { BLANK_ENDPOINT_TEMPLATE, ENDPOINT_TEMPLATES } from '@/constants';
-import { useLocalize, useValuesScope, useDiscardPrompt } from '@/hooks';
+import {
+  useLocalize,
+  useValuesScope,
+  useDiscardPrompt,
+  useConfigContract,
+  useConfigFeatures,
+} from '@/hooks';
 import { ConfigValuesContext } from '@/contexts/ConfigValuesContext';
 import { isConfigRecord, isConfigValueEqual } from '@/utils';
 import { hasBlockingIssue, validateEndpoint } from './model';
@@ -80,6 +86,9 @@ export function EndpointCreator({
 }: t.EndpointCreatorProps) {
   const localize = useLocalize();
   const scope = useValuesScope();
+  const { keyedTombstones } = useConfigFeatures();
+  const { limits } = useConfigContract();
+  const maxKeyLength = keyedTombstones ? limits.maxEntryKeyLength : undefined;
   const [template, setTemplate] = useState<t.EndpointTemplate | null>(null);
   const [draft, setDraft] = useState<t.ConfigRecord>({});
   const [attempted, setAttempted] = useState(false);
@@ -113,8 +122,9 @@ export function EndpointCreator({
         otherNames: names,
         fromLowerLayer: false,
         storedSecret: false,
+        maxKeyLength,
       }),
-    [draft, names],
+    [draft, names, maxKeyLength],
   );
   const shownIssues = attempted ? issues : issues.filter((issue) => !MISSING_CODES.has(issue.code));
   const labelsOf = (list: t.EndpointIssue[]) =>

@@ -98,13 +98,18 @@ function renderPreview(
   {
     features = {},
     baseData = base,
-  }: { features?: Partial<t.ConfigFeatures>; baseData?: t.BaseConfigData } = {},
+    scopeData = engineeringData,
+  }: {
+    features?: Partial<t.ConfigFeatures>;
+    baseData?: t.BaseConfigData;
+    scopeData?: t.ResolvedConfigData;
+  } = {},
 ) {
   const client = new QueryClient();
   client.setQueryData(['baseConfig'], baseData);
   client.setQueryData(
     ['resolvedConfig', engineering.principalType, engineering.principalId],
-    engineeringData,
+    scopeData,
   );
   const contract: t.ConfigContract = {
     ...BUNDLED_CONFIG_CONTRACT,
@@ -378,6 +383,161 @@ describe('useImportPreview', () => {
     expect(onProfile.result.current.issuesFor(all)).toEqual([]);
     const onBase = renderPreview(sparse);
     expect(onBase.result.current.issuesFor(all)).toEqual(['Server URL is required']);
+  });
+});
+
+describe('useImportPreview into a profile with hides and removals by key (keyedTombstones)', () => {
+  const onProfile: t.ImportTarget = { type: 'scope', scope: engineering, exists: true };
+  const all = new Set(['endpoints.custom']);
+  const hidesMoonshot: t.ResolvedConfigData = {
+    ...engineeringData,
+    overrides: {},
+    tombstones: ['endpoints.custom["Moonshot"]'],
+  };
+  const rowsOf = (groups: t.ImportPreviewGroup[]) =>
+    groups.flatMap((group) => group.rows.flatMap((row) => row.rows.map((change) => change.item)));
+
+  it('leaves an endpoint the profile hides out, saying why, since writing it would show it again', () => {
+    const { result } = renderPreview(
+      { endpoints: { custom: [{ name: 'Moonshot', titleModel: 'kimi-k2.6' }] } },
+      onProfile,
+      { features: { keyedTombstones: true }, scopeData: hidesMoonshot },
+    );
+    expect(result.current.groups).toEqual([]);
+    expect(result.current.entriesFor(all)).toEqual([]);
+    expect(result.current.issuesFor(all)).toEqual([]);
+    expect(result.current.skipped).toEqual([
+      expect.objectContaining({
+        path: 'endpoints.custom.0',
+        label: expect.stringContaining('Moonshot'),
+        reason: expect.stringContaining('hidden for Group: Engineering'),
+      }),
+    ]);
+  });
+
+  it('leaves out only the endpoints the profile hides, and imports the others', () => {
+    const { result } = renderPreview(
+      {
+        endpoints: {
+          custom: [
+            { name: 'Moonshot', titleModel: 'kimi-k2.6' },
+            { name: 'Foundry', titleModel: 'gpt-5' },
+          ],
+        },
+      },
+      onProfile,
+      { features: { keyedTombstones: true }, scopeData: hidesMoonshot },
+    );
+    expect(rowsOf(result.current.groups).map((item) => [item.path, item.after])).toEqual([
+      ['endpoints.custom.0.titleModel', 'gpt-5'],
+    ]);
+    expect(result.current.entriesFor(all)).toEqual([
+      { fieldPath: 'endpoints.custom', value: [{ name: 'Foundry', titleModel: 'gpt-5' }] },
+    ]);
+    expect(result.current.skipped.map((row) => row.path)).toEqual(['endpoints.custom.0']);
+  });
+
+  it('imports a hidden endpoint as before where the server stores keyed tombstones without effect', () => {
+    const { result } = renderPreview(
+      { endpoints: { custom: [{ name: 'Moonshot', titleModel: 'kimi-k2.6' }] } },
+      onProfile,
+      { scopeData: hidesMoonshot },
+    );
+    expect(rowsOf(result.current.groups).map((item) => [item.kind, item.after])).toEqual([
+      ['changed', 'kimi-k2.6'],
+    ]);
+    expect(result.current.skipped).toEqual([]);
+    expect(result.current.entriesFor(all)).toHaveLength(1);
+  });
+
+  describe('a value that selects or names an endpoint the profile hides', () => {
+    const notesOf = (groups: t.ImportPreviewGroup[]) =>
+      groups.flatMap((group) => group.rows.map((row) => [row.fieldPath, row.hiddenNotes]));
+    const specs = {
+      modelSpecs: {
+        list: [
+          { name: 'team-spec', label: 'Team spec', preset: { endpoint: 'Moonshot', model: 'm' } },
+          { name: 'other', label: 'Other', preset: { endpoint: 'Foundry', model: 'gpt-5' } },
+        ],
+      },
+    };
+
+    it('says which imported specs its members never get', () => {
+      const { result } = renderPreview(specs, onProfile, {
+        features: { keyedTombstones: true },
+        scopeData: hidesMoonshot,
+      });
+      expect(notesOf(result.current.groups)).toEqual([
+        [
+          'modelSpecs.list',
+          [
+            "Group: Engineering hides the endpoints these specs use, so its members don't get them: Team spec",
+          ],
+        ],
+      ]);
+      expect(result.current.entriesFor(new Set(['modelSpecs.list']))).toHaveLength(1);
+    });
+
+    it('names the hidden endpoints an imported allow-list loses, or says it then allows none', () => {
+      const { result } = renderPreview(
+        {
+          modelSpecs: { addedEndpoints: ['Moonshot'] },
+          endpoints: { agents: { allowedProviders: ['Moonshot', 'Foundry'] } },
+        },
+        onProfile,
+        { features: { keyedTombstones: true }, scopeData: hidesMoonshot },
+      );
+      expect(Object.fromEntries(notesOf(result.current.groups))).toEqual({
+        'modelSpecs.addedEndpoints': [
+          "Group: Engineering hides every endpoint this list names, so the model specs add none to its members' endpoint menu.",
+        ],
+        'endpoints.agents.allowedProviders': [
+          "Group: Engineering hides Moonshot, so LibreChat leaves hidden endpoints out of the providers its members' agents may use.",
+        ],
+      });
+    });
+
+    it('notes nothing where the server stores keyed tombstones without effect', () => {
+      const { result } = renderPreview(specs, onProfile, { scopeData: hidesMoonshot });
+      expect(notesOf(result.current.groups)).toEqual([['modelSpecs.list', []]]);
+    });
+  });
+
+  it('compares a header with what members get: one the profile removes reads as added', () => {
+    const team = { ...foundry, headers: { 'X-Team': 'blue' } };
+    const baseData: t.BaseConfigData = {
+      ...base,
+      config: { ...base.config, endpoints: { custom: [moonshot, team, local] } },
+    };
+    const removesHeader: t.ResolvedConfigData = {
+      ...engineeringData,
+      overrides: {},
+      tombstones: ['endpoints.custom["Foundry"].headers.X-Team'],
+    };
+    const imported = {
+      endpoints: { custom: [{ name: 'Foundry', headers: { 'X-Team': 'blue' } }] },
+    };
+    const keyed = renderPreview(imported, onProfile, {
+      features: { keyedTombstones: true },
+      baseData,
+      scopeData: removesHeader,
+    });
+    expect(rowsOf(keyed.result.current.groups)).toEqual([
+      expect.objectContaining({
+        kind: 'added',
+        path: 'endpoints.custom.0.headers.X-Team',
+        after: 'blue',
+      }),
+    ]);
+    expect(keyed.result.current.entriesFor(all)).toEqual([
+      {
+        fieldPath: 'endpoints.custom',
+        value: [{ name: 'Foundry', headers: { 'X-Team': 'blue' } }],
+      },
+    ]);
+    const older = renderPreview(imported, onProfile, { baseData, scopeData: removesHeader });
+    expect(older.result.current.groups[0].rows[0].unchanged).toBe(true);
+    expect(older.result.current.entriesFor(all)).toEqual([]);
   });
 });
 

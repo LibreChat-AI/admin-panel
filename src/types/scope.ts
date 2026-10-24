@@ -265,6 +265,23 @@ export interface ScopeOverrideItem {
   hidden: boolean;
   /** An entry of the list at `path` the profile overrides or adds, by identity (`Claude`). */
   entry?: string;
+  /** A hide by key (`endpoints.custom["Name"].headers.X-Team`): its list, entry and path inside it. */
+  keyed?: ScopeOverrideKeyed;
+}
+
+/** Where a hide by key of `ScopeOverrideItem` points: its list, the entry's name, and the path inside it. */
+export interface ScopeOverrideKeyed {
+  /** The list's path (`endpoints.custom`). */
+  collection: string;
+  name: string;
+  /** The dotted path inside the entry; empty for the whole entry. */
+  rest: string;
+}
+
+/** The keyed tombstones a profile holds for one entry of a list merged by key: a hide of it, removals inside it. */
+export interface EntryKeyedHides {
+  hidden: boolean;
+  inside: boolean;
 }
 
 export interface ScopeOverridesDialogProps {

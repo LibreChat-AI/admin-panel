@@ -8,6 +8,7 @@ import {
   valuesDataFixture,
   baseConfigFixture,
   baseLayersFixture,
+  scopeConfigFixture,
   scopeLayersFixture,
 } from '@/test/layers';
 import { CollectionEditsContext } from '@/contexts/CollectionEditsContext';
@@ -18,7 +19,7 @@ import { RestatesContext } from '@/contexts/RestatesContext';
 import { createServerContract } from '@/test/fixtures';
 import { BUNDLED_CONFIG_CONTRACT } from '@/constants';
 import { extractSchemaTree } from '@/server/config';
-import { isConfigRecord } from '@/utils';
+import { isConfigRecord, deepSerializeKVPairs } from '@/utils';
 
 vi.mock('@/hooks/useLocalize', () => {
   const localize = (key: string, params?: Record<string, string | number>) =>
@@ -76,6 +77,9 @@ function Harness({
   collectionEdits = {},
   showConfiguredOnly,
   contract = BUNDLED_CONFIG_CONTRACT,
+  visibilityEdits,
+  onHideField,
+  onUnhideField,
 }: {
   layers: t.ValueLayers;
   initial?: t.ConfigValue[];
@@ -83,6 +87,9 @@ function Harness({
   collectionEdits?: t.CollectionEdits;
   showConfiguredOnly?: boolean;
   contract?: t.ConfigContract;
+  visibilityEdits?: Record<string, t.VisibilityEdit>;
+  onHideField?: (path: string) => void;
+  onUnhideField?: (path: string) => void;
 }) {
   const [items, setItems] = useState<t.ConfigValue[]>(initial ?? savedList(layers));
   const handleChange = (path: string, value: t.ConfigValue) => {
@@ -93,7 +100,7 @@ function Harness({
   };
   return (
     <ConfigContractContext.Provider value={contract}>
-      <ConfigValuesProvider value={valuesDataFixture(layers)}>
+      <ConfigValuesProvider value={{ ...valuesDataFixture(layers), visibilityEdits }}>
         <CollectionEditsContext.Provider value={collectionEdits}>
           <CustomEndpointsRenderer
             fields={fields}
@@ -102,6 +109,8 @@ function Harness({
             getValue={(path, fallback) => (path === 'endpoints.custom' ? items : fallback)}
             onChange={handleChange}
             showConfiguredOnly={showConfiguredOnly}
+            onHideField={onHideField}
+            onUnhideField={onUnhideField}
           />
         </CollectionEditsContext.Provider>
       </ConfigValuesProvider>
@@ -484,5 +493,312 @@ describe('CustomEndpointsRenderer', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('CustomEndpointsRenderer — hiding inherited endpoints by key (keyedTombstones)', () => {
+  const keyed = createServerContract({ keyedTombstones: true });
+  const withSpec = baseConfigFixture({
+    dbOverrides: {
+      modelSpecs: {
+        list: [{ name: 'gpt-spec', label: 'GPT spec', preset: { endpoint: 'GPT', model: 'm' } }],
+      },
+    },
+  });
+
+  function openMenu(name: string) {
+    const trigger = within(row(name)).getByRole('button', {
+      name: `com_config_ce_actions_a11y:${name}`,
+    });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+  }
+
+  it('offers Hide for an endpoint the profile inherits, by its key', () => {
+    const onHideField = vi.fn();
+    render(
+      <Harness
+        layers={scopeLayersFixture()}
+        contract={keyed}
+        onHideField={onHideField}
+        onUnhideField={vi.fn()}
+      />,
+    );
+    openMenu('Claude');
+    fireEvent.click(screen.getByRole('menuitem', { name: /com_config_ce_action_hide/ }));
+    expect(onHideField).toHaveBeenCalledWith('endpoints.custom["Claude"]');
+  });
+
+  it('offers no Hide on a server that stores such a hide without effect, nor in Base', () => {
+    const { unmount } = render(
+      <Harness layers={scopeLayersFixture()} onHideField={vi.fn()} onUnhideField={vi.fn()} />,
+    );
+    openMenu('Claude');
+    expect(screen.queryByRole('menuitem', { name: /com_config_ce_action_hide/ })).toBeNull();
+    unmount();
+    render(
+      <Harness
+        layers={baseLayers()}
+        contract={keyed}
+        onHideField={vi.fn()}
+        onUnhideField={vi.fn()}
+      />,
+    );
+    openMenu('GPT');
+    expect(screen.queryByRole('menuitem', { name: /com_config_ce_action_hide/ })).toBeNull();
+  });
+
+  it('lists a hidden endpoint apart, with the model specs hidden with it, and unhides it', () => {
+    const onUnhideField = vi.fn();
+    const layers = scopeLayersFixture(
+      scopeConfigFixture({ tombstones: ['endpoints.custom["GPT"]'] }),
+      withSpec,
+      true,
+    );
+    render(
+      <Harness
+        layers={layers}
+        contract={keyed}
+        onHideField={vi.fn()}
+        onUnhideField={onUnhideField}
+      />,
+    );
+    expect(document.querySelector('li[data-endpoint-row="GPT"]')).toBeNull();
+    const hidden = document.querySelector<HTMLElement>('[data-endpoint-hidden="GPT"]');
+    expect(hidden?.textContent).toContain('com_config_ce_hidden');
+    expect(hidden?.textContent).toContain('com_config_ce_hidden_specs');
+    fireEvent.click(
+      within(hidden as HTMLElement).getByRole('button', { name: 'com_config_ce_unhide_a11y:GPT' }),
+    );
+    expect(onUnhideField).toHaveBeenCalledWith('endpoints.custom["GPT"]');
+  });
+
+  it('keeps the name of an endpoint shown again on save from a new endpoint', async () => {
+    vi.useFakeTimers();
+    try {
+      const layers = scopeLayersFixture(
+        scopeConfigFixture({ tombstones: ['endpoints.custom["GPT"]'] }),
+        withSpec,
+        true,
+      );
+      render(
+        <Harness
+          layers={layers}
+          contract={keyed}
+          visibilityEdits={{ 'endpoints.custom["GPT"]': 'unhide' }}
+          onHideField={vi.fn()}
+          onUnhideField={vi.fn()}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'com_config_create_endpoint' }));
+      fireEvent.click(screen.getByRole('button', { name: /com_config_ce_template_blank_name/ }));
+      await typeInto('#endpoints-custom-9999-name', 'GPT');
+      expect(screen.getByText(/com_config_ce_issue_name_taken/)).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says nothing matches when the filter matches no row, removal or hidden endpoint', () => {
+    const layers = scopeLayersFixture(
+      scopeConfigFixture({ tombstones: ['endpoints.custom["GPT"]'] }),
+      withSpec,
+      true,
+    );
+    const extra = ['E1', 'E2', 'E3', 'E4', 'E5'].map((name) => ({ ...ADMIN_ENTRY, name }));
+    render(
+      <Harness
+        layers={layers}
+        initial={[...savedList(layers), ...extra]}
+        contract={keyed}
+        onHideField={vi.fn()}
+        onUnhideField={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('com_config_ce_filter_a11y'), {
+      target: { value: 'no such endpoint' },
+    });
+    expect(screen.getByRole('status').textContent).toContain('com_config_ce_filter_empty');
+  });
+
+  it('says when an allow-list names only the endpoints the profile hides, so it allows none', () => {
+    const base = baseConfigFixture({
+      dbOverrides: {
+        modelSpecs: { addedEndpoints: ['agents', 'GPT'] },
+        endpoints: { agents: { allowedProviders: ['GPT', 'Claude'] } },
+      },
+    });
+    const layers = scopeLayersFixture(
+      scopeConfigFixture({ tombstones: ['endpoints.custom["GPT"]'] }),
+      base,
+      true,
+    );
+    render(
+      <Harness
+        layers={layers}
+        contract={keyed}
+        visibilityEdits={{ 'endpoints.custom["Claude"]': 'hide' }}
+        onHideField={vi.fn()}
+        onUnhideField={vi.fn()}
+      />,
+    );
+    const notesOf = (name: string) =>
+      [...document.querySelectorAll(`[data-endpoint-hidden="${name}"] span`)].map(
+        (span) => span.textContent,
+      );
+    for (const name of ['GPT', 'Claude']) {
+      expect(notesOf(name)).toContain('com_config_ce_hidden_allowed_providers_only');
+      expect(notesOf(name)).not.toContain('com_config_ce_hidden_allowed_providers');
+    }
+    expect(notesOf('GPT')).toContain('com_config_ce_hidden_added_endpoints');
+    expect(notesOf('GPT')).not.toContain('com_config_ce_hidden_added_endpoints_only');
+    expect(notesOf('Claude')).not.toContain('com_config_ce_hidden_added_endpoints');
+  });
+
+  it('moves an endpoint a pending hide hides out of the list, with Undo', () => {
+    const onUnhideField = vi.fn();
+    render(
+      <Harness
+        layers={scopeLayersFixture(scopeConfigFixture(), withSpec, true)}
+        contract={keyed}
+        visibilityEdits={{ 'endpoints.custom["GPT"]': 'hide' }}
+        onHideField={vi.fn()}
+        onUnhideField={onUnhideField}
+      />,
+    );
+    expect(document.querySelector('li[data-endpoint-row="GPT"]')).toBeNull();
+    const hidden = document.querySelector<HTMLElement>('[data-endpoint-hidden="GPT"]');
+    expect(hidden?.textContent).toContain('com_config_ce_hidden_pending');
+    fireEvent.click(
+      within(hidden as HTMLElement).getByRole('button', {
+        name: 'com_config_ce_hide_undo_a11y:GPT',
+      }),
+    );
+    expect(onUnhideField).toHaveBeenCalledWith('endpoints.custom["GPT"]');
+  });
+
+  it('offers to remove an inherited header by key, and lists a saved removal with Restore', () => {
+    const onHideField = vi.fn();
+    const onUnhideField = vi.fn();
+    const base = baseConfigFixture({
+      dbOverrides: {
+        endpoints: { custom: [{ name: 'Claude', headers: { 'X-Team': 'blue', 'X-Org': 'acme' } }] },
+      },
+    });
+    const layers = scopeLayersFixture(
+      scopeConfigFixture({ tombstones: ['endpoints.custom["Claude"].headers.X-Org'] }),
+      base,
+      true,
+    );
+    render(
+      <Harness
+        layers={layers}
+        contract={keyed}
+        onHideField={onHideField}
+        onUnhideField={onUnhideField}
+      />,
+    );
+    const drawer = openRow('Claude');
+    const removed = drawer.querySelector<HTMLElement>('[data-kv-removed="X-Org"]');
+    expect(removed?.textContent).toContain('com_config_ctl_kv_removed');
+    fireEvent.click(
+      within(removed as HTMLElement).getByRole('button', {
+        name: 'com_config_ctl_kv_restore_a11y',
+      }),
+    );
+    expect(onUnhideField).toHaveBeenCalledWith('endpoints.custom["Claude"].headers.X-Org');
+    fireEvent.click(
+      within(drawer).getByRole('button', { name: 'com_config_ctl_kv_remove_inherited' }),
+    );
+    expect(onHideField).toHaveBeenCalledWith('endpoints.custom["Claude"].headers.X-Team');
+  });
+
+  describe('a removed header the profile sets again itself', () => {
+    const base = baseConfigFixture({
+      dbOverrides: {
+        endpoints: { custom: [{ name: 'Claude', headers: { 'X-Team': 'blue', 'X-Org': 'acme' } }] },
+      },
+    });
+    const removal = 'endpoints.custom["Claude"].headers.X-Org';
+    const profileWith = (headers: t.ConfigRecord) =>
+      scopeLayersFixture(
+        scopeConfigFixture({
+          overrides: { endpoints: { custom: [{ name: 'Claude', headers }] } },
+          changedPaths: ['endpoints.custom'],
+          tombstones: [removal],
+        }),
+        base,
+        true,
+      );
+    const claudeOf = (onChange: ReturnType<typeof vi.fn>): t.ConfigRecord => {
+      const calls = onChange.mock.calls.filter((call) => call[0] === 'endpoints.custom.1');
+      return deepSerializeKVPairs(calls[calls.length - 1]?.[1] ?? {}) as t.ConfigRecord;
+    };
+
+    it('is its own value: Delete removes it, and the saved removal applies again', () => {
+      const onChange = vi.fn();
+      const onHideField = vi.fn();
+      const onUnhideField = vi.fn();
+      render(
+        <Harness
+          layers={profileWith({ 'X-Org': 'mine' })}
+          contract={keyed}
+          onChange={onChange}
+          onHideField={onHideField}
+          onUnhideField={onUnhideField}
+        />,
+      );
+      const drawer = openRow('Claude');
+      expect(drawer.querySelector('[data-kv-removed="X-Org"]')).toBeNull();
+      expect(
+        within(drawer).getAllByRole('button', { name: 'com_config_ctl_kv_remove_inherited' }),
+      ).toHaveLength(1);
+      fireEvent.click(within(drawer).getByRole('button', { name: 'com_ui_delete X-Org' }));
+      expect(onUnhideField).not.toHaveBeenCalled();
+      expect(onHideField).not.toHaveBeenCalled();
+      expect(claudeOf(onChange).headers).toEqual({ 'X-Team': 'blue' });
+      const removed = drawer.querySelector<HTMLElement>('[data-kv-removed="X-Org"]');
+      expect(removed?.textContent).toContain('com_config_ctl_kv_removed');
+    });
+
+    it('stays removed when the profile reverts its Headers', () => {
+      const onChange = vi.fn();
+      render(
+        <Harness
+          layers={profileWith({ 'X-Own': 'o' })}
+          contract={keyed}
+          onChange={onChange}
+          onHideField={vi.fn()}
+          onUnhideField={vi.fn()}
+        />,
+      );
+      const drawer = openRow('Claude');
+      const reverts = within(drawer).getAllByRole('button', {
+        name: /com_config_values_revert_inherited_aria/,
+      });
+      expect(reverts).toHaveLength(1);
+      fireEvent.click(reverts[0]);
+      expect(claudeOf(onChange).headers).toEqual({ 'X-Team': 'blue' });
+      const removed = drawer.querySelector<HTMLElement>('[data-kv-removed="X-Org"]');
+      expect(removed?.textContent).toContain('com_config_ctl_kv_removed');
+    });
+  });
+
+  it('keeps inherited headers locked on a server without keyed tombstones', () => {
+    const base = baseConfigFixture({
+      dbOverrides: { endpoints: { custom: [{ name: 'Claude', headers: { 'X-Team': 'blue' } }] } },
+    });
+    render(
+      <Harness
+        layers={scopeLayersFixture(scopeConfigFixture(), base)}
+        onHideField={vi.fn()}
+        onUnhideField={vi.fn()}
+      />,
+    );
+    const drawer = openRow('Claude');
+    fireEvent.click(within(drawer).getByRole('button', { name: 'com_config_ce_override_for' }));
+    expect(drawer.querySelector('input[data-kv-part="key"]')).toHaveProperty('value', 'X-Team');
+    expect(
+      within(drawer).queryByRole('button', { name: 'com_config_ctl_kv_remove_inherited' }),
+    ).toBeNull();
   });
 });

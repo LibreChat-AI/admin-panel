@@ -7,6 +7,7 @@ import type * as t from '@/types';
 import {
   baseConfigFixture,
   baseLayersFixture,
+  scopeConfigFixture,
   scopeLayersFixture,
   valuesDataFixture,
 } from '@/test/layers';
@@ -382,6 +383,55 @@ describe('ModelSpecsRenderer', () => {
     fireEvent.click(screen.getByRole('button', { name: /com_config_ce_override_for/ }));
     expect(screen.getByRole('button', { name: 'com_config_specs_add' })).toHaveFocus();
     expect(screen.getByText(/com_config_specs_customizing/)).toBeInTheDocument();
+  });
+
+  it('names the specs a profile hides with the endpoints they select (keyedTombstones)', () => {
+    const specs = [...SPECS, { name: 'gw', label: 'Gateway spec', preset: { endpoint: 'GPT' } }];
+    const base = baseConfigFixture({ dbOverrides: { modelSpecs: { list: specs } } });
+    const scope = scopeConfigFixture({ tombstones: ['endpoints.custom["GPT"]'] });
+    const data = valuesDataFixture(scopeLayersFixture(scope, base, true));
+    const keyed = createServerContract({ keyedTombstones: true });
+    const { unmount } = renderSpecs({ list: specs }, { data, contract: keyed });
+    expect(
+      screen.getByText(/com_config_specs_hidden_endpoint .*"specs":"Gateway spec"/),
+    ).toBeInTheDocument();
+    expect(document.body.textContent).toContain('com_config_specs_preview_specs {\\"count\\":1}');
+    unmount();
+    renderSpecs({ list: specs }, { data });
+    expect(screen.queryByText(/com_config_specs_hidden_endpoint/)).toBeNull();
+    expect(document.body.textContent).toContain('com_config_specs_preview_specs {\\"count\\":2}');
+  });
+
+  it('leaves the added endpoints a profile hides out of "Users will see" (keyedTombstones)', () => {
+    const base = baseConfigFixture({
+      dbOverrides: { modelSpecs: { list: SPECS, addedEndpoints: ['GPT'] } },
+    });
+    const scope = scopeConfigFixture({ tombstones: ['endpoints.custom["GPT"]'] });
+    const data = valuesDataFixture(scopeLayersFixture(scope, base, true));
+    const keyed = createServerContract({ keyedTombstones: true });
+    const { unmount } = renderSpecs(
+      { list: SPECS, addedEndpoints: ['GPT'] },
+      { data, contract: keyed },
+    );
+    expect(document.body.textContent).toContain('com_config_specs_preview_added_none');
+    unmount();
+    renderSpecs({ list: SPECS, addedEndpoints: ['GPT'] }, { data });
+    expect(document.body.textContent).not.toContain('com_config_specs_preview_added_none');
+    expect(document.body.textContent).toContain('com_config_specs_preview_added');
+  });
+
+  it("warns that a profile hiding every spec's endpoint leaves its members nothing to pick (keyedTombstones)", () => {
+    const specs = [{ name: 'gw', label: 'Gateway spec', preset: { endpoint: 'GPT' } }];
+    const base = baseConfigFixture({ dbOverrides: { modelSpecs: { list: specs } } });
+    const scope = scopeConfigFixture({ tombstones: ['endpoints.custom["GPT"]'] });
+    const data = valuesDataFixture(scopeLayersFixture(scope, base, true));
+    const keyed = createServerContract({ keyedTombstones: true });
+    const { unmount } = renderSpecs({ list: specs }, { data, contract: keyed });
+    expect(document.body.textContent).toContain('com_config_specs_preview_none_menu_off');
+    expect(document.body.textContent).toContain('com_config_specs_empty_menu_off');
+    unmount();
+    renderSpecs({ list: specs }, { data });
+    expect(document.body.textContent).not.toContain('com_config_specs_empty_menu_off');
   });
 
   it('says an inherited endpoint list cannot be emptied in a profile (D3)', () => {

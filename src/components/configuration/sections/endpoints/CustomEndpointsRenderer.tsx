@@ -1,12 +1,31 @@
 import { Button } from '@clickhouse/click-ui';
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type * as t from '@/types';
-import { useLocalize, useValuesScope, useEndpointRows, useEntryOverrideNotes } from '@/hooks';
+import {
+  useLocalize,
+  useValuesScope,
+  useEndpointRows,
+  useHiddenEntries,
+  useConfigContract,
+  useEntryOverrideNotes,
+} from '@/hooks';
+import {
+  isRowVisible,
+  isConfigRecord,
+  formatKeyedPath,
+  entryIdentityOf,
+  getKeyedCollection,
+  getSecretCarry,
+  isAddressableEntryKey,
+  findHiddenEndpointUses,
+} from '@/utils';
 import { EndpointList, SourceBadge, StatusBadge, Badge, isDeletable } from './List';
 import { RevealTargetContext } from '@/contexts/RevealTargetContext';
+import { ConfigValuesContext } from '@/contexts/ConfigValuesContext';
+import { ConfigErrorsContext } from '@/contexts/ConfigErrorsContext';
 import { describeOverrideNotes, sourceLabel } from '../../values';
 import { RowFilterContext } from '@/contexts/RowFilterContext';
-import { isConfigRecord, isRowVisible } from '@/utils';
+import { EndpointHiddenList } from './Hidden';
 import { endpointHost, modelNames } from './model';
 import { SearchInput } from '@/components/shared';
 import { revealConfigPath } from '../../reveal';
@@ -20,10 +39,11 @@ const FILTER_THRESHOLD = 6;
 
 /** Whether every word of the query appears in the name, host or a model of an endpoint. */
 function matchesFilter(
-  { title, value }: t.EndpointRemoval | t.EndpointRow,
+  item: t.EndpointRemoval | t.EndpointRow | t.EndpointHiddenItem,
   query: string,
 ): boolean {
   if (query === '') return true;
+  const { title, value } = 'entry' in item ? { title: item.entry.name, value: undefined } : item;
   const baseURL = isConfigRecord(value) ? value.baseURL : undefined;
   const haystack = [title, endpointHost(baseURL) ?? '', ...modelNames(value)]
     .join('\n')
@@ -63,11 +83,18 @@ function locateEntry(path: string, listPath: string): { index: number; field?: s
  */
 export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
   const { fields, parentPath, parentValue, getValue, onChange, disabled, editSessionId } = props;
+  const { onHideField, onUnhideField } = props;
   const localize = useLocalize();
   const scope = useValuesScope();
+  const { features, limits } = useConfigContract();
   const rowFilter = useContext(RowFilterContext);
   const revealTarget = useContext(RevealTargetContext);
+  const effective = useContext(ConfigValuesContext)?.layers?.effective ?? null;
+  const pageErrors = useContext(ConfigErrorsContext);
   const path = `${parentPath}.custom`;
+  const collection = getKeyedCollection(path);
+  const hiddenEntries = useHiddenEntries(path);
+  const carriesKey = getSecretCarry(features).endpointRename;
   const overrideNotes = useEntryOverrideNotes(path);
   const customField = fields.find((field) => field.key === 'custom');
   const parentObj = isConfigRecord(parentValue) ? parentValue : {};
@@ -88,7 +115,47 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
   const idPrefix = `section-${parentPath}-custom`;
   const scopeName = scope ? sourceLabel('scope', localize, scope) : '';
 
-  const names = useMemo(() => rows.flatMap((row) => (row.identity ? [row.identity] : [])), [rows]);
+  /**
+   * Names in the list, and those the profile hides or shows again on save: a new endpoint can't
+   * take one (LibreChat would show it again, or the save would add it twice).
+   */
+  const names = useMemo(
+    () => [
+      ...rows.flatMap((row) => (row.identity ? [row.identity] : [])),
+      ...[...hiddenEntries.hidden.values(), ...hiddenEntries.unhiding.values()].map(
+        (entry) => entry.name,
+      ),
+    ],
+    [rows, hiddenEntries],
+  );
+  /** Whether the profile hides the row's endpoint, as LibreChat matches names. */
+  const isHiddenRow = (row: t.EndpointRow): boolean =>
+    collection !== undefined &&
+    row.loadedName !== undefined &&
+    hiddenEntries.hidden.has(entryIdentityOf(collection, row.loadedName));
+  /** The endpoints the profile hides or shows again, with the model specs that go with each. */
+  const hiddenItems = useMemo((): t.EndpointHiddenItem[] => {
+    const none: t.HiddenEndpointUses = {
+      specs: [],
+      addedEndpoints: 'none',
+      allowedProviders: 'none',
+    };
+    const allHidden = new Set(hiddenEntries.hidden.keys());
+    return [
+      ...[...hiddenEntries.hidden].map(([identity, entry]) => ({
+        identity,
+        entry,
+        unhiding: false,
+        uses: findHiddenEndpointUses(effective, new Set([identity]), allHidden),
+      })),
+      ...[...hiddenEntries.unhiding].map(([identity, entry]) => ({
+        identity,
+        entry,
+        unhiding: true,
+        uses: none,
+      })),
+    ];
+  }, [hiddenEntries, effective]);
   const modelsOf = useMemo(() => {
     const byName = new Map(rows.map((row) => [row.identity ?? '', modelNames(row.value)]));
     return (endpoint: string): readonly string[] => byName.get(endpoint) ?? [];
@@ -188,11 +255,13 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
   const trimmedQuery = query.trim();
   const visible = rows.filter(
     (row) =>
+      !isHiddenRow(row) &&
       isRowVisible(rowFilter, `${path}.${row.index}`) &&
       matchesFilter(row, trimmedQuery) &&
       (!configuredOnly || row.overridden || row.edited || row.origin === 'scope'),
   );
   const shownRemovals = removals.filter((removal) => matchesFilter(removal, trimmedQuery));
+  const shownHidden = hiddenItems.filter((item) => matchesFilter(item, trimmedQuery));
 
   const closeDrawer = () => {
     setOpenKey(null);
@@ -223,6 +292,37 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
     if (!lower) return;
     onChange(`${path}.${row.index}`, lower);
   };
+
+  /**
+   * Hides an endpoint Base defines for the profile (`keyedTombstones`). Its
+   * pending edits go first: LibreChat removes what the profile sets for it.
+   */
+  const handleHide = (row: t.EndpointRow) => {
+    if (!onHideField || row.loadedName === undefined) return;
+    if (row.key === openKey) closeDrawer();
+    if (row.edited && row.saved) onChange(`${path}.${row.index}`, row.saved);
+    onHideField(formatKeyedPath(path, row.loadedName));
+  };
+
+  const hide: t.EndpointHideAction | undefined =
+    features.keyedTombstones && scope && onHideField && onUnhideField
+      ? {
+          label: localize('com_config_ce_action_hide', { scope: scopeName }),
+          offers: (row) => row.origin === 'inherited' && !row.isNew,
+          disabledReason: (row) =>
+            isAddressableEntryKey(row.loadedName ?? '', limits.maxEntryKeyLength)
+              ? undefined
+              : localize('com_config_ce_hide_unaddressable'),
+          onSelect: handleHide,
+        }
+      : undefined;
+
+  /** Unhides a saved hide, or drops a pending hide or unhide (a second visibility edit of a path undoes the first). */
+  const toggleHidden =
+    onHideField && onUnhideField && !disabled
+      ? (item: t.EndpointHiddenItem) =>
+          item.unhiding ? onHideField(item.entry.path) : onUnhideField(item.entry.path)
+      : undefined;
 
   const handleUndoRemoval = (removal: t.EndpointRemoval) => {
     const name = isConfigRecord(removal.value) ? removal.value.name : undefined;
@@ -295,16 +395,34 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
     );
   };
 
-  const drawerNotice = (row: t.EndpointRow) => {
-    const origin = originNotice(row);
-    const profiles = profileNotice(row);
-    if (!profiles) return origin;
+  /**
+   * A renamed endpoint whose stored key the save moves to its new name (a
+   * batch `rename`, or the PATCH's `renames` hint with `renameHints`); none
+   * while the entry has a problem of its own (a swap the save can't carry).
+   */
+  const renameNotice = (row: t.EndpointRow) => {
+    const { loadedName, identity } = row;
+    if (!carriesKey || !row.storedSecret || loadedName === undefined || identity === loadedName) {
+      return undefined;
+    }
+    if (pageErrors?.[`${path}.${row.index}`] !== undefined) return undefined;
     return (
-      <>
-        {origin}
-        {profiles}
-      </>
+      <Banner tone="info" role="status">
+        {localize(
+          scope ? 'com_config_ce_renamed_key_moves_scope' : 'com_config_ce_renamed_key_moves',
+          {
+            name: loadedName,
+            scope: scopeName,
+          },
+        )}
+      </Banner>
     );
+  };
+
+  const drawerNotice = (row: t.EndpointRow) => {
+    const notices = [originNotice(row), renameNotice(row), profileNotice(row)].filter(Boolean);
+    if (notices.length <= 1) return notices[0];
+    return <>{notices}</>;
   };
 
   const originNotice = (row: t.EndpointRow) => {
@@ -411,7 +529,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
     </>
   );
 
-  const isEmpty = rows.length === 0 && removals.length === 0;
+  const isEmpty = rows.length === 0 && removals.length === 0 && hiddenItems.length === 0;
 
   return (
     <div ref={listRef} className="flex flex-col gap-3">
@@ -473,11 +591,13 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
                   }
                 : undefined
             }
+            hide={hide}
             onUndoRemoval={handleUndoRemoval}
             removalNotes={removalNotes}
             idPrefix={idPrefix}
           />
-          {visible.length === 0 && shownRemovals.length === 0 && (
+          <EndpointHiddenList items={shownHidden} onToggle={toggleHidden} />
+          {visible.length === 0 && shownRemovals.length === 0 && shownHidden.length === 0 && (
             <p className="m-0 py-2 text-sm text-(--cui-color-text-muted)" role="status">
               {configuredOnly && trimmedQuery === ''
                 ? localize('com_config_ce_none_set_in_scope', { scope: scopeName })
@@ -529,6 +649,9 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
               if (body) revealConfigPath(body, { path: fieldPath }, { align: 'center' });
             }}
             editSessionId={editSessionId}
+            loadedName={open.loadedName}
+            onHideField={onHideField}
+            onUnhideField={onUnhideField}
           />
         )}
       </EndpointDrawer>
