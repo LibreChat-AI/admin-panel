@@ -21,24 +21,71 @@ function extractCookieValue(response: Response, name: string): string | undefine
   return undefined;
 }
 
+/** Returns the origin of ADMIN_PANEL_PUBLIC_URL when configured, giving deployments behind proxies that strip Origin and forward no proto/host metadata a deterministic override. */
+function getConfiguredPublicOrigin(): string | undefined {
+  const publicUrl = process.env.ADMIN_PANEL_PUBLIC_URL;
+  if (!publicUrl) return undefined;
+  try {
+    const url = new URL(publicUrl);
+    if ((url.protocol === 'http:' || url.protocol === 'https:') && url.origin !== 'null') {
+      return url.origin;
+    }
+  } catch {
+    /* fall through to the warning */
+  }
+  console.warn('[getRequestOrigin] Ignoring malformed ADMIN_PANEL_PUBLIC_URL:', publicUrl);
+  return undefined;
+}
+
+const DEFAULT_SCHEME_PORTS: Record<string, string> = { 'https:': ':443', 'http:': ':80' };
+
+/** Returns the referer's origin only when its host matches the serving host, so a foreign referer (e.g. an IdP such as Azure EntraID's login.microsoftonline.com) can never be forwarded as the panel's own origin. `URL` strips the scheme's default port from the referer host, so an explicit default port on the serving authority (`example.com:443`) is stripped before comparing. */
+function getSameHostRefererOrigin(host: string): string | undefined {
+  const referer = getRequestHeader('referer');
+  if (!referer) return undefined;
+  try {
+    const url = new URL(referer);
+    const defaultPort = DEFAULT_SCHEME_PORTS[url.protocol] ?? '';
+    const servingHost = host.toLowerCase();
+    const normalizedHost =
+      defaultPort && servingHost.endsWith(defaultPort)
+        ? servingHost.slice(0, -defaultPort.length)
+        : servingHost;
+    return url.host.toLowerCase() === normalizedHost ? url.origin : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Resolves the admin panel's browser-visible origin for LibreChat's exchange-code
+ * origin binding.
+ *
+ * Order: the configured `ADMIN_PANEL_PUBLIC_URL` origin, then the `origin` header,
+ * then the first `x-forwarded-host` value (Host-rewriting proxies replace `host` with
+ * the internal upstream authority) combined with the first `x-forwarded-proto` value.
+ * When no forwarded proto is available, a same-host referer recovers the scheme for
+ * HTTPS deployments whose proxy strips `Origin` without setting `x-forwarded-proto`.
+ * A foreign referer is never used: it identifies whatever page or IdP initiated the
+ * request, and forwarding it makes LibreChat reject the exchange code as expired even
+ * though authentication succeeded.
+ */
 function getRequestOrigin(): string | undefined {
+  const configuredOrigin = getConfiguredPublicOrigin();
+  if (configuredOrigin) return configuredOrigin;
+
   const origin = getRequestHeader('origin');
   if (origin) return origin;
 
-  const referer = getRequestHeader('referer');
-  if (referer) {
-    try {
-      return new URL(referer).origin;
-    } catch {
-      return undefined;
-    }
-  }
-
-  const host = getRequestHeader('host');
+  const forwardedHost = getRequestHeader('x-forwarded-host');
+  const host = forwardedHost?.split(',')[0]?.trim() || getRequestHeader('host');
   if (!host) return undefined;
 
-  const proto = getRequestHeader('x-forwarded-proto') ?? 'http';
-  return `${proto}://${host}`;
+  const forwardedProto = getRequestHeader('x-forwarded-proto');
+  const proto = forwardedProto?.split(',')[0]?.trim();
+  if (proto) return `${proto}://${host}`;
+
+  return getSameHostRefererOrigin(host) ?? `http://${host}`;
 }
 
 export const adminLoginFn = createServerFn({ method: 'POST' })
@@ -197,7 +244,8 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
       return { valid: false, error: 'Session expired due to inactivity' };
     }
 
-    const needsRevalidation = !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
+    const needsRevalidation =
+      !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
 
     if (needsRevalidation) {
       try {
