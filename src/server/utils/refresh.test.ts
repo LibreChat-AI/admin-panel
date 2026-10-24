@@ -112,7 +112,7 @@ describe('refreshAdminTokenDeduped', () => {
 
     const [resA, resB] = await Promise.all([a, b]);
     expect(resA).toEqual(resB);
-    expect(resA?.token).toBe('new-jwt');
+    expect(resA.kind === 'success' && resA.tokens.token).toBe('new-jwt');
   });
 
   it('does not coalesce when userId differs even with the same refresh token', async () => {
@@ -126,8 +126,8 @@ describe('refreshAdminTokenDeduped', () => {
     const [resA, resB] = await Promise.all([a, b]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(resA?.token).toBe('jwt-user-1');
-    expect(resB?.token).toBe('jwt-user-2');
+    expect(resA.kind === 'success' && resA.tokens.token).toBe('jwt-user-1');
+    expect(resB.kind === 'success' && resB.tokens.token).toBe('jwt-user-2');
   });
 
   it('does not coalesce when tokenProvider differs', async () => {
@@ -141,8 +141,8 @@ describe('refreshAdminTokenDeduped', () => {
     const [resA, resB] = await Promise.all([a, b]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(resA?.token).toBe('jwt-openid');
-    expect(resB?.token).toBe('jwt-librechat');
+    expect(resA.kind === 'success' && resA.tokens.token).toBe('jwt-openid');
+    expect(resB.kind === 'success' && resB.tokens.token).toBe('jwt-librechat');
   });
 
   it('does not coalesce when tenant header differs between concurrent calls', async () => {
@@ -158,8 +158,26 @@ describe('refreshAdminTokenDeduped', () => {
     const [resA, resB] = await Promise.all([a, b]);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(resA?.token).toBe('jwt-tenant-a');
-    expect(resB?.token).toBe('jwt-tenant-b');
+    expect(resA.kind === 'success' && resA.tokens.token).toBe('jwt-tenant-a');
+    expect(resB.kind === 'success' && resB.tokens.token).toBe('jwt-tenant-b');
+  });
+});
+
+describe('refreshAdminToken — reuse-disabled signal', () => {
+  it('returns kind:"reuse_disabled" when backend rejects with 403 TOKEN_REUSE_DISABLED', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { error_code: 'TOKEN_REUSE_DISABLED' }));
+
+    const result = await refreshAdminToken('rt', 'openid', 'user-1');
+
+    expect(result).toEqual({ kind: 'reuse_disabled' });
+  });
+
+  it('returns kind:"failed" for a plain 403 without the reuse-disabled error_code', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { error_code: 'FORBIDDEN' }));
+
+    const result = await refreshAdminToken('rt', 'openid', 'user-1');
+
+    expect(result).toEqual({ kind: 'failed' });
   });
 });
 
@@ -241,6 +259,23 @@ describe('ensureFreshBearer', () => {
     expect(result).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('clears the stored refresh token when backend reports TOKEN_REUSE_DISABLED', async () => {
+    sessionState.data = {
+      token: 'cur',
+      refreshToken: 'rt-unusable',
+      tokenProvider: 'openid',
+      user: { id: 'u' },
+      expiresAt: Date.now() + 1_000,
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { error_code: 'TOKEN_REUSE_DISABLED' }));
+
+    const result = await ensureFreshBearer(30_000);
+
+    expect(result).toBe('cur');
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(updateSpy.mock.calls[0][0]).toEqual({ refreshToken: undefined });
+  });
 });
 
 describe('refreshOn401', () => {
@@ -272,5 +307,20 @@ describe('refreshOn401', () => {
     const result = await refreshOn401();
     expect(result).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('clears the stored refresh token on TOKEN_REUSE_DISABLED and returns undefined', async () => {
+    sessionState.data = {
+      token: 'cur',
+      refreshToken: 'rt-unusable',
+      tokenProvider: 'openid',
+      user: { id: 'u' },
+    };
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { error_code: 'TOKEN_REUSE_DISABLED' }));
+
+    const result = await refreshOn401();
+
+    expect(result).toBeUndefined();
+    expect(updateSpy).toHaveBeenCalledWith({ refreshToken: undefined });
   });
 });
