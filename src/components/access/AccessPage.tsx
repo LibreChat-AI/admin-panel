@@ -21,10 +21,15 @@ export function AccessPage({
     <div
       role="region"
       aria-label={localize('com_nav_access')}
-      className="admin-content-page flex min-h-0 flex-1 flex-col gap-6 overflow-hidden"
+      className="admin-content-page flex min-h-0 flex-1 flex-col gap-5 overflow-hidden"
     >
       {canReadRoles && canReadGroups && (
-        <Tabs value={activeTab} onValueChange={onTabChange} ariaLabel={localize('com_nav_access')}>
+        <Tabs
+          value={activeTab}
+          onValueChange={onTabChange}
+          ariaLabel={localize('com_nav_access')}
+          className="aimo-segmented"
+        >
           <Tabs.TriggersList>
             <Tabs.Trigger value="roles">{localize('com_access_tab_roles')}</Tabs.Trigger>
             <Tabs.Trigger value="groups">{localize('com_access_tab_groups')}</Tabs.Trigger>

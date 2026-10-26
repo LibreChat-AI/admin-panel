@@ -1,4 +1,5 @@
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
+import type { PrincipalType } from 'librechat-data-provider';
 import type { ReactNode, RefObject } from 'react';
 import type { MenuIconName } from './scope';
 
@@ -108,6 +109,17 @@ export interface TrashButtonProps {
   ariaLabel: string;
   size?: 'xs' | 'sm';
   disabled?: boolean;
+}
+
+export type StatusTone = 'success' | 'danger';
+
+export interface StatusPillProps {
+  tone: StatusTone;
+  label: string;
+}
+
+export interface TypeBadgeProps {
+  type: PrincipalType | 'BASE';
 }
 
 export interface PaginationProps {

@@ -19,12 +19,13 @@ export function GrantsPage({ activeTab, onTabChange }: t.GrantsPageProps) {
     <div
       role="region"
       aria-label={localize('com_grants_title')}
-      className="admin-content-page flex min-h-0 flex-1 flex-col gap-6 overflow-hidden"
+      className="admin-content-page flex min-h-0 flex-1 flex-col gap-5 overflow-hidden"
     >
       <Tabs
         value={resolvedTab}
         onValueChange={onTabChange}
         ariaLabel={localize('com_grants_title')}
+        className="aimo-segmented"
       >
         <Tabs.TriggersList>
           <Tabs.Trigger value="management">{localize('com_grants_tab_management')}</Tabs.Trigger>

@@ -13,7 +13,7 @@ export function KebabMenu({ items, ariaLabel }: t.KebabMenuProps) {
           ref={triggerRef}
           type="button"
           aria-label={ariaLabel ?? localize('com_ui_actions')}
-          className="rounded p-1 text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover)"
+          className="aimo-icon-btn"
         >
           <Icon name="dots-horizontal" size="sm" />
         </button>
@@ -24,7 +24,7 @@ export function KebabMenu({ items, ariaLabel }: t.KebabMenuProps) {
             key={item.label}
             icon={item.icon}
             onClick={item.onClick}
-            className={item.danger ? 'text-(--cui-color-accent-danger)' : undefined}
+            className={item.danger ? 'text-red-ink' : undefined}
           >
             {item.label}
           </Dropdown.Item>

@@ -87,8 +87,8 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: t.SidebarProp
       <aside
         aria-label={localize('com_a11y_admin_panel')}
         className={cn(
-          'admin-sidebar sticky top-0 z-(--z-floating) flex h-screen shrink-0 flex-col overflow-hidden border-r border-(--sidebar-stroke) bg-(--sidebar-background) transition-[width] duration-200',
-          collapsed ? 'is-collapsed w-16' : 'w-62',
+          'admin-sidebar sticky top-0 z-(--z-floating) flex h-screen shrink-0 flex-col overflow-hidden bg-rail text-rail-ink transition-[width] duration-200 motion-reduce:transition-none',
+          collapsed ? 'is-collapsed w-16' : 'w-60',
         )}
       >
         <Link
@@ -102,7 +102,7 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: t.SidebarProp
         </Link>
 
         <nav className="flex min-h-0 flex-1 flex-col pb-2" role="navigation">
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pt-4">
+          <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto pt-2">
             {visibleItems.map((item) => (
               <Link
                 key={item.path}
@@ -124,7 +124,7 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: t.SidebarProp
             ))}
           </div>
           {(navigation.chatUrl || navigation.governanceAdminUrl || navigation.gatewayUrl) && (
-            <div className="flex shrink-0 flex-col gap-1 border-t border-(--sidebar-stroke) pt-3">
+            <div className="flex shrink-0 flex-col gap-0.5 border-t border-rail-line pt-2">
               {navigation.chatUrl && (
                 <a
                   href={navigation.chatUrl}
@@ -165,22 +165,19 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: t.SidebarProp
         </nav>
 
         {initials && (
-          <div className="flex shrink-0 items-center border-t border-(--sidebar-stroke) px-2 py-3">
-            <div className="flex items-center gap-3 overflow-hidden px-1.75">
+          <div className="flex shrink-0 items-center border-t border-rail-line px-3.5 py-3">
+            <div className="flex min-w-0 items-center gap-3 overflow-hidden">
               <Dropdown>
                 <Dropdown.Trigger>
                   <button
                     ref={userMenuRef}
                     type="button"
-                    className="flex size-8.5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-(--sidebar-stroke) bg-(--sidebar-avatar-background) transition-colors hover:border-(--sidebar-text-muted)"
+                    className="flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-avatar transition-colors hover:bg-rail-active"
                     aria-label={`${localize('com_nav_user_menu')}, ${user?.name || user?.email || ''}`}
                     aria-haspopup="true"
                     title={user?.name || user?.email || ''}
                   >
-                    <span
-                      aria-hidden="true"
-                      className="text-xs font-medium text-(--sidebar-avatar-text)"
-                    >
+                    <span aria-hidden="true" className="text-xs font-semibold text-white">
                       {initials}
                     </span>
                   </button>
@@ -229,11 +226,11 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: t.SidebarProp
               </Dropdown>
               {user && (
                 <div className="sidebar-user-details min-w-0 flex-1">
-                  <span className="block truncate text-sm leading-tight font-medium text-(--sidebar-text)">
+                  <span className="block truncate text-sm leading-tight font-semibold text-rail-ink">
                     {user.name || ''}
                   </span>
                   {user.email && (
-                    <span className="block truncate text-xs leading-tight text-(--sidebar-text-muted)">
+                    <span className="block truncate text-xs leading-tight text-rail-muted">
                       {user.email}
                     </span>
                   )}
@@ -248,7 +245,7 @@ export function Sidebar({ user, navigation, collapsed, onToggle }: t.SidebarProp
           onClick={onToggle}
           aria-label={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
           title={localize(collapsed ? 'com_nav_expand_sidebar' : 'com_nav_collapse_sidebar')}
-          className="flex h-12 w-full shrink-0 cursor-pointer items-center justify-center border-t border-(--sidebar-stroke) bg-transparent text-(--sidebar-text-muted) transition-colors hover:bg-(--sidebar-background-hover) hover:text-(--sidebar-interaction-ink)"
+          className="flex h-12 w-full shrink-0 cursor-pointer items-center justify-center border-t border-rail-line bg-transparent text-rail-muted transition-colors hover:bg-rail-hover hover:text-rail-ink"
         >
           <Icon name={collapsed ? 'slide-in' : 'slide-out'} size="sm" />
         </button>

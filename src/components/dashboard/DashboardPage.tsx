@@ -57,51 +57,53 @@ export function DashboardPage() {
     <div
       role="region"
       aria-label={localize('com_nav_dashboard')}
-      className="admin-content-page flex flex-1 flex-col gap-6 overflow-auto"
+      className="admin-content-page flex flex-1 flex-col gap-7 overflow-auto"
     >
       <section aria-label={localize('com_dash_quick_links')}>
-        <h3 className="mb-3 text-sm font-medium text-(--cui-color-text-muted)">
-          {localize('com_dash_quick_links')}
-        </h3>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <h3 className="aimo-label mb-3">{localize('com_dash_quick_links')}</h3>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {visibleLinks.map((link) => (
             <Link
               key={link.path}
               to={link.path}
-              className="flex items-start gap-3 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-6 no-underline transition-colors hover:bg-(--cui-color-background-hover)"
+              className="aimo-card aimo-card-link group flex items-start gap-4 px-5 py-4.5 no-underline"
             >
-              <span aria-hidden="true" className="mt-0.5 text-(--cui-color-text-muted)">
-                <Icon name={link.icon} width="20px" height="20px" />
+              <span
+                aria-hidden="true"
+                className="flex size-10 shrink-0 items-center justify-center rounded-full bg-fill text-link"
+              >
+                <Icon name={link.icon} width="18px" height="18px" />
               </span>
-              <div className="flex flex-col gap-0.5">
-                <span className="text-sm font-medium text-(--cui-color-text-default)">
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="text-[17px] leading-snug font-semibold tracking-[-0.022em] text-ink">
                   {localize(link.labelKey)}
                 </span>
-                <span className="text-xs text-(--cui-color-text-muted)">
-                  {localize(link.descKey)}
-                </span>
+                <span className="text-sm text-muted">{localize(link.descKey)}</span>
               </div>
+              <span
+                aria-hidden="true"
+                className="mt-1 text-muted transition-colors group-hover:text-link"
+              >
+                <Icon name="chevron-right" size="sm" />
+              </span>
             </Link>
           ))}
         </div>
       </section>
 
-      <section
-        aria-label={localize('com_dash_nav_tips')}
-        className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) p-6"
-      >
-        <h3 className="mb-3 text-sm font-medium text-(--cui-color-text-default)">
+      <section aria-label={localize('com_dash_nav_tips')} className="aimo-tile">
+        <h3 className="m-0 text-[17px] font-semibold tracking-[-0.022em] text-tile-title">
           {localize('com_dash_nav_tips')}
         </h3>
-        <ul className="flex flex-col gap-3 text-sm text-(--cui-color-text-muted)">
-          <li className="flex items-center gap-3">
-            <kbd className="shrink-0 rounded border border-(--cui-color-stroke-default) bg-(--cui-color-background-secondary) px-1.5 py-0.5 text-xs font-medium text-(--cui-color-text-default)">
+        <ul className="m-0 flex list-none flex-col gap-3 p-0">
+          <li className="flex items-baseline gap-3.5">
+            <kbd className="aimo-kbd flex-none bg-tile-kbd-bg text-tile-kbd-ink">
               {isMac ? '⌘B' : 'Ctrl+B'}
             </kbd>
             <span>{localize('com_dash_tip_sidebar')}</span>
           </li>
-          <li className="flex items-center gap-3">
-            <kbd className="shrink-0 rounded border border-(--cui-color-stroke-default) bg-(--cui-color-background-secondary) px-1.5 py-0.5 text-xs font-medium text-(--cui-color-text-default)">
+          <li className="flex items-baseline gap-3.5">
+            <kbd className="aimo-kbd flex-none bg-tile-kbd-bg text-tile-kbd-ink">
               {isMac ? '⌘K' : 'Ctrl+K'}
             </kbd>
             <span>{localize('com_dash_tip_cmdk')}</span>

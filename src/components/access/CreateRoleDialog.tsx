@@ -94,6 +94,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as t.CreateRoleTab)}
             ariaLabel={localize('com_access_create_role')}
+            className="aimo-segmented aimo-segmented-sm"
           >
             <Tabs.TriggersList>
               <Tabs.Trigger value="details">{localize('com_access_tab_details')}</Tabs.Trigger>
@@ -108,12 +109,9 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
               tabIndex={-1}
               className={cn(activeTab !== 'details' && 'hidden')}
             >
-              <div className="flex flex-col gap-5 pt-5">
+              <div className="flex flex-col gap-4 pt-5">
                 <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="create-role-name"
-                    className="text-sm font-medium text-(--cui-color-text-default)"
-                  >
+                  <label htmlFor="create-role-name" className="aimo-label">
                     {localize('com_access_col_name')}
                   </label>
                   <input
@@ -123,14 +121,11 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
                     onChange={(e) => setName(e.target.value)}
                     placeholder={localize('com_access_role_name_placeholder')}
                     autoFocus
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="aimo-input"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="create-role-description"
-                    className="text-sm font-medium text-(--cui-color-text-default)"
-                  >
+                  <label htmlFor="create-role-description" className="aimo-label">
                     {localize('com_config_field_description')}
                   </label>
                   <input
@@ -139,7 +134,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder={localize('com_access_role_desc_placeholder')}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="aimo-input"
                   />
                 </div>
               </div>

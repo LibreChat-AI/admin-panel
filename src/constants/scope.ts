@@ -4,25 +4,25 @@ import type * as t from '@/types';
 export const SCOPE_TYPE_CONFIG: Record<t.ScopePrincipalType | 'BASE', t.ScopeTypeConfigEntry> = {
   BASE: {
     icon: 'settings',
-    color: 'var(--cui-color-accent-success)',
+    color: 'var(--color-principal-base)',
     labelKey: 'com_scope_base_config',
     badgeClass: '',
   },
   [PrincipalType.ROLE]: {
     icon: 'lock',
-    color: 'var(--cui-color-accent-warning)',
+    color: 'var(--color-principal-role)',
     labelKey: 'com_scope_roles',
     badgeClass: 'badge-role',
   },
   [PrincipalType.GROUP]: {
     icon: 'users',
-    color: 'var(--cui-color-accent-info)',
+    color: 'var(--color-principal-group)',
     labelKey: 'com_scope_groups',
     badgeClass: 'badge-group',
   },
   [PrincipalType.USER]: {
     icon: 'user',
-    color: 'var(--cui-color-accent-user)',
+    color: 'var(--color-principal-user)',
     labelKey: 'com_scope_users',
     badgeClass: 'badge-user',
   },

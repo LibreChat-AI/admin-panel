@@ -3,14 +3,17 @@ import { REGEXP_ONLY_DIGITS } from 'input-otp';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from '@tanstack/react-router';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Alert, Title, Panel, Button, Separator, TextField, Container } from '@clickhouse/click-ui';
+import { Alert, Panel, Button, Separator, TextField, Container } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { adminLoginFn, adminVerify2FAFn, openIdCheckOptions, openidLoginFn } from '@/server';
 import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from './InputOTP';
 import { rememberPostLoginRedirect } from '@/utils';
 import { PasswordInput } from './PasswordInput';
-import { useLocalize } from '@/hooks';
 import aimoLogo from '@/assets/logo.svg';
+import { useLocalize } from '@/hooks';
+
+const TITLE_CLASS =
+  'm-0 text-center text-[40px] leading-[1.1] font-semibold tracking-[-0.02em] text-ink';
 
 export function AuthCard({
   redirectTo = '/',
@@ -217,47 +220,37 @@ export function AuthCard({
   if (showAutoRedirect) {
     return (
       <Panel
-        className="auth-card w-full max-w-md"
+        className="auth-card w-full max-w-110"
         padding="xl"
         radii="lg"
         hasBorder
-        hasShadow
         color="default"
       >
         <Container orientation="vertical" gap="lg" alignItems="center">
-          <img src={aimoLogo} alt={localize('com_a11y_logo_alt')} className="aimo-logo h-12 w-44" />
-          <Title type="h1">{localize('com_auth_title')}</Title>
-          <p className="text-center text-sm text-(--cui-color-text-muted)">
+          <img src={aimoLogo} alt={localize('com_a11y_logo_alt')} className="aimo-logo h-8 w-32" />
+          <h1 className={TITLE_CLASS}>{localize('com_auth_title')}</h1>
+          <p className="text-center text-[15px] text-muted">
             {localize('com_auth_sso_redirecting_auto')}
           </p>
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-(--cui-color-stroke-default) border-t-(--cui-color-accent-info)" />
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-line border-t-accent" />
         </Container>
       </Panel>
     );
   }
 
   return (
-    <Panel
-      className="auth-card w-full max-w-md"
-      padding="xl"
-      radii="lg"
-      hasBorder
-      hasShadow
-      color="default"
-    >
+    <Panel className="auth-card w-full max-w-110" padding="xl" radii="lg" hasBorder color="default">
       <Container orientation="vertical" gap="lg" alignItems="center">
-        <img src={aimoLogo} alt={localize('com_a11y_logo_alt')} className="aimo-logo h-12 w-44" />
-        <Title type="h1">
+        <img src={aimoLogo} alt={localize('com_a11y_logo_alt')} className="aimo-logo h-8 w-32" />
+        <h1 className={TITLE_CLASS}>
           {step === '2fa' ? localize('com_auth_2fa_title') : localize('com_auth_title')}
-        </Title>
+        </h1>
 
         {generalError && <Alert type="banner" state="danger" text={generalError} />}
 
         {step === '2fa' ? (
           <>
-            <p className="text-center text-sm text-(--cui-color-text-muted)">
-              {localize('com_auth_2fa_prompt')}
-            </p>
+            <p className="text-center text-[15px] text-muted">{localize('com_auth_2fa_prompt')}</p>
             <div className="flex justify-center">
               <InputOTP
                 maxLength={6}
@@ -283,7 +276,7 @@ export function AuthCard({
               </InputOTP>
             </div>
             {isSubmitting && (
-              <p className="text-center text-sm text-(--cui-color-text-muted)">
+              <p className="text-center text-[15px] text-muted">
                 {localize('com_auth_2fa_verifying')}
               </p>
             )}
@@ -291,7 +284,7 @@ export function AuthCard({
               type="button"
               onClick={handleBack}
               disabled={isSubmitting}
-              className="text-sm text-(--cui-color-accent-info) transition-colors hover:underline disabled:pointer-events-none disabled:opacity-50"
+              className="cursor-pointer text-sm font-semibold text-link transition-colors hover:underline disabled:pointer-events-none disabled:opacity-50"
             >
               {localize('com_auth_2fa_back')}
             </button>
@@ -327,6 +320,7 @@ export function AuthCard({
               type="primary"
               onClick={handleLogin}
               disabled={isSubmitting}
+              fillWidth
             />
 
             {ssoAvailable && (
@@ -341,6 +335,7 @@ export function AuthCard({
                   type="secondary"
                   onClick={handleSsoLogin}
                   disabled={ssoLoading}
+                  fillWidth
                 />
               </>
             )}

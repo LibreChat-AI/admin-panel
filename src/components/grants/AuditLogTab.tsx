@@ -2,7 +2,7 @@ import { PrincipalType } from 'librechat-data-provider';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Badge, Button, DatePicker, Icon, Select, TextField } from '@clickhouse/click-ui';
+import { Button, DatePicker, Select, TextField } from '@clickhouse/click-ui';
 import type { AuditAction } from '@librechat/data-schemas';
 import type { AuditFilters } from '@/server';
 import type * as t from '@/types';
@@ -18,22 +18,23 @@ import {
   localDayBoundaryIso,
 } from './auditLogUtils';
 import {
-  AUDIT_LOG_PAGE_SIZE,
-  auditLogEntryQueryOptions,
-  auditLogQueryOptions,
-  exportAuditLogServerFn,
-} from '@/server';
-import {
   EmptyState,
   LoadingState,
   Pagination,
   ScreenReaderAnnouncer,
   SearchInput,
+  StatusPill,
+  TypeBadge,
 } from '@/components/shared';
+import {
+  AUDIT_LOG_PAGE_SIZE,
+  auditLogEntryQueryOptions,
+  auditLogQueryOptions,
+  exportAuditLogServerFn,
+} from '@/server';
 import { useAnnouncement, useDebouncedFilter, useLocalize } from '@/hooks';
-import { getScopeTypeConfig, isAuditEntryId } from '@/constants';
 import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
-import { cn } from '@/utils';
+import { isAuditEntryId } from '@/constants';
 
 const AUDIT_ACTIONS: readonly AuditAction[] = ['grant.assigned', 'grant.removed'] as const;
 const TARGET_TYPE_OPTIONS: readonly PrincipalType[] = [
@@ -314,7 +315,11 @@ export function AuditLogTab() {
         announce(localize('com_a11y_copy_failed'));
         return false;
       }
-      const url = buildEntryPermalink(id, window.location.origin, import.meta.env.VITE_BASE_PATH || '');
+      const url = buildEntryPermalink(
+        id,
+        window.location.origin,
+        import.meta.env.VITE_BASE_PATH || '',
+      );
       try {
         await navigator.clipboard.writeText(url);
         return true;
@@ -386,7 +391,7 @@ export function AuditLogTab() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 pl-1">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div
           className="flex flex-1 flex-wrap items-center gap-3"
           role="group"
@@ -425,7 +430,7 @@ export function AuditLogTab() {
           </div>
 
           <div className="flex items-center gap-1.5">
-            <label htmlFor="audit-date-from" className="text-xs text-(--cui-color-text-muted)">
+            <label htmlFor="audit-date-from" className="aimo-label">
               {localize('com_audit_date_from')}
             </label>
             <DatePickerCell resetKey={dateResetNonce} inputId="audit-date-from">
@@ -441,7 +446,7 @@ export function AuditLogTab() {
             </DatePickerCell>
           </div>
           <div className="flex items-center gap-1.5">
-            <label htmlFor="audit-date-to" className="text-xs text-(--cui-color-text-muted)">
+            <label htmlFor="audit-date-to" className="aimo-label">
               {localize('com_audit_date_to')}
             </label>
             <DatePickerCell resetKey={dateResetNonce} inputId="audit-date-to">
@@ -524,35 +529,21 @@ export function AuditLogTab() {
       </div>
 
       <div
-        className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)"
+        className="aimo-card overflow-x-auto"
         role="region"
         aria-label={localize('com_audit_title')}
       >
-        <table className="w-full text-left text-sm">
+        <table className="aimo-table">
           <caption className="sr-only">{localize('com_audit_title')}</caption>
           <thead className="sticky top-0 z-(--z-sticky)">
-            <tr className="border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-muted)">
-              <th
-                scope="col"
-                className="w-24 px-4 py-2.5 font-medium text-(--cui-color-text-muted)"
-              >
+            <tr>
+              <th scope="col" className="w-28">
                 {localize('com_audit_col_action')}
               </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_audit_col_target')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_audit_col_capability')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_audit_col_actor')}
-              </th>
-              <th
-                scope="col"
-                className="px-4 py-2.5 font-medium whitespace-nowrap text-(--cui-color-text-muted)"
-              >
-                {localize('com_audit_col_timestamp')}
-              </th>
+              <th scope="col">{localize('com_audit_col_target')}</th>
+              <th scope="col">{localize('com_audit_col_capability')}</th>
+              <th scope="col">{localize('com_audit_col_actor')}</th>
+              <th scope="col">{localize('com_audit_col_timestamp')}</th>
             </tr>
           </thead>
           <tbody>
@@ -608,11 +599,7 @@ export function AuditLogTab() {
       */}
       {!isError && (
         <div className="flex items-center justify-between gap-3 pb-4">
-          <p
-            className="text-xs text-(--cui-color-text-muted)"
-            aria-live="polite"
-            aria-atomic="true"
-          >
+          <p className="text-xs text-muted tabular-nums" aria-live="polite" aria-atomic="true">
             {localize('com_audit_entry_count', { count: displayTotal })}
           </p>
         </div>
@@ -652,7 +639,6 @@ export function AuditLogTab() {
 
 function AuditLogTableRow({
   entry,
-  isLast,
   onActivate,
   onKeyDown,
   localize,
@@ -663,7 +649,6 @@ function AuditLogTableRow({
   onKeyDown: (e: React.KeyboardEvent<HTMLTableRowElement>) => void;
   localize: ReturnType<typeof useLocalize>;
 }) {
-  const targetConfig = getScopeTypeConfig(entry.target.type as PrincipalType);
   const capability = auditCapability(entry);
   return (
     <tr
@@ -672,47 +657,29 @@ function AuditLogTableRow({
       aria-label={localize('com_a11y_audit_row_open')}
       onClick={onActivate}
       onKeyDown={onKeyDown}
-      className={cn(
-        'cursor-pointer bg-(--cui-color-background-panel) outline-none hover:bg-(--cui-color-background-hover) focus-visible:bg-(--cui-color-background-hover) focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-(--cui-color-outline)',
-        !isLast && 'border-b border-(--cui-color-stroke-default)',
-      )}
     >
-      <td className="px-4 py-3">
-        <Badge
-          size="sm"
-          state={ACTION_BADGE_STATE[entry.action]}
-          text={localize(ACTION_LABEL_KEY[entry.action])}
+      <td>
+        <StatusPill
+          tone={ACTION_BADGE_STATE[entry.action]}
+          label={localize(ACTION_LABEL_KEY[entry.action])}
         />
       </td>
-      <td className="px-4 py-3">
-        <span className="flex items-center gap-2">
-          <Badge
-            size="sm"
-            state="neutral"
-            text={
-              <span className="inline-flex items-center gap-1">
-                <Icon name={targetConfig.icon} size="xs" />
-                {localize(targetConfig.labelKey)}
-              </span>
-            }
-          />
-          <span className="text-(--cui-color-text-default)">
-            {entry.target.name ?? entry.target.id}
-          </span>
+      <td>
+        <span className="flex items-center gap-2.5">
+          <TypeBadge type={entry.target.type as PrincipalType} />
+          <span className="text-ink">{entry.target.name ?? entry.target.id}</span>
         </span>
       </td>
-      <td className="px-4 py-3">
+      <td>
         <div className="flex flex-col">
-          <span className="text-(--cui-color-text-default)">
-            {capabilityLabel(capability, localize)}
-          </span>
-          <span aria-hidden="true" className="text-[10px] text-(--cui-color-text-muted)">
+          <span className="text-ink">{capabilityLabel(capability, localize)}</span>
+          <span aria-hidden="true" className="font-mono text-[11px] tracking-normal text-muted">
             {capability}
           </span>
         </div>
       </td>
-      <td className="px-4 py-3 font-medium text-(--cui-color-text-default)">{entry.actor.name}</td>
-      <td className="px-4 py-3 text-xs whitespace-nowrap text-(--cui-color-text-muted)">
+      <td className="font-semibold text-ink">{entry.actor.name}</td>
+      <td className="text-[13px] whitespace-nowrap text-muted tabular-nums">
         <time dateTime={entry.timestamp}>{formatTimestamp(entry.timestamp)}</time>
       </td>
     </tr>

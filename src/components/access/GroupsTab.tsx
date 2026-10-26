@@ -73,22 +73,22 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
 
   if (isError && !data) {
     return (
-      <div className="px-4 py-8 text-center text-sm text-(--cui-color-foreground-danger)">
+      <div className="px-4 py-8 text-center text-sm text-red-ink">
         {localize('com_error_load_groups')}
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 pr-1">
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 pb-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <SearchInput
           value={search}
           onChange={handleSearchChange}
           placeholder={localize('com_access_search_groups')}
         />
         <Button
-          type="secondary"
+          type="primary"
           iconLeft="plus"
           label={localize('com_access_create_group')}
           onClick={onCreateGroup}
@@ -105,24 +105,22 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
       {groups.length === 0 ? (
         <EmptyState message={localize('com_access_groups_empty')} />
       ) : (
-        <div className={cn('flex flex-col', isFetching && 'opacity-60 transition-opacity')}>
+        <div className={cn('flex flex-col gap-2.5', isFetching && 'opacity-60 transition-opacity')}>
           {groups.map((group) => (
             <div
               key={group.id}
-              className="mb-2 flex items-center gap-3 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) px-3 py-3"
+              className="aimo-card aimo-card-link flex items-center gap-3 py-1.5 pr-3 pl-1.5"
             >
               <button
                 type="button"
                 onClick={() => setEditTarget(group)}
-                className="-my-2 -ml-2 min-w-0 flex-1 cursor-pointer rounded py-3 pl-3 text-left outline-none focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)"
+                className="min-w-0 flex-1 cursor-pointer rounded-inner px-3.5 py-2.5 text-left"
               >
-                <div className="text-sm font-medium text-(--cui-color-text-default) hover:underline">
+                <div className="truncate text-[15px] font-semibold tracking-[-0.02em] text-ink">
                   {group.name}
                 </div>
                 {group.description && (
-                  <div className="truncate text-xs text-(--cui-color-text-muted)">
-                    {group.description}
-                  </div>
+                  <div className="mt-0.5 truncate text-sm text-muted">{group.description}</div>
                 )}
               </button>
 

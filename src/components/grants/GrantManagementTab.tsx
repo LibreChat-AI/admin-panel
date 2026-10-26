@@ -59,7 +59,7 @@ export function GrantManagementTab() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 pr-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 pb-2">
       <div className="flex flex-wrap items-center gap-3">
         <SearchInput
           value={search}
@@ -72,20 +72,14 @@ export function GrantManagementTab() {
       {/* Raw <table> kept (not click-ui Table): rows act as buttons with tabIndex,
           role, aria-label, onKeyDown, and a ref for focus restoration — semantics
           the click-ui Table API does not expose. Matches AuditLogTab's choice. */}
-      <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
-        <table className="w-full text-left text-sm">
+      <div className="aimo-card overflow-x-auto">
+        <table className="aimo-table">
           <caption className="sr-only">{localize('com_grants_title')}</caption>
           <thead>
-            <tr className="border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-muted)">
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_cap_col_name')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_cap_col_capabilities')}
-              </th>
-              <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
-                {localize('com_cap_col_status')}
-              </th>
+            <tr>
+              <th scope="col">{localize('com_cap_col_name')}</th>
+              <th scope="col">{localize('com_cap_col_capabilities')}</th>
+              <th scope="col">{localize('com_cap_col_status')}</th>
             </tr>
           </thead>
           <tbody>

@@ -1,8 +1,8 @@
+import { Icon } from '@clickhouse/click-ui';
 import * as Dialog from '@radix-ui/react-dialog';
 import type * as t from '@/types';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 const THEME_OPTIONS: t.ThemeOption[] = ['system', 'light', 'dark'];
 const THEME_LABEL_KEYS: Record<t.ThemeOption, string> = {
@@ -13,7 +13,7 @@ const THEME_LABEL_KEYS: Record<t.ThemeOption, string> = {
 
 export function SettingsDialog({ open, onClose }: t.SettingsDialogProps) {
   const localize = useLocalize();
-  const { theme, resolvedTheme, setTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
 
   return (
     <Dialog.Root
@@ -23,20 +23,18 @@ export function SettingsDialog({ open, onClose }: t.SettingsDialogProps) {
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay
-          className={cn('admin-settings-overlay', resolvedTheme === 'dark' && 'is-dark')}
-        />
-        <Dialog.Content
-          className={cn('admin-settings-dialog', resolvedTheme === 'dark' && 'is-dark')}
-        >
-          <Dialog.Title className="admin-settings-title">
-            {localize('com_ui_settings')}
-          </Dialog.Title>
-          <Dialog.Close asChild>
-            <button className="admin-settings-close" type="button" aria-label="Close settings">
-              ×
-            </button>
-          </Dialog.Close>
+        <Dialog.Overlay className="admin-settings-overlay" />
+        <Dialog.Content className="admin-settings-dialog">
+          <div className="admin-settings-header">
+            <Dialog.Title className="admin-settings-title">
+              {localize('com_ui_settings')}
+            </Dialog.Title>
+            <Dialog.Close asChild>
+              <button className="admin-settings-close" type="button" aria-label="Close settings">
+                <Icon name="cross" width="16px" height="16px" />
+              </button>
+            </Dialog.Close>
+          </div>
           <Dialog.Description className="sr-only">
             {localize('com_settings_theme_desc')}
           </Dialog.Description>

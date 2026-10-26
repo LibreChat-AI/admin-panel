@@ -11,6 +11,7 @@ export function TrashButton({ onClick, ariaLabel, size = 'sm', disabled }: t.Tra
   return (
     <IconButton
       icon="trash"
+      type="danger"
       size={size}
       onClick={handleClick}
       aria-label={ariaLabel}

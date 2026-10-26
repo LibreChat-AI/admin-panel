@@ -9,12 +9,8 @@ export function StickyActionBar({
   message,
 }: t.StickyActionBarProps) {
   return (
-    <div className="flex shrink-0 animate-[slideUp_200ms_ease-out] items-center gap-2 border-t border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-6 py-3">
-      {message && (
-        <span className="flex-1 text-sm font-medium text-(--cui-color-text-default)">
-          {message}
-        </span>
-      )}
+    <div className="flex shrink-0 animate-[slideUp_200ms_ease-out] items-center gap-2 border-t border-line bg-glass px-6 py-3 backdrop-blur-xl backdrop-saturate-180">
+      {message && <span className="flex-1 text-sm font-semibold text-ink">{message}</span>}
       <div className="ml-auto flex items-center gap-2">
         <Button type="secondary" label={discardLabel} onClick={onDiscard} />
         <Button type="primary" label={saveLabel} onClick={onSave} />

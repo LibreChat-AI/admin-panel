@@ -1,7 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { PrincipalType } from 'librechat-data-provider';
+import { Button, Icon, IconButton } from '@clickhouse/click-ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Badge, Button, Icon, IconButton } from '@clickhouse/click-ui';
 import type { ReactElement } from 'react';
 import type * as t from '@/types';
 import {
@@ -11,10 +11,24 @@ import {
   capabilityLabel,
   formatTimestamp,
 } from './auditLogUtils';
-import { LoadingState } from '@/components/shared';
-import { getScopeTypeConfig } from '@/constants';
+import { LoadingState, StatusPill, TypeBadge } from '@/components/shared';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
+
+const DRAWER_OVERLAY_CLASS = cn(
+  'fixed inset-0 z-(--z-overlay) bg-black/30',
+  'data-[state=closed]:animate-overlay-out data-[state=open]:animate-overlay-in',
+);
+const DRAWER_CONTENT_CLASS = cn(
+  'fixed top-0 right-0 z-(--z-overlay) flex h-full w-[min(100%,480px)] flex-col bg-surface shadow-pop',
+  'border-l border-line outline-none',
+  'will-change-transform',
+  'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
+);
+const DRAWER_HEADER_CLASS =
+  'flex items-center justify-between gap-3 border-b border-line2 px-5 py-3.5';
+const DRAWER_FOOTER_CLASS = 'flex items-center justify-end gap-2 border-t border-line2 px-5 py-3.5';
+const DRAWER_TITLE_CLASS = 'text-[17px] font-semibold tracking-[-0.022em] text-ink';
 
 interface AuditLogDetailDrawerProps {
   entry: t.AuditLogEntryWithDiff | null;
@@ -83,10 +97,9 @@ function CopyableMono({
       aria-label={ariaLabel}
       aria-live="polite"
       className={cn(
-        'inline-flex w-fit items-center gap-1 self-start rounded px-1 py-0.5 font-mono text-[11px]',
-        'text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover)',
-        'focus:outline-2 focus:outline-(--cui-color-stroke-focus)',
-        copied && 'text-(--cui-color-feedback-success-foreground)',
+        'inline-flex w-fit cursor-pointer items-center gap-1 self-start rounded-full px-2 py-0.5 font-mono text-[11px] tracking-normal',
+        'text-muted transition-colors hover:bg-fill',
+        copied && 'text-green-ink',
       )}
     >
       <span>{value}</span>
@@ -105,19 +118,17 @@ function DiffList({
   localize: ReturnType<typeof useLocalize>;
 }): ReactElement {
   if (items.length === 0) {
-    return (
-      <p className="text-xs text-(--cui-color-text-muted)">
-        {localize('com_audit_detail_no_changes')}
-      </p>
-    );
+    return <p className="text-xs text-muted">{localize('com_audit_detail_no_changes')}</p>;
   }
-  const state = variant === 'added' ? 'success' : 'danger';
+  const tone = variant === 'added' ? 'success' : 'danger';
   return (
     <ul className="flex flex-col gap-1.5">
       {items.map((cap) => (
         <li key={cap} className="flex flex-col gap-0.5">
-          <Badge size="sm" state={state} text={capabilityLabel(cap, localize)} />
-          <span className="font-mono text-[10px] text-(--cui-color-text-muted)">{cap}</span>
+          <span className="w-fit">
+            <StatusPill tone={tone} label={capabilityLabel(cap, localize)} />
+          </span>
+          <span className="font-mono text-[11px] tracking-normal text-muted">{cap}</span>
         </li>
       ))}
     </ul>
@@ -216,27 +227,15 @@ export function AuditLogDetailDrawer({
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay
-            className={cn(
-              'fixed inset-0 z-(--z-overlay) bg-black/30 backdrop-blur-[1px]',
-              'data-[state=closed]:animate-overlay-out data-[state=open]:animate-overlay-in',
-            )}
-          />
+          <Dialog.Overlay className={DRAWER_OVERLAY_CLASS} />
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
-            className={cn(
-              'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
-              'border-l border-(--cui-color-stroke-default)',
-              'will-change-transform',
-              'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
-            )}
+            className={DRAWER_CONTENT_CLASS}
           >
             <Dialog.Title className="sr-only">{localize('com_audit_detail_title')}</Dialog.Title>
-            <header className="flex items-center justify-between gap-3 border-b border-(--cui-color-stroke-default) px-4 py-3">
-              <span className="text-sm font-semibold text-(--cui-color-text-default)">
-                {localize('com_audit_detail_title')}
-              </span>
+            <header className={DRAWER_HEADER_CLASS}>
+              <span className={DRAWER_TITLE_CLASS}>{localize('com_audit_detail_title')}</span>
               <IconButton
                 icon="cross"
                 type="ghost"
@@ -263,27 +262,15 @@ export function AuditLogDetailDrawer({
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay
-            className={cn(
-              'fixed inset-0 z-(--z-overlay) bg-black/30 backdrop-blur-[1px]',
-              'data-[state=closed]:animate-overlay-out data-[state=open]:animate-overlay-in',
-            )}
-          />
+          <Dialog.Overlay className={DRAWER_OVERLAY_CLASS} />
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
-            className={cn(
-              'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
-              'border-l border-(--cui-color-stroke-default)',
-              'will-change-transform',
-              'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
-            )}
+            className={DRAWER_CONTENT_CLASS}
           >
             <Dialog.Title className="sr-only">{localize('com_audit_detail_title')}</Dialog.Title>
-            <header className="flex items-center justify-between gap-3 border-b border-(--cui-color-stroke-default) px-4 py-3">
-              <span className="text-sm font-semibold text-(--cui-color-text-default)">
-                {localize('com_audit_detail_title')}
-              </span>
+            <header className={DRAWER_HEADER_CLASS}>
+              <span className={DRAWER_TITLE_CLASS}>{localize('com_audit_detail_title')}</span>
               <IconButton
                 icon="cross"
                 type="ghost"
@@ -293,11 +280,9 @@ export function AuditLogDetailDrawer({
               />
             </header>
             <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
-              <p className="text-sm text-(--cui-color-text-muted)">
-                {localize('com_audit_detail_load_error')}
-              </p>
+              <p className="text-sm text-muted">{localize('com_audit_detail_load_error')}</p>
             </div>
-            <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
+            <footer className={DRAWER_FOOTER_CLASS}>
               <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
             </footer>
           </Dialog.Content>
@@ -315,27 +300,15 @@ export function AuditLogDetailDrawer({
         }}
       >
         <Dialog.Portal>
-          <Dialog.Overlay
-            className={cn(
-              'fixed inset-0 z-(--z-overlay) bg-black/30 backdrop-blur-[1px]',
-              'data-[state=closed]:animate-overlay-out data-[state=open]:animate-overlay-in',
-            )}
-          />
+          <Dialog.Overlay className={DRAWER_OVERLAY_CLASS} />
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
-            className={cn(
-              'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
-              'border-l border-(--cui-color-stroke-default)',
-              'will-change-transform',
-              'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
-            )}
+            className={DRAWER_CONTENT_CLASS}
           >
             <Dialog.Title className="sr-only">{localize('com_audit_detail_title')}</Dialog.Title>
-            <header className="flex items-center justify-between gap-3 border-b border-(--cui-color-stroke-default) px-4 py-3">
-              <span className="text-sm font-semibold text-(--cui-color-text-default)">
-                {localize('com_audit_detail_title')}
-              </span>
+            <header className={DRAWER_HEADER_CLASS}>
+              <span className={DRAWER_TITLE_CLASS}>{localize('com_audit_detail_title')}</span>
               <IconButton
                 icon="cross"
                 type="ghost"
@@ -345,11 +318,9 @@ export function AuditLogDetailDrawer({
               />
             </header>
             <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
-              <p className="text-sm text-(--cui-color-text-muted)">
-                {localize('com_audit_detail_not_found')}
-              </p>
+              <p className="text-sm text-muted">{localize('com_audit_detail_not_found')}</p>
             </div>
-            <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
+            <footer className={DRAWER_FOOTER_CLASS}>
               <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
             </footer>
           </Dialog.Content>
@@ -360,7 +331,6 @@ export function AuditLogDetailDrawer({
 
   if (!latestEntry) return null;
 
-  const targetConfig = getScopeTypeConfig(latestEntry.target.type as PrincipalType);
   const capability = auditCapability(latestEntry);
   const targetLabel = latestEntry.target.name ?? latestEntry.target.id ?? '';
   const summaryKey =
@@ -380,33 +350,20 @@ export function AuditLogDetailDrawer({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay
-          className={cn(
-            'fixed inset-0 z-(--z-overlay) bg-black/30 backdrop-blur-[1px]',
-            'data-[state=closed]:animate-overlay-out data-[state=open]:animate-overlay-in',
-          )}
-        />
+        <Dialog.Overlay className={DRAWER_OVERLAY_CLASS} />
         <Dialog.Content
           aria-label={localize('com_audit_detail_title')}
           onEscapeKeyDown={() => onClose()}
-          className={cn(
-            'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
-            'border-l border-(--cui-color-stroke-default)',
-            'will-change-transform',
-            'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
-          )}
+          className={DRAWER_CONTENT_CLASS}
         >
           <Dialog.Title className="sr-only">{localize('com_audit_detail_title')}</Dialog.Title>
-          <header className="flex items-center justify-between gap-3 border-b border-(--cui-color-stroke-default) px-4 py-3">
+          <header className={DRAWER_HEADER_CLASS}>
             <div className="flex items-center gap-2">
-              <Badge
-                size="sm"
-                state={ACTION_BADGE_STATE[latestEntry.action]}
-                text={localize(ACTION_LABEL_KEY[latestEntry.action])}
+              <StatusPill
+                tone={ACTION_BADGE_STATE[latestEntry.action]}
+                label={localize(ACTION_LABEL_KEY[latestEntry.action])}
               />
-              <span className="text-sm font-semibold text-(--cui-color-text-default)">
-                {localize('com_audit_detail_title')}
-              </span>
+              <span className={DRAWER_TITLE_CLASS}>{localize('com_audit_detail_title')}</span>
             </div>
             <IconButton
               icon="cross"
@@ -418,8 +375,8 @@ export function AuditLogDetailDrawer({
           </header>
 
           <div className="flex-1 overflow-y-auto">
-            <div className="flex flex-col gap-5 px-4 py-4">
-              <p className="text-sm text-(--cui-color-text-default)">
+            <div className="flex flex-col gap-5 px-5 py-5">
+              <p className="text-[15px] leading-relaxed text-ink">
                 {localize(summaryKey, {
                   actor: latestEntry.actor.name,
                   capability: capabilityLabel(capability, localize),
@@ -427,10 +384,10 @@ export function AuditLogDetailDrawer({
                 })}
               </p>
 
-              <dl className="flex flex-col gap-3">
+              <dl className="aimo-card flex flex-col divide-y divide-line2 rounded-inner">
                 <DetailRow label={localize('com_audit_detail_timestamp')}>
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-sm text-(--cui-color-text-default)">
+                    <span className="text-sm text-ink">
                       {formatTimestamp(latestEntry.timestamp)}
                     </span>
                     <CopyableMono
@@ -443,9 +400,7 @@ export function AuditLogDetailDrawer({
 
                 <DetailRow label={localize('com_audit_detail_actor')}>
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium text-(--cui-color-text-default)">
-                      {latestEntry.actor.name}
-                    </span>
+                    <span className="text-sm font-semibold text-ink">{latestEntry.actor.name}</span>
                     <CopyableMono
                       value={latestEntry.actor.id ?? ''}
                       ariaLabel={`Copy ${localize('com_audit_detail_actor')} ID`}
@@ -457,19 +412,8 @@ export function AuditLogDetailDrawer({
                 <DetailRow label={localize('com_audit_detail_target')}>
                   <div className="flex flex-col gap-1">
                     <span className="flex items-center gap-2">
-                      <Badge
-                        size="sm"
-                        state="neutral"
-                        text={
-                          <span className="inline-flex items-center gap-1">
-                            <Icon name={targetConfig.icon} size="xs" />
-                            {localize(targetConfig.labelKey)}
-                          </span>
-                        }
-                      />
-                      <span className="text-sm font-medium text-(--cui-color-text-default)">
-                        {targetLabel}
-                      </span>
+                      <TypeBadge type={latestEntry.target.type as PrincipalType} />
+                      <span className="text-sm font-semibold text-ink">{targetLabel}</span>
                     </span>
                     <CopyableMono
                       value={latestEntry.target.id ?? ''}
@@ -481,7 +425,7 @@ export function AuditLogDetailDrawer({
 
                 <DetailRow label={localize('com_audit_detail_capability')}>
                   <div className="flex flex-col gap-0.5">
-                    <span className="text-sm text-(--cui-color-text-default)">
+                    <span className="text-sm text-ink">
                       {capabilityLabel(capability, localize)}
                     </span>
                     <CopyableMono
@@ -502,18 +446,14 @@ export function AuditLogDetailDrawer({
               </dl>
 
               {hasDiff && (
-                <div className="flex flex-col gap-3 border-t border-(--cui-color-stroke-default) pt-4">
+                <div className="flex flex-col gap-3">
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <section className="flex flex-col gap-2">
-                      <h3 className="text-xs font-semibold tracking-wide text-(--cui-color-text-muted) uppercase">
-                        {localize('com_audit_detail_before')}
-                      </h3>
+                      <h3 className="aimo-label">{localize('com_audit_detail_before')}</h3>
                       <DiffList items={before} variant="removed" localize={localize} />
                     </section>
                     <section className="flex flex-col gap-2">
-                      <h3 className="text-xs font-semibold tracking-wide text-(--cui-color-text-muted) uppercase">
-                        {localize('com_audit_detail_after')}
-                      </h3>
+                      <h3 className="aimo-label">{localize('com_audit_detail_after')}</h3>
                       <DiffList items={after} variant="added" localize={localize} />
                     </section>
                   </div>
@@ -522,7 +462,7 @@ export function AuditLogDetailDrawer({
             </div>
           </div>
 
-          <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
+          <footer className={DRAWER_FOOTER_CLASS}>
             <Button
               type="secondary"
               iconLeft={copied ? 'check' : 'share'}
@@ -543,10 +483,8 @@ export function AuditLogDetailDrawer({
 
 function DetailRow({ label, children }: { label: string; children: ReactElement }): ReactElement {
   return (
-    <div className="grid grid-cols-[120px_1fr] gap-3">
-      <dt className="text-xs font-medium tracking-wide text-(--cui-color-text-muted) uppercase">
-        {label}
-      </dt>
+    <div className="grid grid-cols-[112px_1fr] gap-3 px-4 py-3">
+      <dt className="aimo-label pt-0.5">{label}</dt>
       <dd className="min-w-0">{children}</dd>
     </div>
   );

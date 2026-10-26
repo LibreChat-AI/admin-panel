@@ -84,7 +84,7 @@ function ThemedApp() {
 
   return (
     <ClickUIProvider theme={resolvedTheme}>
-      <BrandControlsTheme mode={resolvedTheme}>
+      <BrandControlsTheme>
         <div className="isolate">
           <Outlet />
         </div>
@@ -96,10 +96,8 @@ function ThemedApp() {
 function RootPending() {
   const localize = useLocalize();
   return (
-    <div className="flex min-h-screen items-center justify-center bg-(--cui-color-background-default)">
-      <div className="animate-pulse text-lg text-(--cui-color-text-muted)">
-        {localize('com_ui_loading')}
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-canvas">
+      <div className="animate-pulse text-lg text-muted">{localize('com_ui_loading')}</div>
     </div>
   );
 }
@@ -138,19 +136,16 @@ function RootError({ error }: ErrorComponentProps) {
   if (import.meta.env.DEV) console.error(error);
   const localize = useLocalize();
   return (
-    <div
-      role="alert"
-      className="flex min-h-screen items-center justify-center bg-(--cui-color-background-default) px-4"
-    >
+    <div role="alert" className="flex min-h-screen items-center justify-center bg-canvas px-4">
       <div className="flex max-w-md flex-col items-center gap-4 text-center">
-        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-(--cui-color-background-secondary)">
+        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-fill">
           <svg
             aria-hidden="true"
             width="28"
             height="28"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="var(--cui-color-text-danger)"
+            stroke="var(--red-ink)"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -160,14 +155,9 @@ function RootError({ error }: ErrorComponentProps) {
             <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
         </div>
-        <h1 className="text-xl font-semibold text-(--cui-color-title-default)">
-          {localize('com_error_page_title')}
-        </h1>
-        <p className="text-sm text-(--cui-color-text-muted)">{localize('com_error_page_desc')}</p>
-        <Link
-          to="/"
-          className="mt-2 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-4 py-2 text-sm font-medium text-(--cui-color-text-default) no-underline transition-colors hover:bg-(--cui-color-background-hover)"
-        >
+        <h1 className="text-[21px] font-semibold text-ink">{localize('com_error_page_title')}</h1>
+        <p className="text-sm text-muted">{localize('com_error_page_desc')}</p>
+        <Link to="/" className="aimo-btn aimo-btn-outline mt-2">
           {localize('com_nav_go_home')}
         </Link>
       </div>
@@ -178,22 +168,14 @@ function RootError({ error }: ErrorComponentProps) {
 function RootNotFound() {
   const localize = useLocalize();
   return (
-    <div
-      role="alert"
-      className="flex min-h-screen items-center justify-center bg-(--cui-color-background-default) px-4"
-    >
+    <div role="alert" className="flex min-h-screen items-center justify-center bg-canvas px-4">
       <div className="flex max-w-md flex-col items-center gap-4 text-center">
-        <span className="text-5xl font-bold text-(--cui-color-text-muted)">404</span>
-        <h1 className="text-xl font-semibold text-(--cui-color-title-default)">
+        <span className="text-5xl font-bold text-muted">404</span>
+        <h1 className="text-[21px] font-semibold text-ink">
           {localize('com_error_not_found_title')}
         </h1>
-        <p className="text-sm text-(--cui-color-text-muted)">
-          {localize('com_error_not_found_desc')}
-        </p>
-        <Link
-          to="/"
-          className="mt-2 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-4 py-2 text-sm font-medium text-(--cui-color-text-default) no-underline transition-colors hover:bg-(--cui-color-background-hover)"
-        >
+        <p className="text-sm text-muted">{localize('com_error_not_found_desc')}</p>
+        <Link to="/" className="aimo-btn aimo-btn-outline mt-2">
           {localize('com_nav_go_home')}
         </Link>
       </div>

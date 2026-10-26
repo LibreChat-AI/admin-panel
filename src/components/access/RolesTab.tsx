@@ -72,15 +72,15 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 pr-1">
-      <div className="flex items-center justify-between gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1 pb-2">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <SearchInput
           value={search}
           onChange={handleSearchChange}
           placeholder={localize('com_access_search_roles')}
         />
         <Button
-          type="secondary"
+          type="primary"
           iconLeft="plus"
           label={localize('com_access_create_role')}
           onClick={onCreateRole}
@@ -99,31 +99,29 @@ export function RolesTab({ onCreateRole }: t.RolesTabProps) {
           message={search ? localize('com_access_no_results') : localize('com_access_roles_empty')}
         />
       ) : (
-        <div className="flex flex-col">
+        <div className="flex flex-col gap-2.5">
           {paged.map((role) => (
             <div
               key={role.id}
-              className="mb-2 flex items-center gap-3 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) px-3 py-3"
+              className="aimo-card aimo-card-link flex items-center gap-3 py-1.5 pr-3 pl-1.5"
             >
               <button
                 type="button"
                 onClick={() => setEditTarget(role)}
-                className="-my-2 -ml-2 min-w-0 flex-1 cursor-pointer rounded py-3 pl-3 text-left outline-none focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)"
+                className="min-w-0 flex-1 cursor-pointer rounded-inner px-3.5 py-2.5 text-left"
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-(--cui-color-text-default) hover:underline">
+                  <span className="truncate text-[15px] font-semibold tracking-[-0.02em] text-ink">
                     {role.name}
                   </span>
                   {role.isSystemRole && (
-                    <span className="inline-block rounded-full bg-(--cui-color-background-secondary) px-2 py-0.5 text-[10px] font-medium text-(--cui-color-text-default)">
+                    <span className="inline-block shrink-0 rounded-full bg-fill px-2 py-0.5 text-[11px] font-semibold text-ink2">
                       {localize('com_access_system_role')}
                     </span>
                   )}
                 </div>
                 {role.description && (
-                  <div className="truncate text-xs text-(--cui-color-text-muted)">
-                    {role.description}
-                  </div>
+                  <div className="mt-0.5 truncate text-sm text-muted">{role.description}</div>
                 )}
               </button>
 

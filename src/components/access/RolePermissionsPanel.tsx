@@ -98,7 +98,7 @@ export function RolePermissionsPanel({
           const hasDescription = description !== descKey(type);
 
           return (
-            <div key={type} className="rounded-lg border border-(--cui-color-stroke-default)">
+            <div key={type} className="rounded-inner border border-line bg-surface">
               <div
                 role="button"
                 tabIndex={0}
@@ -110,31 +110,25 @@ export function RolePermissionsPanel({
                     toggleCollapsed(type);
                   }
                 }}
-                className={cn(
-                  'flex w-full cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-(--cui-color-background-hover) focus-visible:bg-(--cui-color-background-hover) focus-visible:outline-1 focus-visible:outline-(--cui-color-outline)',
-                  isOpen ? 'rounded-t-lg' : 'rounded-lg',
-                )}
+                className="aimo-disclosure"
               >
                 <div className="flex flex-1 items-center gap-2">
                   <Icon
                     name="chevron-right"
                     size="sm"
-                    className={cn(
-                      'text-(--cui-color-text-muted) transition-transform',
-                      isOpen && 'rotate-90',
-                    )}
+                    className={cn('text-muted transition-transform', isOpen && 'rotate-90')}
                   />
                   <div className="flex flex-col">
-                    <span className="text-sm font-medium text-(--cui-color-text-default)">
+                    <span className="text-sm font-semibold text-ink">
                       {localize(`com_perm_type_${type}`)}
                     </span>
                     {hasDescription && (
-                      <span className="text-xs text-(--cui-color-text-muted)">{description}</span>
+                      <span className="text-xs text-muted tabular-nums">{description}</span>
                     )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                  <span className="text-xs text-(--cui-color-text-muted)">
+                  <span className="text-xs text-muted tabular-nums">
                     {allEnabled
                       ? localize('com_ui_all')
                       : `${perms.filter((p) => section[p]).length}/${perms.length}`}
@@ -149,7 +143,7 @@ export function RolePermissionsPanel({
                 </div>
               </div>
               {isOpen && (
-                <div className="border-t border-(--cui-color-stroke-default) px-4 py-2">
+                <div className="border-t border-line2 px-4 py-2">
                   <div className="flex flex-col gap-1 pl-6">
                     {perms.map((perm) => (
                       <label
@@ -160,9 +154,7 @@ export function RolePermissionsPanel({
                           disabled ? 'cursor-default' : 'cursor-pointer',
                         )}
                       >
-                        <span className="text-sm text-(--cui-color-text-muted)">
-                          {localize(`com_perm_${perm}`)}
-                        </span>
+                        <span className="text-sm text-ink2">{localize(`com_perm_${perm}`)}</span>
                         <Switch
                           id={`perm-${type}-${perm}`}
                           checked={section[perm] ?? false}
@@ -183,9 +175,7 @@ export function RolePermissionsPanel({
       {/* Clustered single-permission toggles */}
       {visibleSinglePermTypes.length > 0 && (
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-medium text-(--cui-color-text-muted)">
-            {localize('com_perm_features')}
-          </span>
+          <span className="aimo-label">{localize('com_perm_features')}</span>
           <div
             className={
               visibleSinglePermTypes.length > 6
@@ -202,7 +192,7 @@ export function RolePermissionsPanel({
                   key={type}
                   htmlFor={disabled ? undefined : switchId}
                   className={cn(
-                    'flex w-fit items-center gap-2 rounded-md px-2 py-1 text-sm text-(--cui-color-text-default)',
+                    'flex w-fit items-center gap-2 rounded-full px-2 py-1 text-sm text-ink',
                     disabled ? 'cursor-default' : 'cursor-pointer',
                   )}
                 >

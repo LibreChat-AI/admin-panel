@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 import { Icon } from '@clickhouse/click-ui';
 import { createFileRoute, Outlet, useRouter, Link, redirect } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
+import { getNavigationUrlsFn, getPilotModeFn, verifyAdminTokenFn } from '@/server';
 import { useCapabilities, useCommandMenu, useLocalize } from '@/hooks';
 import { CommandMenu } from '@/components/CommandMenu';
 import { AccessDenied } from '@/components/shared';
 import { SystemCapabilities } from '@/constants';
 import { Sidebar } from '@/components/Sidebar';
-import { getNavigationUrlsFn, getPilotModeFn, verifyAdminTokenFn } from '@/server';
 import { Header } from '@/components/Header';
 
 const PAGE_HEADINGS: Record<string, { titleKey: string }> = {
@@ -76,7 +76,7 @@ function AppLayout() {
   const heading = PAGE_HEADINGS[matchedPath ?? '/'];
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-canvas">
       <Sidebar
         user={user}
         navigation={navigation}
@@ -100,19 +100,14 @@ function AppError({ error }: ErrorComponentProps) {
   return (
     <div role="alert" className="flex min-h-screen items-center justify-center p-6">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-(--cui-color-background-secondary)">
-          <span aria-hidden="true" className="text-(--cui-color-text-danger)">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-fill">
+          <span aria-hidden="true" className="text-red-ink">
             <Icon name="warning" size="md" />
           </span>
         </div>
-        <h2 className="text-lg font-semibold text-(--cui-color-title-default)">
-          {localize('com_error_page_title')}
-        </h2>
-        <p className="text-sm text-(--cui-color-text-muted)">{localize('com_error_page_desc')}</p>
-        <Link
-          to="/"
-          className="mt-2 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-4 py-2 text-sm font-medium text-(--cui-color-text-default) no-underline transition-colors hover:bg-(--cui-color-background-hover)"
-        >
+        <h2 className="text-[21px] font-semibold text-ink">{localize('com_error_page_title')}</h2>
+        <p className="text-sm text-muted">{localize('com_error_page_desc')}</p>
+        <Link to="/" className="aimo-btn aimo-btn-outline mt-2">
           {localize('com_nav_go_home')}
         </Link>
       </div>
@@ -125,17 +120,12 @@ function AppNotFound() {
   return (
     <div role="alert" className="flex min-h-screen items-center justify-center p-6">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
-        <span className="text-4xl font-bold text-(--cui-color-text-muted)">404</span>
-        <h2 className="text-lg font-semibold text-(--cui-color-title-default)">
+        <span className="text-4xl font-bold text-muted">404</span>
+        <h2 className="text-[21px] font-semibold text-ink">
           {localize('com_error_not_found_title')}
         </h2>
-        <p className="text-sm text-(--cui-color-text-muted)">
-          {localize('com_error_not_found_desc')}
-        </p>
-        <Link
-          to="/"
-          className="mt-2 rounded-lg border border-(--cui-color-stroke-default) bg-transparent px-4 py-2 text-sm font-medium text-(--cui-color-text-default) no-underline transition-colors hover:bg-(--cui-color-background-hover)"
-        >
+        <p className="text-sm text-muted">{localize('com_error_not_found_desc')}</p>
+        <Link to="/" className="aimo-btn aimo-btn-outline mt-2">
           {localize('com_nav_go_home')}
         </Link>
       </div>

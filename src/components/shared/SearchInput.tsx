@@ -1,5 +1,6 @@
 import { SearchField } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { cn } from '@/utils';
 
 export function SearchInput({
   value,
@@ -9,7 +10,7 @@ export function SearchInput({
   ariaLabel,
 }: t.SearchInputProps) {
   return (
-    <div className={`cui-field ${className ?? ''}`} style={{ maxWidth: 400 }}>
+    <div className={cn('cui-field aimo-search w-full max-w-100', className)}>
       <SearchField
         value={value}
         onChange={onChange}

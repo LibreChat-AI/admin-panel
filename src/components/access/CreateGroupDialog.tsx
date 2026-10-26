@@ -91,6 +91,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as t.CreateGroupTab)}
             ariaLabel={localize('com_access_create_group')}
+            className="aimo-segmented aimo-segmented-sm"
           >
             <Tabs.TriggersList>
               <Tabs.Trigger value="details">{localize('com_access_tab_details')}</Tabs.Trigger>
@@ -102,12 +103,9 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
               tabIndex={-1}
               className={cn(activeTab !== 'details' && 'hidden')}
             >
-              <div className="flex flex-col gap-5 pt-5">
+              <div className="flex flex-col gap-4 pt-5">
                 <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="create-group-name"
-                    className="text-sm font-medium text-(--cui-color-text-default)"
-                  >
+                  <label htmlFor="create-group-name" className="aimo-label">
                     {localize('com_access_col_name')}
                   </label>
                   <input
@@ -117,14 +115,11 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
                     onChange={(e) => setName(e.target.value)}
                     placeholder={localize('com_access_group_name_placeholder')}
                     autoFocus
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="aimo-input"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="create-group-description"
-                    className="text-sm font-medium text-(--cui-color-text-default)"
-                  >
+                  <label htmlFor="create-group-description" className="aimo-label">
                     {localize('com_config_field_description')}
                   </label>
                   <input
@@ -133,7 +128,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder={localize('com_access_group_desc_placeholder')}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="aimo-input"
                   />
                 </div>
               </div>

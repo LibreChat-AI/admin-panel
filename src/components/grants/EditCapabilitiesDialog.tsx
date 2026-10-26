@@ -1,14 +1,14 @@
+import { Button, Dialog } from '@clickhouse/click-ui';
 import { PrincipalType } from 'librechat-data-provider';
 import { useCallback, useEffect, useState } from 'react';
-import { Button, Dialog, Icon } from '@clickhouse/click-ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminSystemGrant } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { grantCapabilityFn, principalGrantsQueryOptions, revokeCapabilityFn } from '@/server';
-import { getScopeTypeConfig, SystemCapabilities } from '@/constants';
-import { cn, notifySuccess, notifyError } from '@/utils';
+import { LoadingState, TypeBadge } from '@/components/shared';
+import { notifySuccess, notifyError } from '@/utils';
 import { CapabilityPanel } from './CapabilityPanel';
-import { LoadingState } from '@/components/shared';
+import { SystemCapabilities } from '@/constants';
 import { useLocalize } from '@/hooks';
 
 function grantsToRecord(grants: AdminSystemGrant[]): Record<string, boolean> {
@@ -91,7 +91,6 @@ export function EditCapabilitiesDialog({
   const dialogTitle = principalType
     ? `${localize('com_cap_edit_title', { name: principalName })}`
     : '';
-  const principalConfig = principalType ? getScopeTypeConfig(principalType) : null;
 
   return (
     <Dialog
@@ -110,18 +109,10 @@ export function EditCapabilitiesDialog({
           <LoadingState />
         ) : (
           <div className="flex flex-col gap-4">
-            {principalConfig && (
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
-                    principalConfig.badgeClass,
-                  )}
-                >
-                  <Icon name={principalConfig.icon} size="xs" />
-                  {localize(principalConfig.labelKey)}
-                </span>
-                <span className="text-sm font-medium text-(--cui-color-text-default)">
+            {principalType && (
+              <div className="flex items-center gap-2.5">
+                <TypeBadge type={principalType} />
+                <span className="text-[15px] font-semibold tracking-[-0.02em] text-ink">
                   {principalName}
                 </span>
               </div>

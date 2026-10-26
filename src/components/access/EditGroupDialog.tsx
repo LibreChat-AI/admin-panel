@@ -141,6 +141,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as EditGroupTab)}
             ariaLabel={localize('com_access_edit_group')}
+            className="aimo-segmented aimo-segmented-sm"
           >
             <Tabs.TriggersList>
               <Tabs.Trigger value="details">{localize('com_access_tab_details')}</Tabs.Trigger>
@@ -152,12 +153,9 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
               tabIndex={-1}
               className={cn(activeTab !== 'details' && 'hidden')}
             >
-              <div className="flex flex-col gap-5 pt-5">
+              <div className="flex flex-col gap-4 pt-5">
                 <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="edit-group-name"
-                    className="text-sm font-medium text-(--cui-color-text-default)"
-                  >
+                  <label htmlFor="edit-group-name" className="aimo-label">
                     {localize('com_access_col_name')}
                   </label>
                   <input
@@ -169,14 +167,11 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                     disabled={!canManage}
                     readOnly={!canManage}
                     autoFocus
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
+                    className="aimo-input"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <label
-                    htmlFor="edit-group-description"
-                    className="text-sm font-medium text-(--cui-color-text-default)"
-                  >
+                  <label htmlFor="edit-group-description" className="aimo-label">
                     {localize('com_config_field_description')}
                   </label>
                   <input
@@ -187,7 +182,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                     placeholder={localize('com_access_group_desc_placeholder')}
                     disabled={!canManage}
                     readOnly={!canManage}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
+                    className="aimo-input"
                   />
                 </div>
               </div>
@@ -209,7 +204,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                 )}
                 {pendingAdditions.length > 0 && (
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs font-medium text-(--cui-color-text-muted)">
+                    <span className="aimo-label">
                       {localize('com_access_pending_additions', { count: pendingAdditions.length })}
                     </span>
                     <SelectedMemberList
@@ -221,7 +216,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                 )}
                 {pendingRemovals.length > 0 && (
                   <div className="flex flex-col gap-1">
-                    <span className="text-xs font-medium text-(--cui-color-text-muted)">
+                    <span className="aimo-label">
                       {localize('com_access_pending_removals', { count: pendingRemovals.length })}
                     </span>
                     <SelectedMemberList
@@ -310,13 +305,13 @@ function MemberList({
 
   if (loading) {
     return (
-      <LoadingState className="flex items-center justify-center gap-2 py-6 text-sm text-(--cui-color-text-muted)" />
+      <LoadingState className="flex items-center justify-center gap-2 py-6 text-sm text-muted" />
     );
   }
 
   if (error) {
     return (
-      <div className="flex items-center justify-center py-6 text-sm text-(--cui-color-foreground-danger)">
+      <div className="flex items-center justify-center py-6 text-sm text-red-ink">
         {localize('com_error_load_members')}
       </div>
     );
@@ -324,7 +319,7 @@ function MemberList({
 
   if (members.length === 0 && total === 0) {
     return (
-      <div className="flex items-center justify-center py-6 text-sm text-(--cui-color-text-muted)">
+      <div className="flex items-center justify-center py-6 text-sm text-muted">
         {localize('com_access_no_members')}
       </div>
     );
@@ -332,12 +327,12 @@ function MemberList({
 
   return (
     <div className="flex flex-col">
-      <span className="mb-2 text-xs font-medium text-(--cui-color-text-muted)">
+      <span className="aimo-label mb-2">
         {localize('com_access_member_count', { count: total })}
       </span>
       <div
         className={cn(
-          'max-h-64 overflow-auto rounded-lg border border-(--cui-color-stroke-default)',
+          'max-h-64 overflow-auto rounded-inner border border-line',
           fetching && 'opacity-60 transition-opacity',
         )}
       >
@@ -347,23 +342,18 @@ function MemberList({
             <div
               key={member.userId}
               className={cn(
-                'flex items-center justify-between px-3 py-2',
-                i < members.length - 1 && 'border-b border-(--cui-color-stroke-default)',
+                'flex items-center justify-between gap-3 px-3.5 py-2',
+                i < members.length - 1 && 'border-b border-line2',
                 staged && 'opacity-40',
               )}
             >
               <div className="flex items-center gap-3">
                 <Avatar name={member.name} />
                 <div className="flex flex-col">
-                  <span
-                    className={cn(
-                      'text-sm font-medium text-(--cui-color-text-default)',
-                      staged && 'line-through',
-                    )}
-                  >
+                  <span className={cn('text-sm font-semibold text-ink', staged && 'line-through')}>
                     {member.name}
                   </span>
-                  <span className="text-xs text-(--cui-color-text-muted)">{member.email}</span>
+                  <span className="text-xs text-muted">{member.email}</span>
                 </div>
               </div>
               {canManage && !staged && (

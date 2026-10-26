@@ -1,18 +1,9 @@
-import { render } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render } from '@testing-library/react';
 import { getPageNumbers, Pagination } from './Pagination';
 
 vi.mock('@clickhouse/click-ui', () => ({
-  Pagination: ({ currentPage, totalPages, onChange }: {
-    currentPage: number;
-    totalPages: number;
-    onChange: (page: number) => void;
-  }) => (
-    <nav data-testid="cui-pagination" data-current={currentPage} data-total={totalPages}>
-      <button onClick={() => onChange(currentPage - 1)}>prev</button>
-      <button onClick={() => onChange(currentPage + 1)}>next</button>
-    </nav>
-  ),
+  Icon: () => null,
 }));
 
 const TRANSLATIONS: Record<string, string> = {
@@ -28,9 +19,9 @@ vi.mock('@/hooks/useLocalize', () => ({
     if (opts) for (const [k, v] of Object.entries(opts)) str = str.replace(`{{${k}}}`, v);
     return str;
   },
-  useLocalize: () => (key: string, opts?: Record<string, string>) => {
+  useLocalize: () => (key: string, opts?: Record<string, string | number>) => {
     let str = TRANSLATIONS[key] ?? key;
-    if (opts) for (const [k, v] of Object.entries(opts)) str = str.replace(`{{${k}}}`, v);
+    if (opts) for (const [k, v] of Object.entries(opts)) str = str.replace(`{{${k}}}`, String(v));
     return str;
   },
 }));
@@ -77,12 +68,33 @@ describe('Pagination', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('renders CUI Pagination when totalPages > 1', () => {
-    const { getByTestId } = render(
+  it('renders a page button per page and marks the current one', () => {
+    const { getByRole, getAllByRole } = render(
       <Pagination currentPage={2} totalPages={5} onPageChange={() => {}} />,
     );
-    const nav = getByTestId('cui-pagination');
-    expect(nav).toHaveAttribute('data-current', '2');
-    expect(nav).toHaveAttribute('data-total', '5');
+    expect(getByRole('navigation', { name: 'Pagination' })).toBeInTheDocument();
+    expect(getAllByRole('button', { name: /^Page \d$/ })).toHaveLength(5);
+    expect(getByRole('button', { name: 'Page 2' })).toHaveAttribute('aria-current', 'page');
+    expect(getByRole('button', { name: 'Page 3' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('calls onPageChange for prev, next, and page buttons', () => {
+    const onPageChange = vi.fn();
+    const { getByRole } = render(
+      <Pagination currentPage={2} totalPages={5} onPageChange={onPageChange} />,
+    );
+    fireEvent.click(getByRole('button', { name: 'Previous page' }));
+    fireEvent.click(getByRole('button', { name: 'Next page' }));
+    fireEvent.click(getByRole('button', { name: 'Page 5' }));
+    expect(onPageChange.mock.calls).toEqual([[1], [3], [5]]);
+  });
+
+  it('disables prev on the first page and next on the last page', () => {
+    const { getByRole, rerender } = render(
+      <Pagination currentPage={1} totalPages={3} onPageChange={() => {}} />,
+    );
+    expect(getByRole('button', { name: 'Previous page' })).toBeDisabled();
+    rerender(<Pagination currentPage={3} totalPages={3} onPageChange={() => {}} />);
+    expect(getByRole('button', { name: 'Next page' })).toBeDisabled();
   });
 });
