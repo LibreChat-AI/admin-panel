@@ -20,7 +20,7 @@ import { useLocalize } from '@/hooks';
 
 const themeScript = `(function(){
   try {
-    var t = localStorage.getItem('theme') || 'system';
+    var t = document.cookie.match(/(?:^|;\\s*)aimo-theme=(light|dark|system)(?:;|$)/)?.[1] || 'system';
     if (t === 'dark') document.documentElement.classList.add('dark');
     else if (t === 'light') document.documentElement.classList.add('light');
   } catch(e) {}

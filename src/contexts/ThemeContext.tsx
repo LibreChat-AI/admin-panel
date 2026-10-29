@@ -1,38 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import type * as t from '@/types';
+import { readThemePreference, writeThemePreference, subscribeToTheme } from '@/utils';
 
-type ThemePreference = 'dark' | 'light' | 'system';
-type ResolvedTheme = 'dark' | 'light';
+const ThemeContext = createContext<t.ThemeContextValue | null>(null);
 
-interface ThemeContextValue {
-  theme: ThemePreference;
-  resolvedTheme: ResolvedTheme;
-  systemTheme: ResolvedTheme;
-  setTheme: (t: ThemePreference) => void;
-}
-
-const STORAGE_KEY = 'theme';
-
-const ThemeContext = createContext<ThemeContextValue | null>(null);
-
-function getInitialPreference(): ThemePreference {
-  if (typeof window === 'undefined') return 'dark';
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'dark' || stored === 'light' || stored === 'system') {
-      return stored;
-    }
-  } catch {
-    // localStorage unavailable
-  }
-  return 'system';
-}
-
-function getSystemTheme(): ResolvedTheme {
+function getSystemTheme(): t.ResolvedTheme {
   if (typeof window === 'undefined') return 'dark';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-function applyClassesToDOM(preference: ThemePreference) {
+function applyClassesToDOM(preference: t.ThemeOption) {
   const root = document.documentElement;
   root.classList.remove('dark', 'light');
   if (preference === 'dark' || preference === 'light') {
@@ -41,21 +18,24 @@ function applyClassesToDOM(preference: ThemePreference) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemePreference>(getInitialPreference);
-  const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(getSystemTheme);
+  const [theme, setThemeState] = useState<t.ThemeOption>(readThemePreference);
+  const [systemTheme, setSystemTheme] = useState<t.ResolvedTheme>(getSystemTheme);
 
-  const setTheme = useCallback((next: ThemePreference) => {
+  const setTheme = useCallback((next: t.ThemeOption) => {
     setThemeState(next);
-    try {
-      localStorage.setItem(STORAGE_KEY, next);
-    } catch {
-      // localStorage unavailable
-    }
+    writeThemePreference(next);
     applyClassesToDOM(next);
   }, []);
 
   useEffect(() => {
     applyClassesToDOM(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const sync = () => setThemeState(readThemePreference());
+    const unsubscribe = subscribeToTheme(sync);
+    sync();
+    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -67,7 +47,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     return () => mq.removeEventListener('change', handler);
   }, []);
 
-  const resolvedTheme: ResolvedTheme = useMemo(
+  const resolvedTheme: t.ResolvedTheme = useMemo(
     () => (theme === 'system' ? systemTheme : theme),
     [theme, systemTheme],
   );
@@ -80,7 +60,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return <ThemeContext value={value}>{children}</ThemeContext>;
 }
 
-export function useTheme(): ThemeContextValue {
+export function useTheme(): t.ThemeContextValue {
   const ctx = useContext(ThemeContext);
   if (!ctx) {
     throw new Error('useTheme must be used within a ThemeProvider');

@@ -4,3 +4,4 @@ export * from './format';
 export * from './interfacePermissions';
 export * from './session';
 export * from './toast';
+export * from './theme';
