@@ -10,6 +10,7 @@
     "reinstall": "rm -rf node_modules && bun pm cache rm && bun install && bun run build",
     "dev": "vite dev --port 3000",
     "build": "vite build",
+    "build:lambda": "vite build && bun build ./lambda.ts --target=node --format=esm --outfile=dist/lambda/index.mjs && rm -rf dist/lambda/client && cp -r dist/client dist/lambda/client",
     "start": "bun server.ts",
     "preview": "vite preview",
     "test": "vitest run",
