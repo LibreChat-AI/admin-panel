@@ -154,7 +154,7 @@ export function EndpointSectionNav({ sections, idPrefix }: t.EndpointSectionNavP
     <nav
       ref={navRef}
       aria-label={localize('com_config_ce_sections_nav')}
-      className="sticky -top-4 z-10 -mx-4 -mt-4 flex gap-1 overflow-x-auto border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) px-4 py-2 max-sm:mask-[linear-gradient(to_right,black_calc(100%-2rem),transparent)] max-sm:pr-8"
+      className="sticky -top-4 z-10 -mx-4 -mt-4 flex gap-1 overflow-x-auto border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) px-4 py-2 max-sm:mask-[linear-gradient(to_right,black_calc(100%-2rem),transparent)] max-sm:pe-8"
     >
       {sections.map((section) => {
         const isActive = section.id === active;

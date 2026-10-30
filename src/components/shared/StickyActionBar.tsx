@@ -18,7 +18,7 @@ export function StickyActionBar({
       {message && (
         <span className="min-w-0 flex-1 text-sm text-(--cui-color-text-default)">{message}</span>
       )}
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ms-auto flex items-center gap-2">
         <Button htmlType="button" type="secondary" label={discardLabel} onClick={onDiscard} />
         <Button htmlType="button" type="primary" label={saveLabel} onClick={onSave} />
       </div>

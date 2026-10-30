@@ -6,6 +6,7 @@
       "name": "librechat-admin-panel",
       "dependencies": {
         "@clickhouse/click-ui": "0.15.0",
+        "@fontsource-variable/vazirmatn": "^5.3.0",
         "@librechat/data-schemas": "^0.0.74",
         "@radix-ui/react-dialog": "1.3.1",
         "@tailwindcss/vite": "^4.3.3",
@@ -230,6 +231,8 @@
     "@floating-ui/react-dom": ["@floating-ui/react-dom@2.1.9", "", { "dependencies": { "@floating-ui/dom": "^1.8.0" }, "peerDependencies": { "react": ">=16.8.0", "react-dom": ">=16.8.0" } }, "sha512-JDjEFGCpImxDCA7JJKviA0M9+RtmJdj0m/NVU5IMgBK+AmZouAQQ7/+2GLH0GXXY0YMw9oXPB8hKdbPYg5QLYg=="],
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
+
+    "@fontsource-variable/vazirmatn": ["@fontsource-variable/vazirmatn@5.3.0", "", {}, "sha512-ZA68W8JHbMdNzzwjYHUWKB2PH22QpxNEnk0ukcXM+XiqYMV6ZWJZAKuNXcrMR2JjuIAwsfAU3KknCXPI6wXUvw=="],
 
     "@h6s/calendar": ["@h6s/calendar@2.2.0", "", { "peerDependencies": { "react": ">= 18", "react-dom": "*", "react-native": "*" }, "optionalPeers": ["react-dom", "react-native"] }, "sha512-o1fb4RlMWDRIOiMEX65vN5qDTiD/OyC++EkJzmoz9l1vUOkN89gTE+wNE83XZBi3hbYqMV3CNhgKf51n/0hcBw=="],
 

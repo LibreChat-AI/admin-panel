@@ -255,8 +255,8 @@ export function McpServerCard({
         className={cn(
           'w-full rounded-lg transition-colors hover:bg-(--cui-color-background-hover)',
           renaming
-            ? 'flex items-start gap-1 pr-2'
-            : 'grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 py-2.5 pr-2 pl-3 has-[.row-link:focus-visible]:bg-(--cui-color-background-hover)',
+            ? 'flex items-start gap-1 pe-2'
+            : 'grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 py-2.5 pe-2 ps-3 has-[.row-link:focus-visible]:bg-(--cui-color-background-hover)',
           isExpanded
             ? 'sticky top-0 z-5 rounded-t-lg bg-(--cui-color-background-default)'
             : 'relative',
@@ -286,7 +286,7 @@ export function McpServerCard({
                 userToggled.current = true;
                 setIsExpanded((prev) => !prev);
               }}
-              className="row-link flex min-w-0 cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-0.5 border-none bg-transparent p-0 text-left select-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:outline-1 focus-visible:after:-outline-offset-1 focus-visible:after:outline-(--cui-color-outline)"
+              className="row-link flex min-w-0 cursor-pointer flex-wrap items-baseline gap-x-2 gap-y-0.5 border-none bg-transparent p-0 text-start select-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:outline-1 focus-visible:after:-outline-offset-1 focus-visible:after:outline-(--cui-color-outline)"
             >
               <span
                 className="max-w-full truncate text-sm font-medium text-(--cui-color-text-default)"

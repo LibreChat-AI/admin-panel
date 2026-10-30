@@ -226,7 +226,7 @@ export function EndpointCreator({
       <span className="min-w-0 text-sm text-(--cui-color-text-muted)">
         {template && footerHint !== '' ? footerHint : null}
       </span>
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ms-auto flex items-center gap-2">
         {template && (
           <Button
             type="secondary"
@@ -362,7 +362,7 @@ function TemplatePicker({ onPick }: { onPick: (template: t.EndpointTemplate) => 
             <button
               type="button"
               onClick={() => onPick(choice)}
-              className="flex h-full w-full cursor-pointer flex-col items-start gap-1 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2.5 text-left transition-colors hover:bg-(--cui-color-background-hover) focus-visible:outline-2 focus-visible:outline-(--cui-color-outline)"
+              className="flex h-full w-full cursor-pointer flex-col items-start gap-1 rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2.5 text-start transition-colors hover:bg-(--cui-color-background-hover) focus-visible:outline-2 focus-visible:outline-(--cui-color-outline)"
             >
               <span className="text-sm font-medium text-(--cui-color-text-default)">
                 {choice.id === BLANK_ENDPOINT_TEMPLATE.id

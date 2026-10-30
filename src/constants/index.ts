@@ -14,3 +14,4 @@ export * from './system';
 export * from './network';
 export * from './preview';
 export * from './env';
+export * from './locale';

@@ -25,7 +25,7 @@ export function SelectAllHeader({
   return (
     <div
       className={cn(
-        'flex items-center gap-3 pr-4 transition-colors hover:bg-(--cui-color-background-hover)',
+        'flex items-center gap-3 pe-4 transition-colors hover:bg-(--cui-color-background-hover)',
         open ? 'rounded-t-lg' : 'rounded-lg',
       )}
     >
@@ -35,8 +35,8 @@ export function SelectAllHeader({
         aria-controls={open ? controls : undefined}
         onClick={onToggle}
         className={cn(
-          'select-all-toggle flex flex-1 cursor-pointer items-center gap-2 self-stretch border-none bg-transparent py-3 pl-4 text-left',
-          open ? 'rounded-tl-lg' : 'rounded-l-lg',
+          'select-all-toggle flex flex-1 cursor-pointer items-center gap-2 self-stretch border-none bg-transparent py-3 ps-4 text-start',
+          open ? 'rounded-ss-lg' : 'rounded-s-lg',
         )}
       >
         <DecorativeIcon

@@ -88,7 +88,7 @@ export function ReorderableList<T extends { id: string }>({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-0.5 pr-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-0.5 pe-1">
       <div className="flex items-center justify-between gap-3">
         <SearchInput value={search} onChange={handleSearchChange} placeholder={searchPlaceholder} />
         {headerAction}
@@ -130,7 +130,7 @@ export function ReorderableList<T extends { id: string }>({
                 tabIndex={-1}
                 aria-hidden="true"
                 className={cn(
-                  '-my-3 -mr-1.5 -ml-3 flex shrink-0 cursor-grab touch-none items-center self-stretch rounded-l-lg pr-3 pl-3 text-(--cui-color-text-disabled)',
+                  '-my-3 -me-1.5 -ms-3 flex shrink-0 cursor-grab touch-none items-center self-stretch rounded-s-lg pe-3 ps-3 text-(--cui-color-text-disabled)',
                   isDragged && 'cursor-grabbing',
                   (isSearching || reorderDisabled) && 'invisible',
                 )}

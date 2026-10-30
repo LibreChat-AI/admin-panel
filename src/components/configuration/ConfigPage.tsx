@@ -597,7 +597,7 @@ export function ConfigPage({
 
           <div className="flex min-h-0 flex-1 overflow-hidden">
             <div className="relative min-h-0 min-w-0 flex-1">
-              <div className="h-full scrollbar-gutter-stable overflow-auto pl-4" ref={setScrollEl}>
+              <div className="h-full scrollbar-gutter-stable overflow-auto ps-4" ref={setScrollEl}>
                 {baseline.status === 'error' && (
                   <ConfigLoadError error={baseline.error} onRetry={baseline.retry} />
                 )}

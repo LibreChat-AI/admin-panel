@@ -6,8 +6,9 @@ import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { Title as DialogTitle, Description as DialogDescription } from '@radix-ui/react-dialog';
 import type * as t from '@/types';
 import { matchesQuery, searchConfigIndex } from './configuration/search';
-import { useSearchIndex, useLocalize, useReturnFocus } from '@/hooks';
+import { useSearchIndex, useLocalize, useLanguage, useReturnFocus } from '@/hooks';
 import { CONFIG_TABS } from './configuration/configMeta';
+import { LANGUAGES } from '@/constants';
 import { pageTitle, restoreFocusLater } from '@/utils';
 import { CommandDialog } from '@/components/shared';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -24,6 +25,7 @@ export function CommandMenu({ open, onOpenChange }: t.CommandMenuProps) {
   const localize = useLocalize();
   const router = useRouter();
   const { setTheme } = useTheme();
+  const { setLanguage } = useLanguage();
   const { items: settings } = useSearchIndex(localize, open);
 
   const [search, setSearch] = useState('');
@@ -111,6 +113,14 @@ export function CommandMenu({ open, onOpenChange }: t.CommandMenuProps) {
     [setTheme, close],
   );
 
+  const selectLanguage = useCallback(
+    (value: t.LanguageCode) => {
+      setLanguage(value);
+      close();
+    },
+    [setLanguage, close],
+  );
+
   const navigation: t.StaticCommand[] = [
     {
       id: 'nav-home',
@@ -190,6 +200,15 @@ export function CommandMenu({ open, onOpenChange }: t.CommandMenuProps) {
       keywords: ['theme', 'system', 'auto', 'mode', 'appearance'],
       onSelect: () => selectTheme('system'),
     },
+    ...LANGUAGES.map(
+      (option): t.StaticCommand => ({
+        id: `language-${option.code}`,
+        icon: 'globe',
+        label: localize('com_cmdk_set_language', { language: option.nativeName }),
+        keywords: ['language', 'locale', 'translation', option.code, option.nativeName],
+        onSelect: () => selectLanguage(option.code),
+      }),
+    ),
   ];
 
   const query = search.trim();

@@ -60,7 +60,7 @@ export function ConfigLoadError({
   );
 
   return (
-    <div className="py-6 pr-4">
+    <div className="py-6 pe-4">
       <div
         ref={alertRef}
         role="alert"

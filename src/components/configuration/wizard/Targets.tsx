@@ -43,7 +43,7 @@ function TargetOption({
       aria-checked={selected}
       onClick={onClick}
       className={cn(
-        'flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-colors',
+        'flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-start transition-colors',
         selected
           ? 'border-(--cui-color-accent) bg-(--cui-color-background-hover)'
           : 'border-(--cui-color-stroke-default) bg-transparent hover:bg-(--cui-color-background-hover)',
@@ -163,7 +163,7 @@ function PrincipalList({
             aria-checked={isSelected}
             onClick={() => onSelect(principal)}
             className={cn(
-              'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors',
+              'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors',
               isSelected
                 ? 'bg-(--cui-color-background-active) text-(--cui-color-text-default)'
                 : 'text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default)',
@@ -246,7 +246,7 @@ export function Targets({
           description={localize('com_config_review_import_existing_desc')}
         />
         {mode === 'existing' && (
-          <div className="ml-6 flex flex-col gap-2 border-l-2 border-(--cui-color-stroke-default) pl-3">
+          <div className="ms-6 flex flex-col gap-2 border-s-2 border-(--cui-color-stroke-default) ps-3">
             <Segmented
               label={localize('com_config_import_scope_type')}
               value={kind}
@@ -304,7 +304,7 @@ export function Targets({
           description={localize('com_config_review_import_create_desc')}
         />
         {mode === 'create' && (
-          <div className="ml-6 flex flex-col gap-3 border-l-2 border-(--cui-color-stroke-default) pt-1 pl-3">
+          <div className="ms-6 flex flex-col gap-3 border-s-2 border-(--cui-color-stroke-default) pt-1 ps-3">
             <Segmented
               label={localize('com_config_import_scope_type')}
               value={newType}

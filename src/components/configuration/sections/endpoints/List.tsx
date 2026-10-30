@@ -315,7 +315,7 @@ function EndpointListRow({
             aria-haspopup="dialog"
             aria-describedby={detailsId}
             onClick={() => onOpen(row)}
-            className="row-link max-w-full cursor-pointer truncate border-none bg-transparent p-0 text-left text-sm font-medium text-(--cui-color-text-default) after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:outline-2 focus-visible:after:outline-offset-1 focus-visible:after:outline-(--cui-color-outline)"
+            className="row-link max-w-full cursor-pointer truncate border-none bg-transparent p-0 text-start text-sm font-medium text-(--cui-color-text-default) after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:outline-2 focus-visible:after:outline-offset-1 focus-visible:after:outline-(--cui-color-outline)"
             title={row.title}
           >
             {row.title}

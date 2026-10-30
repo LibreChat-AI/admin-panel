@@ -32,7 +32,7 @@ export function Header({ title, onSearchClick, children }: t.HeaderProps) {
             <div />
           )}
         </div>
-        <div className="ml-auto flex max-w-full min-w-0 items-center justify-end gap-2">
+        <div className="ms-auto flex max-w-full min-w-0 items-center justify-end gap-2">
           {children}
           <div id="header-actions-portal" className="contents" />
           {onSearchClick && (

@@ -89,7 +89,7 @@ export function CapabilityPanel({ capabilities, onChange, disabled }: t.Capabili
             />
             {isOpen && (
               <div id={panelId} className="border-t border-(--cui-color-stroke-default) px-4 py-2">
-                <div className="flex flex-col gap-1 pl-6">
+                <div className="flex flex-col gap-1 ps-6">
                   {caps.map((cap: string) => {
                     const isImplied = impliedSet.has(cap) && !capabilities[cap];
                     const isChecked = capabilities[cap] || isImplied;

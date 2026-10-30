@@ -13,6 +13,7 @@ export type * from './files';
 export type * from './grant';
 export type * from './hooks';
 export type * from './layout';
+export type * from './locale';
 export type * from './mcp';
 export type * from './preview';
 export type * from './review';

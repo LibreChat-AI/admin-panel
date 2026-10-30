@@ -362,7 +362,7 @@ export function AuditLogTab() {
   const exportLabel = localize('com_audit_export_server');
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-4 pr-1 pl-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-4 pe-1 ps-1">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div
           className="flex min-w-0 flex-1 flex-wrap items-center gap-3"
@@ -498,7 +498,7 @@ export function AuditLogTab() {
         role="region"
         aria-label={localize('com_audit_title')}
       >
-        <table className="w-full text-left text-sm">
+        <table className="w-full text-start text-sm">
           <caption className="sr-only">{localize('com_audit_title')}</caption>
           <thead className="sticky top-0 z-(--z-sticky)">
             <tr className="border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-muted)">

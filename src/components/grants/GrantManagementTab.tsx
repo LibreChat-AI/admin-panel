@@ -59,7 +59,7 @@ export function GrantManagementTab() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2 pr-1">
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2 pe-1">
       <div className="flex flex-wrap items-center gap-3">
         <SearchInput
           value={search}
@@ -73,7 +73,7 @@ export function GrantManagementTab() {
           stretched over the row, with a ref for focus restoration — markup the
           click-ui Table API does not expose. Matches AuditLogTab's choice. */}
       <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
-        <table className="w-full text-left text-sm">
+        <table className="w-full text-start text-sm">
           <caption className="sr-only">{localize('com_grants_title')}</caption>
           <thead>
             <tr className="border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-muted)">

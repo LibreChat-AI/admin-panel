@@ -43,7 +43,7 @@ export function StorageConfirm({
         },
       ]}
     >
-      <ul className="m-0 flex list-disc flex-col gap-2 pl-5">
+      <ul className="m-0 flex list-disc flex-col gap-2 ps-5">
         <li>{localize('com_config_storage_confirm_live', { backend: to })}</li>
         <li>{localize('com_config_storage_confirm_existing', { backend: from })}</li>
         {scope && (

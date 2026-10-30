@@ -104,7 +104,7 @@ export function RolePermissionsPanel({
                   id={panelId}
                   className="border-t border-(--cui-color-stroke-default) px-4 py-2"
                 >
-                  <div className="flex flex-col gap-1 pl-6">
+                  <div className="flex flex-col gap-1 ps-6">
                     {perms.map((perm) => (
                       <label
                         key={perm}

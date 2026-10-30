@@ -8,4 +8,4 @@ export const ROW =
   'relative bg-(--cui-color-background-panel) transition-colors hover:bg-(--cui-color-background-hover) has-[.row-link:focus-visible]:bg-(--cui-color-background-hover)';
 
 export const ROW_BUTTON =
-  "row-link cursor-pointer border-none bg-transparent p-0 text-left after:absolute after:inset-0 after:content-[''] focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-(--cui-color-outline)";
+  "row-link cursor-pointer border-none bg-transparent p-0 text-start after:absolute after:inset-0 after:content-[''] focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-(--cui-color-outline)";

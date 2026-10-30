@@ -68,12 +68,12 @@ function PreviewEntry({
         )}
       </div>
       {row.unchanged && (
-        <span className="pl-6 text-xs text-(--cui-color-text-muted)">
+        <span className="ps-6 text-xs text-(--cui-color-text-muted)">
           {localize('com_config_review_import_unchanged')}
         </span>
       )}
       {row.unknown && (
-        <span className="pl-6 text-xs text-(--cui-color-text-muted)">
+        <span className="ps-6 text-xs text-(--cui-color-text-muted)">
           {localize('com_config_review_import_unknown')}:{' '}
           <span className="font-mono text-(--cui-color-text-default)">
             {formatReviewValue(importedValue(row), localize)}
@@ -81,7 +81,7 @@ function PreviewEntry({
         </span>
       )}
       {notes.map((note) => (
-        <span key={note} className="flex items-start gap-1 pl-6 text-xs text-(--settings-warn-fg)">
+        <span key={note} className="flex items-start gap-1 ps-6 text-xs text-(--settings-warn-fg)">
           <span aria-hidden="true" className="flex pt-0.5 text-(--settings-warn-mark)">
             <Icon name="warning" size="xs" />
           </span>
@@ -89,7 +89,7 @@ function PreviewEntry({
         </span>
       ))}
       {!row.unknown && row.rows.length > 0 && (
-        <ul className="m-0 flex list-none flex-col gap-0.5 p-0 pl-4">
+        <ul className="m-0 flex list-none flex-col gap-0.5 p-0 ps-4">
           {row.rows.map((change) => (
             <ChangeRow key={change.key} row={change} isScope={isScope} compact />
           ))}

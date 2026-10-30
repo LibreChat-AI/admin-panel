@@ -13,7 +13,13 @@ import {
 } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 import type * as t from '@/types';
-import { useLocalize, useDocumentTitle, useToastCloseLabels, useDialogCloseLabels } from '@/hooks';
+import {
+  useLanguage,
+  useLocalize,
+  useDocumentTitle,
+  useToastCloseLabels,
+  useDialogCloseLabels,
+} from '@/hooks';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import appCss from '../styles.css?url';
 import { withBasePath } from '@/utils';
@@ -94,8 +100,9 @@ function RootPending() {
 }
 
 function RootDocument({ children }: { children: React.ReactNode }) {
+  const { language, direction } = useLanguage();
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={language} dir={direction} suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>

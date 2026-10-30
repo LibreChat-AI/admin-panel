@@ -128,7 +128,7 @@ export function Sidebar({ user, collapsed, onToggle }: t.SidebarProps) {
       <aside
         aria-label={localize('com_a11y_admin_panel')}
         className={cn(
-          'sticky top-0 z-(--z-floating) flex h-screen shrink-0 flex-col overflow-hidden border-r border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) transition-[width] duration-200',
+          'sticky top-0 z-(--z-floating) flex h-screen shrink-0 flex-col overflow-hidden border-e border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) transition-[width] duration-200',
           collapsed ? 'w-14' : 'w-63',
         )}
       >

@@ -102,7 +102,7 @@ export default function ThemeSelector({ returnThemeOnly }: { returnThemeOnly?: b
 
   return (
     <div className="flex flex-col items-center justify-center sm:pt-0">
-      <div className="absolute bottom-0 left-0 m-4">
+      <div className="absolute bottom-0 inset-s-0 m-4">
         <ThemeButton theme={theme} onChange={changeTheme} />
       </div>
     </div>

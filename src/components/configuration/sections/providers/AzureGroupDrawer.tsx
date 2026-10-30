@@ -90,8 +90,8 @@ export function AzureGroupDrawer({
             returnFocus?.current?.focus();
           }}
           className={cn(
-            'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-xl',
-            'border-l border-(--cui-color-stroke-default)',
+            'fixed top-0 inset-e-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-xl',
+            'border-s border-(--cui-color-stroke-default)',
             'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
           )}
         >

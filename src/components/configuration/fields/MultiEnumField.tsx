@@ -54,7 +54,7 @@ export function MultiEnumField({
             onCheckedChange={(next) => toggle(option.value, next === true)}
           />
           {option.description && (
-            <span className="pl-6 text-xs text-(--cui-color-text-muted)">{option.description}</span>
+            <span className="ps-6 text-xs text-(--cui-color-text-muted)">{option.description}</span>
           )}
         </div>
       ))}

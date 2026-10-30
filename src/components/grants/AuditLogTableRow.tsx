@@ -9,12 +9,13 @@ import {
 } from './auditLogUtils';
 import { DecorativeIcon } from '@/components/shared';
 import { ROW, ROW_BUTTON } from './rows';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useLanguage } from '@/hooks';
 import { cn } from '@/utils';
 
 /** One audit entry; its target's name is the button that opens the entry's drawer. */
 export function AuditLogTableRow({ entry, isLast, onOpen, buttonRef }: t.AuditLogTableRowProps) {
   const localize = useLocalize();
+  const { language } = useLanguage();
   const targetConfig = auditTargetConfig(entry.target.type);
   const subject = auditSubject(entry, localize);
   const target = entry.target.name ?? entry.target.id ?? '';
@@ -61,7 +62,7 @@ export function AuditLogTableRow({ entry, isLast, onOpen, buttonRef }: t.AuditLo
       </td>
       <td className="px-4 py-3 font-medium text-(--cui-color-text-default)">{entry.actor.name}</td>
       <td className="px-4 py-3 text-xs whitespace-nowrap text-(--cui-color-text-muted)">
-        <time dateTime={entry.timestamp}>{formatTimestamp(entry.timestamp)}</time>
+        <time dateTime={entry.timestamp}>{formatTimestamp(entry.timestamp, language)}</time>
       </td>
     </tr>
   );

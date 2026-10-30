@@ -425,7 +425,7 @@ export function CreateMcpServerDialog({
                   className="text-sm font-medium text-(--cui-color-text-default)"
                 >
                   {localize('com_config_server_name')}
-                  <span aria-hidden="true" className="ml-0.5 text-(--cui-color-text-danger)">
+                  <span aria-hidden="true" className="ms-0.5 text-(--cui-color-text-danger)">
                     *
                   </span>
                 </label>

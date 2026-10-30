@@ -1,7 +1,8 @@
 import { Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { useLocalize, useReturnFocus } from '@/hooks';
+import { useLocalize, useLanguage, useReturnFocus } from '@/hooks';
 import { useTheme } from '@/contexts/ThemeContext';
+import { LANGUAGES } from '@/constants';
 import { cn } from '@/utils';
 
 const THEME_OPTIONS: t.ThemeOption[] = ['system', 'light', 'dark'];
@@ -15,6 +16,7 @@ export function SettingsDialog({ open, onClose }: t.SettingsDialogProps) {
   const localize = useLocalize();
   const returnFocus = useReturnFocus(open);
   const { theme, setTheme } = useTheme();
+  const { language, setLanguage } = useLanguage();
 
   return (
     <Dialog
@@ -55,6 +57,35 @@ export function SettingsDialog({ open, onClose }: t.SettingsDialogProps) {
                   aria-pressed={theme === opt}
                 >
                   {localize(THEME_LABEL_KEYS[opt])}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium text-(--cui-color-text-default)">
+                {localize('com_nav_language')}
+              </span>
+              <span className="text-xs text-(--cui-color-text-muted)">
+                {localize('com_settings_language_desc')}
+              </span>
+            </div>
+            <div className="flex gap-1 rounded-lg border border-(--cui-color-stroke-default) p-0.5">
+              {LANGUAGES.map((opt) => (
+                <button
+                  key={opt.code}
+                  type="button"
+                  lang={opt.code}
+                  onClick={() => setLanguage(opt.code)}
+                  className={cn(
+                    'cursor-pointer rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                    language === opt.code
+                      ? 'bg-(--cui-color-background-active) text-(--cui-color-text-default)'
+                      : 'text-(--cui-color-text-muted) hover:text-(--cui-color-text-default)',
+                  )}
+                  aria-pressed={language === opt.code}
+                >
+                  {opt.nativeName}
                 </button>
               ))}
             </div>
