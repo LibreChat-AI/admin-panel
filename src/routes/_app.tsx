@@ -129,7 +129,7 @@ function AppPending() {
   return (
     <div role="status" aria-busy="true" className="flex h-screen overflow-hidden">
       <span className="sr-only">{localize('com_ui_loading')}</span>
-      <div className="w-14 shrink-0 border-r border-(--cui-color-stroke-default) bg-(--cui-color-background-panel)" />
+      <div className="w-14 shrink-0 border-e border-(--cui-color-stroke-default) bg-(--cui-color-background-panel)" />
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="h-15.25 shrink-0 border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-panel)" />
       </div>

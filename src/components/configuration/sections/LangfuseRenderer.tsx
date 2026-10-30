@@ -70,7 +70,7 @@ function KeyField({
       </span>
       <button
         type="button"
-        className="rounded-md border border-(--cui-color-stroke-default) px-3 py-2 text-left hover:border-(--cui-color-stroke-intense) focus-visible:outline-2 focus-visible:outline-(--cui-color-stroke-intense)"
+        className="rounded-md border border-(--cui-color-stroke-default) px-3 py-2 text-start hover:border-(--cui-color-stroke-intense) focus-visible:outline-2 focus-visible:outline-(--cui-color-stroke-intense)"
         disabled={disabled}
         onClick={onEdit}
         aria-labelledby={`${labelId} ${previewId}`}

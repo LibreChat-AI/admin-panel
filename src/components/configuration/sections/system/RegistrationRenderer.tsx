@@ -316,7 +316,7 @@ function StartupSettings({
         canRemove ? (
           <button
             type="button"
-            className="settings-row-action -ml-1.5"
+            className="settings-row-action -ms-1.5"
             onClick={() => stale.forEach((path) => fieldProps.onResetField?.(path))}
           >
             {localize('com_config_remove_stale_override')}

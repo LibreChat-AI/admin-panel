@@ -14,7 +14,7 @@ import {
   formatTimestamp,
 } from './auditLogUtils';
 import { CloseButton, DecorativeIcon, LoadingState } from '@/components/shared';
-import { useLocalize, useReturnFocus } from '@/hooks';
+import { useLocalize, useLanguage, useReturnFocus } from '@/hooks';
 import { cn } from '@/utils';
 
 /**
@@ -109,6 +109,7 @@ export function AuditLogDetailDrawer({
   returnFocusTo,
 }: t.AuditLogDetailDrawerProps): ReactElement | null {
   const localize = useLocalize();
+  const { language } = useLanguage();
   const returnFocus = useReturnFocus(open, returnFocusTo);
 
   // Keep the last non-null entry so the close animation has content to render
@@ -202,8 +203,8 @@ export function AuditLogDetailDrawer({
             onEscapeKeyDown={() => onClose()}
             onCloseAutoFocus={returnFocus}
             className={cn(
-              'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
-              'border-l border-(--cui-color-stroke-default)',
+              'fixed top-0 inset-e-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
+              'border-s border-(--cui-color-stroke-default)',
               'will-change-transform',
               'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
             )}
@@ -244,8 +245,8 @@ export function AuditLogDetailDrawer({
             onEscapeKeyDown={() => onClose()}
             onCloseAutoFocus={returnFocus}
             className={cn(
-              'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
-              'border-l border-(--cui-color-stroke-default)',
+              'fixed top-0 inset-e-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
+              'border-s border-(--cui-color-stroke-default)',
               'will-change-transform',
               'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
             )}
@@ -296,8 +297,8 @@ export function AuditLogDetailDrawer({
             onEscapeKeyDown={() => onClose()}
             onCloseAutoFocus={returnFocus}
             className={cn(
-              'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
-              'border-l border-(--cui-color-stroke-default)',
+              'fixed top-0 inset-e-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
+              'border-s border-(--cui-color-stroke-default)',
               'will-change-transform',
               'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
             )}
@@ -358,8 +359,8 @@ export function AuditLogDetailDrawer({
           onEscapeKeyDown={() => onClose()}
           onCloseAutoFocus={returnFocus}
           className={cn(
-            'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
-            'border-l border-(--cui-color-stroke-default)',
+            'fixed top-0 inset-e-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
+            'border-s border-(--cui-color-stroke-default)',
             'will-change-transform',
             'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
           )}
@@ -394,7 +395,7 @@ export function AuditLogDetailDrawer({
                 <DetailRow label={localize('com_audit_detail_timestamp')}>
                   <div className="flex flex-col gap-0.5">
                     <span className="text-sm text-(--cui-color-text-default)">
-                      {formatTimestamp(latestEntry.timestamp)}
+                      {formatTimestamp(latestEntry.timestamp, language)}
                     </span>
                     <CopyableMono
                       value={latestEntry.timestamp}

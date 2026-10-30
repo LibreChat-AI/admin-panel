@@ -35,7 +35,7 @@ export function SwitchObjectField({
         aria-label={ariaLabel}
       />
       {isEnabled && (
-        <div className="mt-3 border-l-2 border-(--cui-color-stroke-default) pl-4">{children}</div>
+        <div className="mt-3 border-s-2 border-(--cui-color-stroke-default) ps-4">{children}</div>
       )}
     </div>
   );

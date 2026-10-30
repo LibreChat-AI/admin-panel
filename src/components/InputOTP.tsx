@@ -46,10 +46,10 @@ const InputOTPSlot = React.forwardRef<
       ref={ref}
       className={clsx(
         'relative flex h-12 w-11 items-center justify-center',
-        'border-y border-r border-(--cui-color-stroke-default)',
+        'border-y border-e border-(--cui-color-stroke-default)',
         'bg-(--cui-color-background-default) text-(--cui-color-text-default)',
         'text-lg font-medium shadow-sm transition-all',
-        'first:rounded-l-lg first:border-l last:rounded-r-lg',
+        'first:rounded-s-lg first:border-s last:rounded-e-lg',
         isActive
           ? 'z-10 border-(--cui-color-outline) ring-1 ring-(--cui-color-outline)'
           : 'hover:border-(--cui-color-stroke-intense)',

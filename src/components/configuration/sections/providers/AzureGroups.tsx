@@ -547,7 +547,7 @@ function EditableGroups({
           onClick={() => handleRevert(entry)}
         />
       )}
-      <span className="ml-auto text-xs text-(--cui-color-text-muted)">
+      <span className="ms-auto text-xs text-(--cui-color-text-muted)">
         {disabled ? null : localize('com_config_ce_drawer_staged')}
       </span>
       <Button

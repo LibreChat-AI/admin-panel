@@ -562,7 +562,7 @@ function InlineFieldBody({
           }
         />
         {enabled && field.children?.length ? (
-          <div className="mb-2 ml-4 border-l-2 border-(--cui-color-stroke-default) pl-4">
+          <div className="mb-2 ms-4 border-s-2 border-(--cui-color-stroke-default) ps-4">
             <InlineFieldRenderer
               fields={field.children}
               parentValue={asConfigRecord(fieldValue)}
@@ -804,7 +804,7 @@ function CollectionRow({
     <span id={`${fieldId}-label`} className="text-sm font-medium text-(--cui-color-text-default)">
       {title}
       {required && (
-        <span aria-hidden="true" className="ml-0.5 text-(--cui-color-text-danger)">
+        <span aria-hidden="true" className="ms-0.5 text-(--cui-color-text-danger)">
           *
         </span>
       )}

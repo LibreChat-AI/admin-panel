@@ -1,6 +1,7 @@
 import { Container } from '@clickhouse/click-ui';
 import { createFileRoute } from '@tanstack/react-router';
 import { useDocumentTitle, useLocalize } from '@/hooks';
+import { LanguageSelector } from '@/components/LanguageSelector';
 import ThemeSelector from '@/components/ThemeSelector';
 import { AuthCard } from '@/components/AuthCard';
 import { ssoProvidersFn } from '@/server';
@@ -27,8 +28,9 @@ function LoginPage() {
       style={{ minHeight: '100vh', padding: '1rem', gap: '1rem' }}
     >
       <AuthCard redirectTo={redirect} providers={providers} ssoOnly={ssoOnly} />
-      <div className="sm:absolute sm:bottom-0 sm:left-0 sm:m-4">
+      <div className="flex items-center gap-1 sm:absolute sm:inset-s-0 sm:bottom-0 sm:m-4">
         <ThemeSelector returnThemeOnly />
+        <LanguageSelector />
       </div>
     </Container>
   );

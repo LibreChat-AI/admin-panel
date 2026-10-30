@@ -49,7 +49,7 @@ export function SelectField({
           if (next === DEFAULT_CHOICE) onClear?.();
           else if (next !== PLACEHOLDER_CHOICE) onChange(next);
         }}
-        className={cn(INPUT_CLASSES, 'cursor-pointer appearance-none pr-8')}
+        className={cn(INPUT_CLASSES, 'cursor-pointer appearance-none pe-8')}
       >
         {hasDefault && (
           <option value={DEFAULT_CHOICE}>
@@ -74,7 +74,7 @@ export function SelectField({
       </select>
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute top-1/2 right-2.5 flex -translate-y-1/2 text-(--cui-color-text-muted)"
+        className="pointer-events-none absolute top-1/2 inset-e-2.5 flex -translate-y-1/2 text-(--cui-color-text-muted)"
       >
         <Icon name="chevron-down" size="sm" />
       </span>

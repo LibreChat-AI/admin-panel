@@ -218,7 +218,7 @@ export function UserSearchInline({
     <div className="relative">
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-(--cui-color-text-muted)"
+        className="pointer-events-none absolute top-1/2 inset-s-3 -translate-y-1/2 text-(--cui-color-text-muted)"
       >
         <Icon name="search" size="xs" />
       </span>
@@ -242,7 +242,7 @@ export function UserSearchInline({
         aria-activedescendant={listOpen && activeIndex >= 0 ? optionId(activeIndex) : undefined}
         role="combobox"
         disabled={disabled}
-        className="w-full rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) py-2 pr-3 pl-9 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted)"
+        className="w-full rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) py-2 pe-3 ps-9 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted)"
       />
       <span role="status" className="sr-only">
         {noUsersFound ? localize('com_access_no_users_found') : ''}

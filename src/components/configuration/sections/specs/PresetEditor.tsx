@@ -233,7 +233,7 @@ export function PresetEditor({
                       focusKeyRef.current = key;
                       setAddedKeys((keys) => [...keys, key]);
                     }}
-                    className={cn(INPUT_CLASSES, 'cursor-pointer appearance-none pr-8')}
+                    className={cn(INPUT_CLASSES, 'cursor-pointer appearance-none pe-8')}
                   >
                     <option value={PICK} disabled>
                       {localize('com_config_specs_raw_add')}
@@ -246,7 +246,7 @@ export function PresetEditor({
                   </select>
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute top-1/2 right-2.5 flex -translate-y-1/2 text-(--cui-color-text-muted)"
+                    className="pointer-events-none absolute top-1/2 inset-e-2.5 flex -translate-y-1/2 text-(--cui-color-text-muted)"
                   >
                     <Icon name="plus" size="sm" />
                   </span>

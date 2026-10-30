@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/vazirmatn';
 
 @theme {
   --z-sticky: 10; /* sticky table/section headers (in-tree) */
@@ -16,7 +17,7 @@
 
 @keyframes drawer-slide-in {
   from {
-    transform: translateX(100%);
+    transform: translateX(var(--drawer-offset));
   }
   to {
     transform: translateX(0);
@@ -28,7 +29,7 @@
     transform: translateX(0);
   }
   to {
-    transform: translateX(100%);
+    transform: translateX(var(--drawer-offset));
   }
 }
 
@@ -247,6 +248,20 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+:root {
+  --drawer-offset: 100%;
+}
+
+[dir='rtl'] {
+  --drawer-offset: -100%;
+}
+
+/* Persian UI text uses Vazirmatn; code keeps its monospace face. */
+:root:lang(fa) body,
+:root:lang(fa) body *:not(code, pre, kbd, samp, .font-mono, .font-mono *) {
+  font-family: 'Vazirmatn Variable', 'Inter', 'Segoe UI', Tahoma, sans-serif;
+}
+
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
@@ -457,8 +472,8 @@ select:focus-visible {
 
 @media (max-width: 400px) {
   .auth-card {
-    padding-left: 0.75rem !important;
-    padding-right: 0.75rem !important;
+    padding-inline-start: 0.75rem !important;
+    padding-inline-end: 0.75rem !important;
   }
 }
 
@@ -551,7 +566,7 @@ select:focus-visible {
   content: '';
   position: absolute;
   top: 0.125rem;
-  left: 0.125rem;
+  inset-inline-start: 0.125rem;
   width: 0.75rem;
   height: 0.75rem;
   border-radius: 9999px;
@@ -565,6 +580,10 @@ select:focus-visible {
 
 .scope-switch[data-checked='true']::after {
   transform: translateX(0.75rem);
+}
+
+[dir='rtl'] .scope-switch[data-checked='true']::after {
+  transform: translateX(-0.75rem);
 }
 
 .scope-icon {
@@ -654,7 +673,8 @@ select:focus-visible {
   max-width: 100%;
   align-items: center;
   gap: 0.25rem;
-  padding: 0.125rem 0.25rem 0.125rem 0.625rem;
+  padding-block: 0.125rem;
+  padding-inline: 0.625rem 0.25rem;
   border: 1px solid var(--cui-color-stroke-default);
   border-radius: 9999px;
   background-color: var(--cui-color-background-muted);
@@ -677,7 +697,7 @@ select:focus-visible {
   border: 1px solid var(--cui-color-stroke-muted);
   background: var(--cui-color-background-muted);
   padding: 2px 6px;
-  margin-left: auto;
+  margin-inline-start: auto;
   border-radius: 9999px;
   transition:
     background 150ms ease,
@@ -857,7 +877,7 @@ ol[class*='toast-viewport'] {
 .toc-list::before {
   content: '';
   position: absolute;
-  left: 0;
+  inset-inline-start: 0;
   top: 0;
   bottom: 0;
   width: 1px;
@@ -869,16 +889,16 @@ ol[class*='toast-viewport'] {
 }
 
 .toc-item-parent {
-  border-left: 2px solid transparent;
+  border-inline-start: 2px solid transparent;
 }
 
 .toc-item-child {
-  border-left: 2px solid transparent;
+  border-inline-start: 2px solid transparent;
 }
 
 .toc-item[data-toc-active] {
   color: var(--cui-color-text-default);
-  border-left-color: var(--settings-accent);
+  border-inline-start-color: var(--settings-accent);
 }
 
 .toc-item-parent[data-toc-active] {
@@ -915,7 +935,7 @@ ol[class*='toast-viewport'] {
 }
 
 .config-count-badge-override {
-  margin-left: 4px;
+  margin-inline-start: 4px;
   background-color: var(--settings-accent-solid-bg);
   color: var(--settings-accent-solid-fg);
 }
@@ -926,8 +946,9 @@ ol[class*='toast-viewport'] {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: 4px;
-  padding: 4px 12px 4px 8px;
+  margin-inline-start: 4px;
+  padding-block: 4px;
+  padding-inline: 8px 12px;
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--cui-color-text-muted) 40%, transparent);
   font-size: 13px;
@@ -954,7 +975,7 @@ ol[class*='toast-viewport'] {
   width: 100%;
   height: 36px;
   padding: 6px 12px;
-  margin-left: 0;
+  margin-inline-start: 0;
   border-color: color-mix(in srgb, var(--cui-color-text-muted) 40%, transparent);
 }
 
@@ -1270,7 +1291,7 @@ body > div:has(+ .modal-frost) {
 .settings-row[data-marker]::before {
   content: '';
   position: absolute;
-  left: 4px;
+  inset-inline-start: 4px;
   top: 10px;
   bottom: 10px;
   width: 3px;
@@ -1297,7 +1318,7 @@ body > div:has(+ .modal-frost) {
   grid-area: label;
   min-width: 0;
   padding-top: 6px;
-  padding-left: var(--settings-indent, 0px);
+  padding-inline-start: var(--settings-indent, 0px);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1352,7 +1373,7 @@ body > div:has(+ .modal-frost) {
 }
 
 .settings-required {
-  margin-left: 2px;
+  margin-inline-start: 2px;
   color: var(--settings-danger-fg);
 }
 
@@ -1430,7 +1451,7 @@ body > div:has(+ .modal-frost) {
   }
 
   .settings-row-control {
-    margin-left: var(--settings-indent, 0px);
+    margin-inline-start: var(--settings-indent, 0px);
   }
 
   .settings-row-trailing {
@@ -1456,7 +1477,7 @@ body > div:has(+ .modal-frost) {
   }
 
   .settings-row-control {
-    margin-left: var(--settings-indent, 0px);
+    margin-inline-start: var(--settings-indent, 0px);
   }
 
   .settings-row-trailing {
@@ -1482,7 +1503,7 @@ body > div:has(+ .modal-frost) {
     > .settings-row-trailing {
     justify-content: flex-start;
     max-width: none;
-    margin-left: var(--settings-indent, 0px);
+    margin-inline-start: var(--settings-indent, 0px);
   }
 }
 
@@ -1501,7 +1522,7 @@ body > div:has(+ .modal-frost) {
   .settings-row:has(> .settings-row-trailing) > .settings-row-trailing {
     justify-content: flex-start;
     max-width: none;
-    margin-left: var(--settings-indent, 0px);
+    margin-inline-start: var(--settings-indent, 0px);
   }
 }
 
@@ -1525,7 +1546,7 @@ body > div:has(+ .modal-frost) {
   .settings-row-trailing {
     justify-content: flex-start;
     max-width: none;
-    margin-left: var(--settings-indent, 0px);
+    margin-inline-start: var(--settings-indent, 0px);
   }
 
   .settings-row-trailing,
@@ -1601,7 +1622,7 @@ body > div:has(+ .modal-frost) {
   background: none;
   color: inherit;
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
@@ -1623,7 +1644,7 @@ body > div:has(+ .modal-frost) {
 }
 
 .settings-section-trigger .settings-chevron {
-  margin-left: auto;
+  margin-inline-start: auto;
   transform: rotate(90deg);
 }
 
@@ -1703,7 +1724,9 @@ body > div:has(+ .modal-frost) {
   position: absolute;
   top: 0;
   bottom: 8px;
-  left: calc(var(--settings-row-px) + var(--settings-indent) - var(--settings-nest-step) + 6px);
+  inset-inline-start: calc(
+    var(--settings-row-px) + var(--settings-indent) - var(--settings-nest-step) + 6px
+  );
   width: 1px;
   background: var(--cui-color-stroke-default);
   pointer-events: none;
@@ -1720,7 +1743,8 @@ body > div:has(+ .modal-frost) {
 
 .settings-group-desc {
   margin: 0;
-  padding: 0 var(--settings-row-px) 4px calc(var(--settings-row-px) + var(--settings-indent));
+  padding-block: 0 4px;
+  padding-inline: calc(var(--settings-row-px) + var(--settings-indent)) var(--settings-row-px);
   font-size: var(--settings-fs-help);
   color: var(--cui-color-text-muted);
 }
@@ -1733,8 +1757,8 @@ body > div:has(+ .modal-frost) {
 }
 
 .settings-group-body > :not(.settings-row, .settings-group) {
-  margin-left: calc(var(--settings-row-px) + var(--settings-indent));
-  margin-right: var(--settings-row-px);
+  margin-inline-start: calc(var(--settings-row-px) + var(--settings-indent));
+  margin-inline-end: var(--settings-row-px);
   max-width: calc(100% - 2 * var(--settings-row-px) - var(--settings-indent));
 }
 
@@ -1914,7 +1938,8 @@ body > div:has(+ .modal-frost) {
   justify-content: center;
   width: 1.5rem;
   height: 1.5rem;
-  margin: -2px -4px -2px 0;
+  margin-block: -2px;
+  margin-inline: 0 -4px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -2035,7 +2060,7 @@ body > div:has(+ .modal-frost) {
   font-weight: 400;
   line-height: 1.35;
   color: var(--cui-color-text-muted);
-  text-align: left;
+  text-align: start;
   white-space: normal;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -2117,7 +2142,7 @@ body > div:has(+ .modal-frost) {
 }
 
 .settings-row:has(> .settings-row-control > fieldset[id$='-capabilities']) .settings-row-control {
-  margin-left: var(--settings-indent, 0px);
+  margin-inline-start: var(--settings-indent, 0px);
 }
 
 .settings-row-control > fieldset[id$='-capabilities'] {
@@ -2142,7 +2167,7 @@ body > div:has(+ .modal-frost) {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-left: 2px;
+  margin-inline-start: 2px;
   padding: 0;
   border: 0;
   background: none;
@@ -2188,7 +2213,7 @@ body > div:has(+ .modal-frost) {
 .azure-groups-table td {
   padding: 8px 12px;
   border-bottom: 1px solid var(--cui-color-stroke-default);
-  text-align: left;
+  text-align: start;
   vertical-align: middle;
 }
 
@@ -2250,13 +2275,13 @@ body > div:has(+ .modal-frost) {
 }
 
 .azure-col-number {
-  text-align: right !important;
+  text-align: end !important;
   font-variant-numeric: tabular-nums;
 }
 
 .azure-col-action {
   width: 1%;
-  text-align: right !important;
+  text-align: end !important;
 }
 
 .azure-details-btn {

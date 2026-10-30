@@ -260,7 +260,7 @@ export function ScopeOverridesDialog({
             {localize('com_scope_overrides_empty')}
           </p>
         ) : (
-          <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pr-1">
+          <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto pe-1">
             {onRevert && (
               <p className="text-xs text-(--cui-color-text-muted)">
                 {localize('com_scope_overrides_revert_hint')}

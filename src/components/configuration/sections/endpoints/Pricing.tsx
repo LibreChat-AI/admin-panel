@@ -85,8 +85,8 @@ export function PricingRow({
         <div className="w-full overflow-x-auto">
           <table aria-labelledby={`${fieldId}-label`} className="w-full border-collapse text-sm">
             <thead>
-              <tr className="text-left text-xs text-(--cui-color-text-muted)">
-                <th scope="col" className="py-1.5 pr-3 font-medium">
+              <tr className="text-start text-xs text-(--cui-color-text-muted)">
+                <th scope="col" className="py-1.5 pe-3 font-medium">
                   {localize('com_config_ce_pricing_model')}
                 </th>
                 {COLUMNS.map((column) => (
@@ -117,7 +117,7 @@ export function PricingRow({
                   >
                     <th
                       scope="row"
-                      className="max-w-56 min-w-36 py-2 pr-3 text-left font-mono text-xs font-normal wrap-anywhere text-(--cui-color-text-default)"
+                      className="max-w-56 min-w-36 py-2 pe-3 text-start font-mono text-xs font-normal wrap-anywhere text-(--cui-color-text-default)"
                     >
                       <span className="block pt-1.5">{model}</span>
                       {missing && !disabled && (
@@ -152,7 +152,7 @@ export function PricingRow({
                         </td>
                       );
                     })}
-                    <td className="py-2 pl-1">
+                    <td className="py-2 ps-1">
                       {!disabled && !locked && (
                         <button
                           type="button"

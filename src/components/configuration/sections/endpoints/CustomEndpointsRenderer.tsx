@@ -517,7 +517,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
           onClick={() => handleDelete(row)}
         />
       )}
-      <span className="ml-auto text-xs text-(--cui-color-text-muted)">
+      <span className="ms-auto text-xs text-(--cui-color-text-muted)">
         {editable ? localize('com_config_ce_drawer_staged') : null}
       </span>
       <Button
@@ -544,7 +544,7 @@ export function CustomEndpointsRenderer(props: t.FieldRendererProps) {
           />
         )}
         {!disabled && (
-          <div className="ml-auto" ref={createButtonRef}>
+          <div className="ms-auto" ref={createButtonRef}>
             <Button
               type="secondary"
               htmlType="button"

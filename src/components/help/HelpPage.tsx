@@ -58,7 +58,7 @@ export function HelpPage() {
                   {localize(resource.titleKey)}
                   <span
                     aria-hidden="true"
-                    className="ml-1.5 inline-block text-(--cui-color-text-muted)"
+                    className="ms-1.5 inline-block text-(--cui-color-text-muted)"
                   >
                     ↗
                   </span>
@@ -75,7 +75,7 @@ export function HelpPage() {
       <section aria-label={localize('com_help_support')}>
         <div className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-muted) px-4 py-3">
           <span className="text-sm text-(--cui-color-text-muted)">
-            <span aria-hidden="true" className="mr-1.5 inline-block align-middle">
+            <span aria-hidden="true" className="me-1.5 inline-block align-middle">
               <Icon name="question" size="xs" />
             </span>
             {localize('com_help_support_text')}

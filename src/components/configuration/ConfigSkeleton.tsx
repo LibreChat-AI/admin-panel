@@ -13,7 +13,7 @@ export function ConfigContentSkeleton({ rows = ROW_WIDTHS.length }: t.ConfigCont
       role="status"
       aria-busy="true"
       aria-live="polite"
-      className="flex flex-col gap-3 py-4 pr-4 motion-safe:animate-pulse"
+      className="flex flex-col gap-3 py-4 pe-4 motion-safe:animate-pulse"
     >
       <span className="sr-only">{localize('com_config_shell_loading')}</span>
       <div className="flex flex-col gap-5 rounded-lg border border-(--cui-color-stroke-default) p-5">

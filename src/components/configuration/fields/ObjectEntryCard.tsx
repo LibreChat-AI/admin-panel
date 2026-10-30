@@ -235,7 +235,7 @@ export function ObjectEntryCard({
     >
       <div
         className={cn(
-          '@container flex w-full items-center gap-1 rounded-lg pr-2 transition-colors hover:bg-(--cui-color-background-hover)',
+          '@container flex w-full items-center gap-1 rounded-lg pe-2 transition-colors hover:bg-(--cui-color-background-hover)',
           isExpanded && 'sticky top-0 z-5 rounded-t-lg bg-(--cui-color-background-default)',
         )}
       >
@@ -280,7 +280,7 @@ export function ObjectEntryCard({
             aria-expanded={isExpanded}
             aria-controls={panelId}
             onClick={toggle}
-            className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg border-none bg-transparent px-3 py-2.5 text-left select-none focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)"
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg border-none bg-transparent px-3 py-2.5 text-start select-none focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)"
           >
             <span
               aria-hidden="true"

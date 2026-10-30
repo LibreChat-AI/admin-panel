@@ -537,7 +537,7 @@ export function ChangeRow({
           </ValueLabelsContext.Provider>
           <RowIssues issues={row.issues} />
           {row.details && row.details.length > 0 && (
-            <dl className="m-0 grid grid-cols-[minmax(6rem,max-content)_1fr] gap-x-3 gap-y-0.5 pl-1 text-xs">
+            <dl className="m-0 grid grid-cols-[minmax(6rem,max-content)_1fr] gap-x-3 gap-y-0.5 ps-1 text-xs">
               {row.details.map((detail) => (
                 <div key={detail.key} className="contents">
                   <dt className="text-(--cui-color-text-muted)">{detail.label}</dt>

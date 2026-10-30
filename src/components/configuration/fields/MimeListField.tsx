@@ -144,7 +144,7 @@ export function MimeListField({
       {editing && (
         <button
           type="button"
-          className="settings-row-action -ml-1.5"
+          className="settings-row-action -ms-1.5"
           onClick={() => {
             focusNextRef.current = 'customize';
             setCustomizing(false);

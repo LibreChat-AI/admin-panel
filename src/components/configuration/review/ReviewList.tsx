@@ -41,7 +41,7 @@ function SectionBlock({
             <span className="font-semibold text-(--cui-color-text-default)">{entry.title}</span> ·{' '}
             {entry.noun}
           </p>
-          <ul className="m-0 flex list-none flex-col gap-0.5 border-l-2 border-(--cui-color-stroke-default) p-0 pl-2">
+          <ul className="m-0 flex list-none flex-col gap-0.5 border-s-2 border-(--cui-color-stroke-default) p-0 ps-2">
             {entry.rows.map((row) => (
               <ChangeRow key={row.key} row={row} {...rowProps} />
             ))}

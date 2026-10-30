@@ -71,7 +71,7 @@ export function ContentToolbar({
           aria-expanded={filtersOpen}
           aria-controls={filtersId}
           onClick={() => setFiltersOpen((open) => !open)}
-          className="config-add-btn ml-0"
+          className="config-add-btn ms-0"
         >
           <DecorativeIcon name="filter" size="sm" />
           <span>{localize('com_config_shell_filters')}</span>
@@ -113,7 +113,7 @@ export function ContentToolbar({
           <JumpToSelect targets={jumpTargets} onJump={onJump} />
         )}
       </div>
-      <div className="ml-auto hidden items-center gap-1 md:flex">
+      <div className="ms-auto hidden items-center gap-1 md:flex">
         <Button
           htmlType="button"
           type="empty"
@@ -129,7 +129,7 @@ export function ContentToolbar({
           onClick={handleCollapseAll}
         />
       </div>
-      <div className="ml-auto flex items-center gap-1 md:hidden">
+      <div className="ms-auto flex items-center gap-1 md:hidden">
         <button
           type="button"
           onClick={handleExpandAll}

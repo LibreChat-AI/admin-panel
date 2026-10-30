@@ -19,7 +19,13 @@ import {
   ScreenReaderAnnouncer,
   SearchInput,
 } from '@/components/shared';
-import { useLocalize, useAnnouncement, useCapabilities, useRefreshScopes } from '@/hooks';
+import {
+  useLocalize,
+  useLanguage,
+  useAnnouncement,
+  useCapabilities,
+  useRefreshScopes,
+} from '@/hooks';
 import { SystemCapabilities, USER_DELETE_UNAVAILABLE } from '@/constants';
 import { cn, errorText, notifySuccess, notifyError } from '@/utils';
 import { CreateUserDialog } from './CreateUserDialog';
@@ -164,7 +170,7 @@ export function UsersPage() {
         </div>
 
         <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
-          <table className="w-full text-left text-sm">
+          <table className="w-full text-start text-sm">
             <thead>
               <tr className="border-b border-(--cui-color-stroke-default) bg-(--cui-color-background-muted)">
                 <th scope="col" className="px-4 py-2.5 font-medium text-(--cui-color-text-muted)">
@@ -250,6 +256,7 @@ function UserRow({
   canManage,
 }: t.UserRowProps) {
   const localize = useLocalize();
+  const { language } = useLanguage();
 
   const kebabItems: t.KebabMenuItem[] = [
     { label: localize('com_users_view_details'), icon: 'user', onClick: onViewDetails },
@@ -333,7 +340,7 @@ function UserRow({
         </span>
       </td>
       <td className="px-4 py-3 text-(--cui-color-text-muted)">
-        {new Date(user.createdAt).toLocaleDateString()}
+        {new Date(user.createdAt).toLocaleDateString(language)}
       </td>
       <td className="px-4 py-3">
         <span onClick={(e) => e.stopPropagation()}>

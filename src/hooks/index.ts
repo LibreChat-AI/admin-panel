@@ -9,6 +9,7 @@ export * from './useCommandMenu';
 export * from './useDebouncedFilter';
 export * from './useInlineFit';
 export * from './labels';
+export * from './language';
 export * from './useLocalize';
 export * from './useReorderVoiceover';
 export * from './useSearchIndex';

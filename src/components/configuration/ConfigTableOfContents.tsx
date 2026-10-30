@@ -6,13 +6,13 @@ import { entryHasPath } from './toc';
 import { cn } from '@/utils';
 
 const ITEM =
-  'toc-item block w-full min-w-0 cursor-pointer truncate border-none bg-transparent text-left text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)';
+  'toc-item block w-full min-w-0 cursor-pointer truncate border-none bg-transparent text-start text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)';
 
 function Markers({ dirty, error }: { dirty: boolean; error: boolean }) {
   const localize = useLocalize();
   if (!dirty && !error) return null;
   return (
-    <span className="ml-1.5 inline-flex shrink-0 items-center gap-1 align-middle">
+    <span className="ms-1.5 inline-flex shrink-0 items-center gap-1 align-middle">
       {error && (
         <span className="inline-block size-1.5 rounded-full bg-(--cui-color-text-danger)">
           <span className="sr-only">{localize('com_config_shell_toc_error')}</span>
@@ -77,8 +77,8 @@ export const ConfigTableOfContents = memo(function ConfigTableOfContents({
       className={cn(
         ITEM,
         isSection
-          ? 'toc-item-parent py-1.5 pr-1 pl-3 text-[13px] font-medium'
-          : 'toc-item-child py-1 pr-1 pl-6 text-xs',
+          ? 'toc-item-parent py-1.5 pe-1 ps-3 text-[13px] font-medium'
+          : 'toc-item-child py-1 pe-1 ps-6 text-xs',
       )}
     >
       {entry.label}

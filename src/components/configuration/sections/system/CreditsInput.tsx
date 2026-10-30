@@ -83,7 +83,7 @@ export function CreditsInput({
         placeholder={placeholder != null ? numberFormat.format(placeholder) : undefined}
         disabled={disabled}
         endContent={
-          <span id={unitId} className="pr-1 text-xs text-(--cui-color-text-muted)">
+          <span id={unitId} className="pe-1 text-xs text-(--cui-color-text-muted)">
             {localize('com_config_ctl_unit_credits')}
           </span>
         }

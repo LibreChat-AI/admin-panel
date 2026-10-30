@@ -110,7 +110,7 @@ export function NumberField({
         hideControls
         endContent={
           unit ? (
-            <span id={unitId} className="pr-1 text-xs text-(--cui-color-text-muted)">
+            <span id={unitId} className="pe-1 text-xs text-(--cui-color-text-muted)">
               {localize(`com_config_ctl_unit_${unit}`)}
             </span>
           ) : undefined

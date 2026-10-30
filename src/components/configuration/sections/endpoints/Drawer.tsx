@@ -53,8 +53,8 @@ export function EndpointDrawer({
             target.focus();
           }}
           className={cn(
-            'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl',
-            'border-l border-(--cui-color-stroke-default) sm:w-[min(56rem,calc(100vw-3rem))]',
+            'fixed top-0 inset-e-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl',
+            'border-s border-(--cui-color-stroke-default) sm:w-[min(56rem,calc(100vw-3rem))]',
             'will-change-transform',
             'data-[state=closed]:animate-drawer-out data-[state=open]:animate-drawer-in',
           )}

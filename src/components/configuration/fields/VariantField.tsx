@@ -142,7 +142,7 @@ export function VariantField({
         </span>
       )}
       {active && blockedKeys.length === 0 && (
-        <div className="flex flex-col gap-3 border-l-2 border-(--cui-color-stroke-default) pl-4">
+        <div className="flex flex-col gap-3 border-s-2 border-(--cui-color-stroke-default) ps-4">
           {renderFields(fieldsOf(active, discriminator), shownValue, (key, child) => {
             const base =
               active === matched ? record : switchVariant(value, active, discriminator, []).value;

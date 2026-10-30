@@ -257,7 +257,7 @@ export function SpecList({
           <span className="settings-group-title">{localize('com_config_specs_list')}</span>
           <CountBadge configured={items.length} total={items.length} entries />
         </h3>
-        <span ref={addButtonRef} className="ml-auto">
+        <span ref={addButtonRef} className="ms-auto">
           {addButton}
         </span>
         <p className="settings-help m-0 basis-full">{localize('com_config_specs_list_desc')}</p>

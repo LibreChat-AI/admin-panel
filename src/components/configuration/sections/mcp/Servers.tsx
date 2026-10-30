@@ -832,7 +832,7 @@ export function McpServersRenderer({
       <div className="flex flex-col gap-2">
         {!disabled && (
           <div className="flex flex-wrap items-center gap-2 py-1">
-            <span ref={createRef} className="ml-auto">
+            <span ref={createRef} className="ms-auto">
               <Button
                 type="secondary"
                 htmlType="button"

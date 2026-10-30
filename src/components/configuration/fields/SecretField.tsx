@@ -86,7 +86,7 @@ export function SecretInput({
           aria-label={ariaLabel}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy || undefined}
-          className={cn(INPUT_CLASSES, 'pr-9')}
+          className={cn(INPUT_CLASSES, 'pe-9')}
         />
         {draft !== '' && !isEnvReference(draft) && (
           <button
@@ -98,7 +98,7 @@ export function SecretInput({
               revealed ? 'com_config_ctl_secret_hide' : 'com_config_ctl_secret_show',
               { name },
             )}
-            className="icon-btn icon-btn-xs absolute top-1/2 right-1 -translate-y-1/2"
+            className="icon-btn icon-btn-xs absolute top-1/2 inset-e-1 -translate-y-1/2"
           >
             <DecorativeIcon name={revealed ? 'eye-closed' : 'eye'} size="sm" />
           </button>

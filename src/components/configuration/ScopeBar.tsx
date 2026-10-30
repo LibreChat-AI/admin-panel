@@ -90,7 +90,7 @@ export function ScopeBar({
   return (
     <section
       aria-label={localize('com_scope_bar_label')}
-      className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-l-4 border-(--cui-color-stroke-default) bg-(--cui-color-background-muted) px-3 py-2"
+      className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-s-4 border-(--cui-color-stroke-default) bg-(--cui-color-background-muted) px-3 py-2"
       style={{ borderLeftColor: config.color }}
     >
       <div className="flex min-w-0 flex-1 items-start gap-2.5">

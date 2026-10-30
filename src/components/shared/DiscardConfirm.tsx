@@ -23,7 +23,7 @@ export function DiscardConfirm({ message, onKeep, onDiscard }: t.DiscardConfirmP
       className="flex w-full flex-wrap items-center justify-between gap-2"
     >
       <span className="text-sm text-(--cui-color-text-default)">{message}</span>
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ms-auto flex items-center gap-2">
         <Button
           type="secondary"
           htmlType="button"
