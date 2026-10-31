@@ -161,7 +161,7 @@ function checkDraft(
   if (!result || result.success || !result.error) return { missing: [], errors: {} };
   const missing: string[] = [];
   const errors: t.PathErrors = {};
-  for (const issue of toConfigIssues(result.error.issues, DRAFT_PATH)) {
+  for (const issue of toConfigIssues(result.error.issues, DRAFT_PATH, schema)) {
     if (issue.path === DRAFT_PATH) {
       const [path, message] = thrownIssue(entry, issue.message);
       errors[path] ??= message;

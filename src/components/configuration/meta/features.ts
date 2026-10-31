@@ -26,6 +26,7 @@ const INTERFACE_META: t.FieldMetaRegistry = {
     enumLabels: {
       all: 'com_config_enum_retention_all',
       temporary: 'com_config_enum_retention_temporary',
+      ephemeral: 'com_config_enum_retention_ephemeral',
     },
   },
   'interface.generalChatRetention': {

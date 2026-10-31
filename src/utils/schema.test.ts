@@ -64,8 +64,8 @@ describe('getUnknownConfigKeys', () => {
       endpoints: { custom: [{ name: 'Groq', models: { default: ['m'] } }] },
     };
     expect(getUnknownConfigKeys(config, real)).toEqual([]);
-    expect(getUnknownConfigKeys({ ...config, conversationList: {} }, real)).toEqual([
-      'conversationList',
+    expect(getUnknownConfigKeys({ ...config, conversationArchive: {} }, real)).toEqual([
+      'conversationArchive',
     ]);
   });
 });

@@ -56,6 +56,8 @@ export const SYSTEM_FIELD_META: t.FieldMetaRegistry = {
   'balance.refillIntervalValue': { labelKey: 'com_config_credits_refill_every' },
   'balance.refillIntervalUnit': { labelKey: 'com_config_credits_refill_unit' },
   'balance.reservationTtlMs': { labelKey: 'com_config_credits_reservation' },
+  'balance.refillMode': { labelKey: 'com_config_credits_refill_mode' },
+  'balance.display': { labelKey: 'com_config_credits_display' },
   'transactions.enabled': { labelKey: 'com_config_credits_transactions' },
   'registration.allowedDomains': { emptyListIsValue: true },
 };

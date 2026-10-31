@@ -1,15 +1,40 @@
+import type { AdminAuditLogEntry, AuditAction } from '@librechat/data-schemas';
 import type { PrincipalType, ResourceType } from 'librechat-data-provider';
-import type { AdminAuditLogEntry } from '@librechat/data-schemas';
 import type { Ref } from 'react';
+import type { IconName } from './scope';
 
-export interface AuditLogEntryWithDiff extends AdminAuditLogEntry {
+/**
+ * An audit entry as the panel parses it: its `action` and `category` may be
+ * ones a newer LibreChat adds, so they are any text.
+ */
+export interface AuditLogEntryWithDiff extends Omit<AdminAuditLogEntry, 'action' | 'category'> {
+  action: string;
+  category: string;
   before?: readonly string[];
   after?: readonly string[];
 }
 
+/** Audit actions the audit log tab names (`LABELED_AUDIT_ACTIONS`): capability grants and Insights. */
+export type LabeledAuditAction = Extract<
+  AuditAction,
+  | 'grant.assigned'
+  | 'grant.removed'
+  | 'permission.insights_assigned'
+  | 'permission.insights_removed'
+>;
+
+/** How an audit action's badge reads: granted, revoked, or (an action the tab doesn't name) neutral. */
+export type AuditBadgeState = 'success' | 'danger' | 'neutral';
+
 /** `target.type` values the audit log can filter on: principals for grants, agents for Insights. */
 export type AuditTargetType =
   PrincipalType.USER | PrincipalType.GROUP | PrincipalType.ROLE | ResourceType.AGENT;
+
+/** How an audit entry's target type reads on its badge: an icon and a name. */
+export interface AuditTargetBadge {
+  icon: IconName;
+  label: string;
+}
 
 /** What an audit entry changed: a system capability, or an agent-level permission. */
 export interface AuditSubject {

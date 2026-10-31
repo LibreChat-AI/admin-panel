@@ -112,6 +112,24 @@ export const SECTION_META: Record<string, t.SectionMeta> = {
     tab: 'features',
     order: 120,
   },
+  projects: {
+    titleKey: 'com_config_section_projects',
+    descriptionKey: 'com_config_section_projects_desc',
+    tab: 'features',
+    order: 130,
+  },
+  toolCallPreviews: {
+    titleKey: 'com_config_section_toolCallPreviews',
+    descriptionKey: 'com_config_section_toolCallPreviews_desc',
+    tab: 'features',
+    order: 140,
+  },
+  githubCompare: {
+    titleKey: 'com_config_section_githubCompare',
+    descriptionKey: 'com_config_section_githubCompare_desc',
+    tab: 'features',
+    order: 150,
+  },
 
   fileStrategy: {
     titleKey: 'com_config_storage_title',
@@ -146,6 +164,12 @@ export const SECTION_META: Record<string, t.SectionMeta> = {
     tab: 'files',
     order: 50,
   },
+  fileListLimit: {
+    titleKey: 'com_config_section_fileListLimit',
+    descriptionKey: 'com_config_section_fileListLimit_desc',
+    tab: 'files',
+    order: 60,
+  },
 
   endpoints: {
     titleKey: 'com_config_section_endpoints',
@@ -177,12 +201,30 @@ export const SECTION_META: Record<string, t.SectionMeta> = {
     tab: 'mcp',
     order: 20,
   },
+  mcpAppSandbox: {
+    titleKey: 'com_config_section_mcpAppSandbox',
+    descriptionKey: 'com_config_section_mcpAppSandbox_desc',
+    tab: 'mcp',
+    order: 30,
+  },
 
   registration: {
     titleKey: 'com_config_section_registration',
     descriptionKey: 'com_config_section_registration_desc',
     tab: 'system',
     order: 10,
+  },
+  emailChange: {
+    titleKey: 'com_config_section_emailChange',
+    descriptionKey: 'com_config_section_emailChange_desc',
+    tab: 'system',
+    order: 13,
+  },
+  passkeys: {
+    titleKey: 'com_config_section_passkeys',
+    descriptionKey: 'com_config_section_passkeys_desc',
+    tab: 'system',
+    order: 16,
   },
   balance: {
     titleKey: 'com_config_credits_title',
@@ -233,6 +275,66 @@ export const SECTION_META: Record<string, t.SectionMeta> = {
     descriptionKey: 'com_config_section_skillSync_desc',
     tab: 'system',
     order: 90,
+  },
+  skillDeletion: {
+    titleKey: 'com_config_section_skillDeletion',
+    descriptionKey: 'com_config_section_skillDeletion_desc',
+    tab: 'system',
+    order: 95,
+  },
+  timeouts: {
+    titleKey: 'com_config_section_timeouts',
+    descriptionKey: 'com_config_section_timeouts_desc',
+    tab: 'system',
+    order: 100,
+  },
+  clientLimits: {
+    titleKey: 'com_config_section_clientLimits',
+    descriptionKey: 'com_config_section_clientLimits_desc',
+    tab: 'system',
+    order: 110,
+  },
+  concurrency: {
+    titleKey: 'com_config_section_concurrency',
+    descriptionKey: 'com_config_section_concurrency_desc',
+    tab: 'system',
+    order: 120,
+  },
+  passwordHashing: {
+    titleKey: 'com_config_section_passwordHashing',
+    descriptionKey: 'com_config_section_passwordHashing_desc',
+    tab: 'system',
+    order: 130,
+  },
+  conversationList: {
+    titleKey: 'com_config_section_conversationList',
+    descriptionKey: 'com_config_section_conversationList_desc',
+    tab: 'system',
+    order: 140,
+  },
+  messages: {
+    titleKey: 'com_config_section_messages',
+    descriptionKey: 'com_config_section_messages_desc',
+    tab: 'system',
+    order: 150,
+  },
+  violationLog: {
+    titleKey: 'com_config_section_violationLog',
+    descriptionKey: 'com_config_section_violationLog_desc',
+    tab: 'system',
+    order: 160,
+  },
+  credentials: {
+    titleKey: 'com_config_section_credentials',
+    descriptionKey: 'com_config_section_credentials_desc',
+    tab: 'system',
+    order: 170,
+  },
+  telemetry: {
+    titleKey: 'com_config_section_telemetry',
+    descriptionKey: 'com_config_section_telemetry_desc',
+    tab: 'system',
+    order: 180,
   },
 };
 

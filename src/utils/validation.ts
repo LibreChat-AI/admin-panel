@@ -1,11 +1,15 @@
 import { configSchema } from 'librechat-data-provider';
+import type { core } from 'zod';
 import type * as t from '@/types';
-import { AZURE_GROUPS_PATH, RUNTIME_NUMBER_LIMITS } from '@/constants';
-import { getValueAtPath, isConfigRecord } from './format';
-import { resolveSubSchema } from './schema';
+import { schemaType, unwrapSchema, resolveSubSchema } from './schema';
+import { AZURE_GROUPS_PATH } from '@/constants';
 import { getEntryKey } from './collections';
+import { isConfigRecord } from './format';
 
 const MAX_UNION_DEPTH = 10;
+
+/** Every parse reports the value that failed (`input`): a refused enum's text, a missing field. */
+const PARSE_PARAMS = { reportInput: true } as const;
 
 function isParseable(schema: t.ZodSchemaLike | null | undefined): schema is t.ParseableSchema {
   return schema != null && typeof (schema as Partial<t.ParseableSchema>).safeParse === 'function';
@@ -18,7 +22,7 @@ function isParseable(schema: t.ZodSchemaLike | null | undefined): schema is t.Pa
  */
 export function parseSafely(schema: t.ParseableSchema, value: t.ConfigValue): t.SchemaParseResult {
   try {
-    return schema.safeParse(value);
+    return schema.safeParse(value, PARSE_PARAMS);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Validation failed';
     return { success: false, error: { issues: [{ code: 'custom', path: [], message }] } };
@@ -40,7 +44,7 @@ export function validateFieldValue(
     const messages = result.error.issues.map((issue) => {
       const issuePath = issue.path.reduce<string>(
         (path, segment) =>
-          typeof segment === 'number' ? `${path}[${segment}]` : `${path}.${segment}`,
+          typeof segment === 'number' ? `${path}[${segment}]` : `${path}.${String(segment)}`,
         fieldPath,
       );
       return `${issuePath}: ${issue.message}`;
@@ -51,37 +55,58 @@ export function validateFieldValue(
   return { success: true };
 }
 
+/** Issues nested in a union branch or record key, at their place in the parent's value. */
+function prefixIssues(path: PropertyKey[], issues: core.$ZodIssue[]): core.$ZodIssue[] {
+  return issues.map((issue) => ({ ...issue, path: [...path, ...issue.path] }));
+}
+
 /**
  * A union reports one issue at its own path; the branch with the fewest
  * (then deepest) failures is the shape the value was written for, so its
- * issues locate the actual fault. Mirrors LibreChat's issue attribution.
+ * issues locate the actual fault. A record key's failure (`invalid_key`)
+ * stands for the key's own issues. Zod 4 gives nested issues paths relative
+ * to the union or key, so each takes its parent's path first. Mirrors
+ * LibreChat's issue attribution.
  */
-function expandUnionIssues(issues: t.SchemaIssue[], depth = 0): t.SchemaIssue[] {
+function expandSchemaIssues(issues: core.$ZodIssue[], depth = 0): core.$ZodIssue[] {
   return issues.flatMap((issue) => {
-    if (issue.code !== 'invalid_union' || !issue.unionErrors || depth >= MAX_UNION_DEPTH) {
-      return [issue];
+    if (depth >= MAX_UNION_DEPTH) return [issue];
+    if (issue.code === 'invalid_key') {
+      return expandSchemaIssues(prefixIssues(issue.path, issue.issues), depth + 1);
     }
-    const deepest = (list: t.SchemaIssue[]) => Math.max(0, ...list.map((i) => i.path.length));
-    const closest = issue.unionErrors
-      .map((error) => error.issues)
-      .reduce<t.SchemaIssue[] | undefined>((best, branch) => {
+    if (issue.code !== 'invalid_union') return [issue];
+    const deepest = (list: core.$ZodIssue[]) => Math.max(0, ...list.map((i) => i.path.length));
+    const closest = issue.errors
+      .map((branch) => prefixIssues(issue.path, branch))
+      .reduce<core.$ZodIssue[] | undefined>((best, branch) => {
         if (!best || branch.length < best.length) return branch;
         return branch.length === best.length && deepest(branch) > deepest(best) ? branch : best;
       }, undefined);
-    return closest && closest.length > 0 ? expandUnionIssues(closest, depth + 1) : [issue];
+    return closest && closest.length > 0 ? expandSchemaIssues(closest, depth + 1) : [issue];
   });
 }
 
-function formatBound(value: number | bigint | undefined): string | number {
-  if (typeof value === 'bigint') return value.toString();
+function formatBound(value: number | undefined): string | number {
   return value ?? '';
 }
 
-function boundCode(base: 'too_small' | 'too_big', issue: t.SchemaIssue): string {
-  if (issue.type === 'string') return `${base}_length`;
-  if (issue.type === 'array' || issue.type === 'set') return `${base}_items`;
-  return issue.inclusive === false ? `${base}_exclusive` : base;
+/** `type`: what a bound applies to (`string`, `array`, `number`, …). */
+function boundCode(
+  base: 'too_small' | 'too_big',
+  type: string | undefined,
+  inclusive: boolean | undefined,
+): string {
+  if (type === 'string') return `${base}_length`;
+  if (type === 'array' || type === 'set') return `${base}_items`;
+  return inclusive === false ? `${base}_exclusive` : base;
 }
+
+/** Zod 4's names for expected types that issue codes word as the admin API spells them. */
+const EXPECTED_TYPE_NAMES: Readonly<Record<string, string>> = {
+  int: 'integer',
+  record: 'object',
+  tuple: 'array',
+};
 
 const TYPE_NAMES: Readonly<Record<string, string>> = {
   string: 'text',
@@ -226,42 +251,136 @@ export function hasIssueMessage(code: string | undefined): boolean {
   return code != null && code in ISSUE_MESSAGES;
 }
 
-/** The issue code and message parameters for a zod issue. */
-function classifySchemaIssue(issue: t.SchemaIssue): {
-  code: string;
-  params: Record<string, string | number>;
-} {
-  switch (issue.code) {
+/**
+ * The issue code and message parameters for an issue in the names the admin
+ * API reports (zod 3's: `invalid_enum_value`, `invalid_literal`,
+ * `invalid_string`), with its parameters. `received: 'undefined'` makes a
+ * wrong type a missing value.
+ */
+function classifyContractIssue(
+  code: string,
+  params: t.ReportedIssueParams,
+): { code: string; params: Record<string, string | number> } {
+  switch (code) {
     case 'invalid_type':
-      if (issue.received === 'undefined') return { code: 'required', params: {} };
+      if (params.received === 'undefined') return { code: 'required', params: {} };
       return {
         code: 'invalid_type',
-        params: { expected: TYPE_NAMES[String(issue.expected)] ?? String(issue.expected) },
+        params: { expected: TYPE_NAMES[String(params.expected)] ?? String(params.expected) },
       };
     case 'invalid_literal':
-      return { code: 'invalid_literal', params: { expected: JSON.stringify(issue.expected) } };
+      return { code: 'invalid_literal', params: { expected: JSON.stringify(params.expected) } };
     case 'invalid_enum_value':
       return {
         code: 'invalid_enum_value',
-        params: { options: (issue.options ?? []).map((o) => JSON.stringify(o)).join(', ') },
+        params: { options: (params.options ?? []).map((o) => JSON.stringify(o)).join(', ') },
       };
     case 'too_small':
       return {
-        code: boundCode('too_small', issue),
-        params: { minimum: formatBound(issue.minimum) },
+        code: boundCode('too_small', params.type, params.inclusive),
+        params: { minimum: formatBound(params.minimum) },
       };
     case 'too_big':
       return {
-        code: boundCode('too_big', issue),
-        params: { maximum: formatBound(issue.maximum) },
+        code: boundCode('too_big', params.type, params.inclusive),
+        params: { maximum: formatBound(params.maximum) },
       };
     case 'invalid_string':
-      if (issue.validation === 'url') return { code: 'invalid_url', params: {} };
-      if (issue.validation === 'email') return { code: 'invalid_email', params: {} };
+      if (params.validation === 'url') return { code: 'invalid_url', params: {} };
+      if (params.validation === 'email') return { code: 'invalid_email', params: {} };
       return { code: 'invalid_string', params: {} };
+    default:
+      return { code, params: {} };
+  }
+}
+
+const PRIMITIVE_TYPES: ReadonlySet<string> = new Set(['string', 'number', 'boolean']);
+
+/** Whether a value zod reports (an issue's `input`, an enum's `values`) is JSON-like text, number, flag or null. */
+function isIssuePrimitive(value: core.$ZodIssueBase['input']): value is t.IssuePrimitive {
+  return value === null || PRIMITIVE_TYPES.has(typeof value);
+}
+
+/** The value an issue of a `reportInput` parse refused, when it is a primitive. */
+function refusedValue(issue: core.$ZodIssue): t.IssuePrimitive | undefined {
+  return 'input' in issue && isIssuePrimitive(issue.input) ? issue.input : undefined;
+}
+
+/** A bound as the admin API reports it: a number (zod's bigint bounds become one). */
+function toBound(value: number | bigint): number {
+  return typeof value === 'bigint' ? Number(value) : value;
+}
+
+/**
+ * Whether an `invalid_value` issue is an enum's refusal rather than a
+ * literal's: zod 4 reports both alike. LibreChat's `getConfigIssueCode`
+ * decides by the allowed values alone (more than one is an enum, so a
+ * multi-value literal is one too); the panel does the same, except that the
+ * schema node at the issue's path keeps a one-member enum an enum, as zod 3
+ * reported it.
+ */
+function isEnumRefusal(
+  issue: core.$ZodIssueInvalidValue,
+  schema: t.ZodSchemaLike | undefined,
+): boolean {
+  if (issue.values.length !== 1) return true;
+  const node = schema ? resolveSubSchema(schema, issue.path.map(String)) : null;
+  return node != null && schemaType(unwrapSchema(node)) === 'enum';
+}
+
+/**
+ * A zod 4 issue in the codes and parameters the admin API reports
+ * (LibreChat's `getConfigIssueCode`), so a schema issue and a reported one
+ * are worded alike; only a one-member enum differs (`isEnumRefusal`).
+ * `schema` (what was parsed) tells that enum from a literal.
+ */
+function toContractIssue(
+  issue: core.$ZodIssue,
+  schema: t.ZodSchemaLike | undefined,
+): { code: string; params: t.ReportedIssueParams } {
+  switch (issue.code) {
+    case 'invalid_type': {
+      const missing = 'input' in issue && issue.input === undefined;
+      const expected = EXPECTED_TYPE_NAMES[issue.expected] ?? issue.expected;
+      return { code: issue.code, params: { expected, ...(missing && { received: 'undefined' }) } };
+    }
+    case 'invalid_value': {
+      const options = issue.values.filter(isIssuePrimitive);
+      if (!isEnumRefusal(issue, schema)) {
+        return { code: 'invalid_literal', params: { expected: options[0] } };
+      }
+      /** An enum refuses a missing value too; zod 3 called that a wrong type ("is required"). */
+      if ('input' in issue && issue.input === undefined) {
+        return { code: 'invalid_type', params: { received: 'undefined' } };
+      }
+      return { code: 'invalid_enum_value', params: { options } };
+    }
+    case 'too_small':
+      return {
+        code: issue.code,
+        params: { minimum: toBound(issue.minimum), inclusive: issue.inclusive, type: issue.origin },
+      };
+    case 'too_big':
+      return {
+        code: issue.code,
+        params: { maximum: toBound(issue.maximum), inclusive: issue.inclusive, type: issue.origin },
+      };
+    case 'invalid_format':
+      return { code: 'invalid_string', params: { validation: issue.format } };
+    case 'invalid_union':
+      return { code: issue.discriminator ? 'invalid_union_discriminator' : issue.code, params: {} };
     default:
       return { code: issue.code, params: {} };
   }
+}
+
+/** The issue code and message parameters for a zod issue of `schema`. */
+function classifySchemaIssue(
+  issue: core.$ZodIssue,
+  schema: t.ZodSchemaLike | undefined,
+): { code: string; params: Record<string, string | number> } {
+  const contract = toContractIssue(issue, schema);
+  return classifyContractIssue(contract.code, contract.params);
 }
 
 /** A bound the admin API reported as a number, or undefined (dates and bigints are not sent). */
@@ -312,18 +431,7 @@ export function classifyReportedIssue(
     default:
       break;
   }
-  return classifySchemaIssue({
-    code,
-    path: [],
-    message: '',
-    expected: params.expected,
-    received: params.received,
-    minimum: bound,
-    maximum: bound,
-    inclusive: params.inclusive,
-    type: params.type,
-    validation: params.validation,
-  });
+  return classifyContractIssue(code, { ...params, minimum: bound, maximum: bound });
 }
 
 /**
@@ -339,22 +447,50 @@ export function isUnknownEnumValue(issue: Pick<t.ConfigIssue, 'code' | 'received
 }
 
 /**
- * Config issues (stable codes, English messages) for schema issues relative
- * to `basePath`. An enum issue carries the value it refused (`received`),
- * except inside a union's branch, which stays a union's failure.
+ * The text value an enum of `schema` doesn't list (`isUnknownEnumValue`), for
+ * an issue of `schema.safeParse(value, { reportInput: true })`, with the
+ * values the enum lists; undefined for any other issue: a one-value
+ * literal's, a union's (an enum inside one of its branches stays the union's
+ * failure), or one whose value isn't text.
  */
-export function toConfigIssues(issues: t.SchemaIssue[], basePath: string): t.ConfigIssue[] {
+export function findUnknownEnumValue(
+  issue: core.$ZodIssue,
+  schema: t.ZodSchemaLike,
+): Omit<t.ImportEnumValue, 'path'> | undefined {
+  if (issue.code !== 'invalid_value' || !isEnumRefusal(issue, schema)) return undefined;
+  const value = refusedValue(issue);
+  if (typeof value !== 'string') return undefined;
+  const options = issue.values.filter(
+    (option): option is string | number => typeof option === 'string' || typeof option === 'number',
+  );
+  return { value, options };
+}
+
+/**
+ * Config issues (stable codes, English messages) for issues of `schema`
+ * relative to `basePath`. An enum issue carries the value it refused
+ * (`received`), except inside a union's branch, which stays a union's
+ * failure. Without `schema`, an issue's allowed values alone tell an enum
+ * from a literal.
+ */
+export function toConfigIssues(
+  issues: core.$ZodIssue[],
+  basePath: string,
+  schema?: t.ZodSchemaLike,
+): t.ConfigIssue[] {
   const direct = new Set(issues);
-  return expandUnionIssues(issues)
+  return expandSchemaIssues(issues)
     .filter((issue) => issue.code !== 'unrecognized_keys')
     .map((issue) => {
-      const { code, params } = classifySchemaIssue(issue);
+      const { code, params } = classifySchemaIssue(issue, schema);
       const path = [basePath, ...issue.path.map(String)].filter(Boolean).join('.');
       const message = describeIssueCode(code, params, issue.message);
-      if (code !== 'invalid_enum_value' || !direct.has(issue)) {
+      const received =
+        code === 'invalid_enum_value' && direct.has(issue) ? refusedValue(issue) : undefined;
+      if (received === undefined) {
         return { path, code, params, message };
       }
-      return { path, code, params, message, received: issue.received };
+      return { path, code, params, message, received };
     });
 }
 
@@ -366,7 +502,7 @@ function parseIssues(
   if (!isParseable(schema)) return [];
   const result = parseSafely(schema, value);
   if (result.success || !result.error) return [];
-  return toConfigIssues(result.error.issues, basePath);
+  return toConfigIssues(result.error.issues, basePath, schema);
 }
 
 /** Schema issues of a value at `path` (a field, entry or section of the config). */
@@ -523,35 +659,7 @@ export function validateResolvableGroup(
 export function validateSection(section: string, value: t.ConfigValue): t.ConfigIssue[] {
   if (value === undefined) return [];
   const shape = (configSchema as t.ZodSchemaLike).shape;
-  return [...parseIssues(shape?.[section], value, section), ...runtimeLimitIssues(section, value)];
-}
-
-/** Values of a section outside `RUNTIME_NUMBER_LIMITS` (limits the schema doesn't state). */
-function runtimeLimitIssues(section: string, value: t.ConfigValue): t.ConfigIssue[] {
-  const prefix = `${section}.`;
-  return Object.entries(RUNTIME_NUMBER_LIMITS).flatMap(([path, limits]): t.ConfigIssue[] => {
-    if (!path.startsWith(prefix)) return [];
-    const number = getValueAtPath(value, path.slice(prefix.length));
-    if (typeof number !== 'number') return [];
-    if (limits.int && !Number.isInteger(number)) {
-      const params = { expected: TYPE_NAMES.integer };
-      return [
-        {
-          path,
-          code: 'invalid_type',
-          params,
-          message: describeIssueCode('invalid_type', params, ''),
-        },
-      ];
-    }
-    if (limits.min !== undefined && number < limits.min) {
-      const params = { minimum: limits.min };
-      return [
-        { path, code: 'too_small', params, message: describeIssueCode('too_small', params, '') },
-      ];
-    }
-    return [];
-  });
+  return parseIssues(shape?.[section], value, section);
 }
 
 /** Where an issue is, for plain-text summaries: `endpoints.custom › GPT › provider` inside an entry. */

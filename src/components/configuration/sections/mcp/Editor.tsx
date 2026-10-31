@@ -54,6 +54,11 @@ function isNestedObject(field: t.SchemaField): boolean {
   return Boolean(field.children?.length) && !field.isArray && field.type !== 'record';
 }
 
+/** A list of objects (`oauthToolCatalog`): edited entry by entry, each entry's settings as rows. */
+function isObjectList(field: t.SchemaField): boolean {
+  return Boolean(field.children?.length) && Boolean(field.isArray);
+}
+
 const GROUPED: ReadonlySet<string> = new Set([
   ...CONNECTION,
   ...DISPLAY,
@@ -146,7 +151,9 @@ export function McpServerEditor({
   const renderField = (key: string, options?: Partial<t.McpFieldRowProps>): ReactNode => {
     const field = fieldsByKey.get(key);
     if (!field || !isShown(key)) return null;
-    if (isNestedObject(field)) return renderObject(field, entry, entryPath, onChange);
+    if (isNestedObject(field) || isObjectList(field)) {
+      return renderObject(field, entry, entryPath, onChange);
+    }
     return (
       <McpField
         key={key}

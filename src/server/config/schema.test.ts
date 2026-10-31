@@ -1,44 +1,9 @@
-import { createRequire } from 'module';
+import { z } from 'zod';
 import { describe, it, expect } from 'vitest';
 import { configSchema } from 'librechat-data-provider';
 import type * as t from '@/types';
 import { extractSchemaTree, extractSchemaDefaults, flattenTree, getZodTypeName } from './schema';
 import { resolveSubSchema } from '@/utils';
-
-interface Zod extends t.ZodSchemaLike {
-  optional: () => Zod;
-  nullable: () => Zod;
-  default: (value: t.ConfigValue) => Zod;
-  min: (value: number) => Zod;
-  max: (value: number) => Zod;
-  int: () => Zod;
-  positive: () => Zod;
-  url: () => Zod;
-  regex: (pattern: RegExp) => Zod;
-  length: (value: number) => Zod;
-  refine: (check: (value: t.ConfigValue) => boolean) => Zod;
-  safeParse: (value: t.ConfigValue) => { success: boolean };
-}
-
-interface ZodModule {
-  object: (shape: Record<string, Zod>) => Zod;
-  string: () => Zod;
-  number: () => Zod;
-  boolean: () => Zod;
-  undefined: () => Zod;
-  literal: (value: string) => Zod;
-  enum: (values: [string, ...string[]]) => Zod;
-  array: (element: Zod) => Zod;
-  record: (key: Zod, value: Zod) => Zod;
-  union: (options: Zod[]) => Zod;
-  discriminatedUnion: (key: string, options: Zod[]) => Zod;
-}
-
-/** The zod 3 build that librechat-data-provider's schemas are made with. */
-const require3 = createRequire(import.meta.url);
-const z = require3(
-  require3.resolve('zod', { paths: [require3.resolve('librechat-data-provider')] }),
-) as ZodModule;
 
 const realTree = extractSchemaTree(configSchema);
 const realFields = new Map(flattenTree(realTree).map((field) => [field.path, field]));
@@ -240,7 +205,7 @@ describe('extractSchemaDefaults', () => {
           limit: z.number().default(10),
           nested: z.object({ depth: z.number().default(3) }).optional(),
         })
-        .default({ limit: 20 }),
+        .prefault({ limit: 20 }),
     });
     expect(extractSchemaDefaults(schema)).toEqual({
       section: { mode: 'temporary', limit: 20, nested: { depth: 3 } },
@@ -262,16 +227,138 @@ describe('extractSchemaDefaults', () => {
     expect(get('interface.retentionMode')).toBe('temporary');
     expect(get('endpoints.agents.maxProviderErrorChars')).toBe(2000);
     expect(get('endpoints.agents.maxCitations')).toBe(30);
-    expect(get('registration.openidDiscovery.startupAttempts')).toBe(1);
+    /** data-provider strips these (`partialWithoutDefaults`) so Zod 4 doesn't inject them on parse. */
+    expect(get('registration.openidDiscovery')).toBeUndefined();
     expect(typeof get('mcpSettings.catalogRecovery.discoveryTimeoutMs')).toBe('number');
   });
 });
 
 describe('resolveSubSchema — discriminated unions', () => {
   it('resolves and validates leaves of a discriminated union', () => {
-    const value = resolveSubSchema(configSchema, ['summarization', 'trigger', 'value']) as Zod;
+    const value = resolveSubSchema(configSchema, [
+      'summarization',
+      'trigger',
+      'value',
+    ]) as t.ParseableSchema;
     expect(value).not.toBeNull();
     expect(value.safeParse(0.5).success).toBe(true);
     expect(value.safeParse('0.5').success).toBe(false);
+  });
+});
+
+/** Zod 4 keeps a schema's kind and wrappers in `_zod.def` (zod 3 had `_def.typeName`). */
+describe('extractSchemaTree — Zod 4 schema internals', () => {
+  const NumericMode = { OFF: 0, ON: 1 } as const;
+  const schema = z.object({
+    group: z
+      .object({
+        name: z.string().optional(),
+        models: z.record(z.string(), z.object({ version: z.string().optional() })).optional(),
+      })
+      .required(),
+    withDefault: z.object({ size: z.number().default(3) }).prefault({}),
+    plain: z.string().default('x'),
+    viaEnv: z
+      .string()
+      .transform((value) => value.trim())
+      .pipe(z.string().url()),
+    trimmed: z.string().transform((value) => value.trim()),
+    coerced: z.preprocess((value) => Number(value), z.number().int()),
+    lazy: z.lazy(() => z.boolean()),
+    caught: z.number().int().min(1).catch(5),
+    frozen: z.object({ tags: z.array(z.string()).readonly() }).readonly(),
+    described: z.string().describe('The described setting').optional(),
+    wrappedDescription: z.string().optional().describe('Described on the wrapper'),
+    mode: z.nativeEnum(NumericMode),
+    either: z.literal(['a', 'b']),
+    counts: z.record(z.string(), z.nativeEnum(NumericMode)),
+  });
+  const tree = extractSchemaTree(schema);
+
+  it("walks an object's `.required()` fields (nonoptional), required even where they wrap optional", () => {
+    expect(field(tree, 'group.name')).toMatchObject({ type: 'string', isOptional: false });
+    expect(field(tree, 'group.models')).toMatchObject({ type: 'record', isOptional: false });
+    expect(field(tree, 'group.models.{}.version').type).toBe('string');
+  });
+
+  it('treats `.prefault()` like `.default()`: optional to write, and its default collected', () => {
+    expect(field(tree, 'withDefault')).toMatchObject({ type: 'object', isOptional: true });
+    expect(field(tree, 'plain').isOptional).toBe(true);
+    expect(extractSchemaDefaults(schema)).toMatchObject({ withDefault: { size: 3 }, plain: 'x' });
+  });
+
+  it('steps through `.catch()` (optional to write) and `.readonly()`', () => {
+    expect(field(tree, 'caught')).toMatchObject({
+      type: 'number',
+      isOptional: true,
+      constraints: { int: true, min: 1 },
+    });
+    expect(field(tree, 'frozen')).toMatchObject({ type: 'object', isOptional: false });
+    expect(field(tree, 'frozen.tags').type).toBe('array<string>');
+  });
+
+  it("reads a pipe's output, and a transform's input", () => {
+    expect(field(tree, 'viaEnv')).toMatchObject({ type: 'string', constraints: { url: true } });
+    expect(field(tree, 'trimmed').type).toBe('string');
+    expect(field(tree, 'coerced')).toMatchObject({ type: 'number', constraints: { int: true } });
+    expect(field(tree, 'lazy').type).toBe('boolean');
+  });
+
+  it('reads descriptions from the registry, on the schema or its wrapper', () => {
+    expect(field(tree, 'described').description).toBe('The described setting');
+    expect(field(tree, 'wrappedDescription').description).toBe('Described on the wrapper');
+  });
+
+  it('names numeric native enums by member, and a literal of several values as their union', () => {
+    expect(field(tree, 'mode').type).toBe('enum(OFF=0 | ON=1)');
+    expect(field(tree, 'either').type).toBe('union(literal("a") | literal("b"))');
+    expect(field(tree, 'counts').recordValueKVTypes).toEqual(['number']);
+  });
+
+  it('reads number and string checks from their definitions', () => {
+    const checks = extractSchemaTree(
+      z.object({
+        whole: z.number().int().gt(0).lte(10),
+        ratio: z.number().gte(0).lt(1),
+        name: z.string().min(2).max(8),
+        code: z.string().length(4),
+        site: z.url(),
+        mail: z.string().email(),
+        slug: z.string().regex(/^[a-z]+$/),
+        prefixed: z.string().startsWith('x'),
+      }),
+    );
+    expect(field(checks, 'whole').constraints).toEqual({
+      int: true,
+      min: 0,
+      minExclusive: true,
+      max: 10,
+      step: 1,
+    });
+    expect(field(checks, 'ratio').constraints).toEqual({
+      min: 0,
+      max: 1,
+      maxExclusive: true,
+      step: 0.01,
+    });
+    expect(field(checks, 'name').constraints).toEqual({ minLength: 2, maxLength: 8 });
+    expect(field(checks, 'code').constraints).toEqual({ minLength: 4, maxLength: 4 });
+    expect(field(checks, 'site').constraints).toEqual({ url: true });
+    expect(field(checks, 'mail').constraints).toEqual({ email: true });
+    expect(field(checks, 'slug').constraints).toEqual({ regex: '^[a-z]+$' });
+    expect(field(checks, 'prefixed').constraints).toBeUndefined();
+  });
+
+  it('walks the real schema with no Zod 4 type left unread', () => {
+    const wrapper =
+      /\b(nonoptional|prefault|default|optional|nullable|catch|readonly|pipe|transform|lazy)\b/;
+    const unread = flattenTree(realTree).filter((f) =>
+      wrapper.test(f.type.replace(/(enum|literal)\([^)]*\)/g, '')),
+    );
+    expect(unread.map((f) => `${f.path}: ${f.type}`)).toEqual([]);
+    expect(realField('endpoints.azureOpenAI.groups.[].models.{}.deploymentName').type).toBe(
+      'string',
+    );
+    expect(realField('endpoints.azureOpenAI.groups.[].group').isOptional).toBe(false);
   });
 });

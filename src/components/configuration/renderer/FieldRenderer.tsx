@@ -1,8 +1,13 @@
 import { Fragment, useContext } from 'react';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
+import {
+  isBaseOnlyPath,
+  isStartupOnlyPath,
+  isYamlManagedPath,
+  getReadOnlyReason,
+} from '@/constants';
 import { isRowVisible, getSecretPreviewValue, isInterfacePermissionPath } from '@/utils';
-import { isBaseOnlyPath, isStartupOnlyPath, isYamlManagedPath } from '@/constants';
 import { ConfiguredOnlyContext } from '@/contexts/ConfiguredOnlyContext';
 import { countConfigured, hasPathOverlap, isPathSet } from '../counts';
 import { RowFilterContext } from '@/contexts/RowFilterContext';
@@ -26,14 +31,26 @@ function asEnabled(value: t.ConfigValue): boolean | undefined {
   return undefined;
 }
 
-/** The notice a field managed only in librechat.yaml shows at its root, or null below the root or for any other field. */
+/**
+ * Whether `path` is the root of a field managed only in librechat.yaml, which
+ * shows the notice: not below another one, and not in a read-only section,
+ * whose banner already says why.
+ */
+function isManagedRoot(path: string, parentPath: string, rules: t.ConfigWriteRules): boolean {
+  return (
+    isYamlManagedPath(path, rules) &&
+    !isYamlManagedPath(parentPath, rules) &&
+    getReadOnlyReason(path, rules) === undefined
+  );
+}
+
+/** The notice a field managed only in librechat.yaml shows at its root (`isManagedRoot`), or null. */
 function managedNoticeKind(
   path: string,
   parentPath: string,
   rules: t.ConfigWriteRules,
 ): t.ManagedNoticeKind | null {
-  if (!isYamlManagedPath(path, rules) || isYamlManagedPath(parentPath, rules)) return null;
-  return noticeKindOf(path, rules);
+  return isManagedRoot(path, parentPath, rules) ? noticeKindOf(path, rules) : null;
 }
 
 /** Why a managed field is read-only: read only at startup, kept from librechat.yaml, or not re-processed. */
@@ -171,7 +188,7 @@ export function FieldRenderer({
     <ConfiguredOnlyContext.Provider value={Boolean(showConfiguredOnly && !previewMode)}>
       {groups.map((group, index) => {
         const managed = isYamlManagedPath(group.path, writeRules);
-        const managedRoot = managed && !isYamlManagedPath(parentPath, writeRules);
+        const managedRoot = isManagedRoot(group.path, parentPath, writeRules);
         const noticeRun = noticeRuns.get(index);
         const groupDisabled = disabled || managed;
         if (group.type === 'nested') {

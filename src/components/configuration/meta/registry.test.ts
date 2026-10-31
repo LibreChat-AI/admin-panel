@@ -1,7 +1,11 @@
+import '@/locales/i18n';
 import { describe, it, expect } from 'vitest';
-import { getFieldMeta, labelForPath, descriptionKeyForPath } from '.';
+import { configSchema } from 'librechat-data-provider';
 import type * as t from '@/types';
 import { buildFieldMetaRegistry, resolveFieldMeta } from './registry';
+import { getFieldMeta, labelForPath, descriptionKeyForPath } from '.';
+import { extractSchemaTree } from '@/server/config';
+import { localizeEn } from '@/test/coverage';
 
 const localize: t.LocalizeFn = (key) =>
   ({ com_config_field_tokenLimit: 'Token limit', com_config_field_custom: 'Custom' })[key] ?? key;
@@ -62,6 +66,46 @@ describe('getFieldMeta / labelForPath', () => {
     expect(getFieldMeta('endpoints.openAI.titlePrompt')).toMatchObject({ multiline: true });
     expect(getFieldMeta('webSearch.jinaApiKey')).toEqual({ secret: true });
     expect(getFieldMeta('fileStrategy')).toMatchObject({ confirmChange: true });
+  });
+
+  it('reads seconds and bytes from the key, but no unit from a rate per minutes', () => {
+    expect(getFieldMeta('emailChange.tokenTTLSeconds')?.unit).toBe('s');
+    expect(getFieldMeta('endpoints.agents.pullRequests.cacheTtlSeconds')?.unit).toBe('s');
+    expect(getFieldMeta('interface.historyCacheMaxBytes')?.unit).toBe('bytes');
+    expect(getFieldMeta('endpoints.agents.fileSharing.maxPrivateBytes')?.unit).toBe('bytes');
+    expect(getFieldMeta('skillSync.github.intervalMinutes')?.unit).toBe('minutes');
+    expect(
+      getFieldMeta('rateLimits.twoFactorManagement.requestsPerFiveMinutes')?.unit,
+    ).toBeUndefined();
+  });
+
+  it("never names a time or size unit in a label beside the control's own", () => {
+    const unitWords: Partial<Record<t.FieldUnit, readonly string[]>> = {
+      ms: ['ms', 'milliseconds'],
+      s: ['seconds'],
+      minutes: ['minutes'],
+      hours: ['hours'],
+      bytes: ['bytes'],
+      MB: ['mb'],
+    };
+    const fields: t.SchemaField[] = [];
+    const collect = (list: t.SchemaField[]) =>
+      list.forEach((field) => {
+        fields.push(field);
+        collect(field.children ?? []);
+      });
+    collect(extractSchemaTree(configSchema));
+    const doubled = fields.flatMap((field) => {
+      const unit = getFieldMeta(field.path)?.unit;
+      const words = new Set(
+        labelForPath(field.path, localizeEn)
+          .toLowerCase()
+          .split(/[\s()]+/),
+      );
+      const names = unit ? (unitWords[unit] ?? []) : [];
+      return names.some((name) => words.has(name)) ? [field.path] : [];
+    });
+    expect(doubled).toEqual([]);
   });
 
   it('flags read-only sections and permission paths', () => {

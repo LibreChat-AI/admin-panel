@@ -22,18 +22,37 @@ export const TERMS_ACCEPTANCE_PATH = 'interface.termsOfService.modalAcceptance';
 export const TERMS_NOT_ACCEPTED_ISSUE = 'TERMS_NOT_ACCEPTED';
 
 /**
- * Base-only sections of newer LibreChat releases than the bundled
- * `librechat-data-provider` knows about; the admin API strips them all the same.
- * Drop entries once the package's `BASE_ONLY_CONFIG_SECTIONS` includes them.
- */
-const INTERIM_BASE_ONLY_SECTIONS = ['mcpAppSandbox'];
-
-/**
  * Sections LibreChat reads from librechat.yaml before sign-in (Turnstile),
  * read-only on every server: one that reports its rules lists them as
  * base-only, an older one reads them from the raw file.
  */
 const PRE_AUTH_YAML_SECTIONS: readonly string[] = ['turnstile'];
+
+/**
+ * Sections and fields LibreChat reads only from librechat.yaml although its
+ * `DEPLOYMENT_ONLY_CONFIG_PATHS` (data-provider 0.8.530) doesn't list them,
+ * so the panel adds them on every server: the startup config's client limits
+ * and real user monitoring (and the RUM proxy) read the raw file
+ * (`appConfig.config`), the conversation list's limits and skill deletion's
+ * cleanup concurrency `getAppConfig({ baseOnly: true })`, and the password
+ * hashing pool and the HTML shell's color-mode handoff are set once at
+ * startup. Drop an entry once LibreChat reads it from the merged config.
+ */
+const RAW_YAML_PATHS: Readonly<Record<string, t.DeploymentOnlyReason>> = {
+  clientLimits: 'operator',
+  telemetry: 'operator',
+  conversationList: 'operator',
+  passwordHashing: 'startup',
+  'fileConfig.skills.deletionCleanupConcurrency': 'operator',
+  'interface.colorModeFromUrl': 'startup',
+};
+
+/** `paths` with the ones LibreChat reads from librechat.yaml without listing them (`RAW_YAML_PATHS`). */
+function withRawYamlPaths(
+  paths: Readonly<Record<string, t.DeploymentOnlyReason>>,
+): Readonly<Record<string, t.DeploymentOnlyReason>> {
+  return { ...RAW_YAML_PATHS, ...paths };
+}
 
 /**
  * Sections and fields only librechat.yaml sets, as the panel knew them before
@@ -82,10 +101,8 @@ export const READ_ONLY_CONFIG_SECTIONS: ReadonlyMap<string, t.ReadOnlyReason> = 
   string,
   t.ReadOnlyReason
 >([
-  ...[...BASE_ONLY_CONFIG_SECTIONS, ...INTERIM_BASE_ONLY_SECTIONS].map(
-    (section): [string, t.ReadOnlyReason] => [section, 'baseOnly'],
-  ),
-  ...Object.keys(BUNDLED_DEPLOYMENT_ONLY_PATHS)
+  ...BASE_ONLY_CONFIG_SECTIONS.map((section): [string, t.ReadOnlyReason] => [section, 'baseOnly']),
+  ...Object.keys(withRawYamlPaths(BUNDLED_DEPLOYMENT_ONLY_PATHS))
     .filter((path) => !path.includes('.'))
     .map((section): [string, t.ReadOnlyReason] => [section, 'yamlOnly']),
   ...PRE_AUTH_YAML_SECTIONS.map((section): [string, t.ReadOnlyReason] => [section, 'yamlOnly']),
@@ -179,13 +196,14 @@ export function resolveWriteRules(
   >,
   features: t.WriteRuleFeatures,
 ): t.ConfigWriteRules {
+  const deploymentOnlyPaths = withRawYamlPaths(rules.deploymentOnlyPaths);
   const readOnlySections = new Map<string, t.ReadOnlyReason>();
   for (const section of rules.baseOnlySections) readOnlySections.set(section, 'baseOnly');
-  for (const path of Object.keys(rules.deploymentOnlyPaths)) {
+  for (const path of Object.keys(deploymentOnlyPaths)) {
     if (!path.includes('.')) readOnlySections.set(path, 'yamlOnly');
   }
   for (const section of PRE_AUTH_YAML_SECTIONS) readOnlySections.set(section, 'yamlOnly');
-  const { fields, startup } = deploymentOnlyFields(rules.deploymentOnlyPaths);
+  const { fields, startup } = deploymentOnlyFields(deploymentOnlyPaths);
   return {
     readOnlySections,
     yamlManagedFields: new Set([

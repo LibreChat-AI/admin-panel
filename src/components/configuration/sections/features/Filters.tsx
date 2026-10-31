@@ -14,6 +14,16 @@ const PII_LISTED_KEYS: ReadonlySet<string> = new Set([
   'customPatterns',
 ]);
 
+/** The label of each action a filter takes; one a newer LibreChat adds shows by its own name. */
+const ACTION_LABEL_KEYS: Readonly<Record<string, string>> = {
+  block: 'com_config_features_filters_block',
+  audit: 'com_config_features_filters_audit',
+  redact: 'com_config_features_filters_redact',
+};
+
+/** Actions that let content through (logged, or with matches replaced), on an info badge; blocking warns. */
+const PASSING_ACTIONS: ReadonlySet<string> = new Set(['audit', 'redact']);
+
 function childField(field: t.SchemaField | undefined, key: string): t.SchemaField | undefined {
   return field?.children?.find((child) => child.key === key);
 }
@@ -59,7 +69,8 @@ function summarizeSurface(
 
 function SurfaceCard({ summary }: t.SurfaceCardProps) {
   const localize = useLocalize();
-  const isAudit = summary.action === 'audit';
+  const passes = summary.action != null && PASSING_ACTIONS.has(summary.action);
+  const actionKey = summary.action ? ACTION_LABEL_KEYS[summary.action] : undefined;
   const builtIn = (() => {
     if (summary.starterPatterns == null) return localize('com_config_features_filters_all_builtin');
     if (summary.starterPatterns.length === 0) {
@@ -74,14 +85,12 @@ function SurfaceCard({ summary }: t.SurfaceCardProps) {
         {summary.action && (
           <span
             className={
-              isAudit
+              passes
                 ? 'rounded-full bg-(--settings-info-bg) px-2 py-0.5 text-xs font-medium text-(--settings-info-fg)'
                 : 'rounded-full bg-(--settings-warn-bg) px-2 py-0.5 text-xs font-medium text-(--settings-warn-fg)'
             }
           >
-            {localize(
-              isAudit ? 'com_config_features_filters_audit' : 'com_config_features_filters_block',
-            )}
+            {actionKey ? localize(actionKey) : summary.action}
           </span>
         )}
       </div>

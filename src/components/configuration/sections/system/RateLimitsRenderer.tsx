@@ -192,12 +192,12 @@ export function RateLimitsRenderer(props: t.FieldRendererProps) {
       {!rowFilter && isConfigRecord(yamlValue) && (
         <>
           <UnknownSettings fields={fields} value={record} path={SECTION} />
-          {limiters.map((limiter) => (
+          {fields.map((field) => (
             <UnknownSettings
-              key={limiter.key}
-              fields={childrenOf(limiter.key)}
-              value={record[limiter.key]}
-              path={`${SECTION}.${limiter.key}`}
+              key={field.key}
+              fields={field.children ?? []}
+              value={record[field.key]}
+              path={`${SECTION}.${field.key}`}
             />
           ))}
         </>

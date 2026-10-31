@@ -55,16 +55,6 @@ export const AZURE_GROUP_CREDENTIALS_KEY = 'com_config_providers_creds_azureOpen
 export const DEFAULT_RECURSION_LIMIT = 50;
 
 /**
- * Number limits LibreChat's schema leaves out but its runtime needs: agents
- * take `recursionLimit` as the step budget of every run, so 0 (or a
- * negative or fractional value) makes each agent run fail at once.
- */
-export const RUNTIME_NUMBER_LIMITS: Readonly<Record<string, t.FieldConstraints>> = {
-  'endpoints.agents.recursionLimit': { min: 1, int: true, step: 1 },
-  'endpoints.agents.maxRecursionLimit': { min: 1, int: true, step: 1 },
-};
-
-/**
  * Sections of the Azure group editor, each with the group settings it places
  * in order. A setting none places (a newer schema's) is listed under
  * "Other settings", so every schema field stays editable.

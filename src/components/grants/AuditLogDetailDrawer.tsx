@@ -4,14 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type * as t from '@/types';
 import {
-  ACTION_BADGE_STATE,
-  ACTION_LABEL_KEY,
-  ACTION_SUMMARY_KEY,
   auditGrantee,
   auditSubject,
-  auditTargetConfig,
   capabilityLabel,
   formatTimestamp,
+  auditActionLabel,
+  auditTargetBadge,
+  auditActionBadgeState,
+  auditActionSummaryKey,
 } from './auditLogUtils';
 import { CloseButton, DecorativeIcon, LoadingState } from '@/components/shared';
 import { useLocalize, useReturnFocus } from '@/hooks';
@@ -330,7 +330,7 @@ export function AuditLogDetailDrawer({
 
   if (!latestEntry) return null;
 
-  const targetConfig = auditTargetConfig(latestEntry.target.type);
+  const targetBadge = auditTargetBadge(latestEntry.target.type, localize);
   const subject = auditSubject(latestEntry, localize);
   const grantee = auditGrantee(latestEntry);
   const targetLabel = latestEntry.target.name ?? latestEntry.target.id ?? '';
@@ -369,8 +369,8 @@ export function AuditLogDetailDrawer({
             <div className="flex items-center gap-2">
               <Badge
                 size="sm"
-                state={ACTION_BADGE_STATE[latestEntry.action]}
-                text={localize(ACTION_LABEL_KEY[latestEntry.action])}
+                state={auditActionBadgeState(latestEntry.action)}
+                text={auditActionLabel(latestEntry.action, localize)}
               />
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
@@ -382,7 +382,8 @@ export function AuditLogDetailDrawer({
           <div className="flex-1 overflow-y-auto">
             <div className="flex flex-col gap-5 px-4 py-4">
               <p className="text-sm text-(--cui-color-text-default)">
-                {localize(ACTION_SUMMARY_KEY[latestEntry.action], {
+                {localize(auditActionSummaryKey(latestEntry.action), {
+                  action: latestEntry.action,
                   actor: latestEntry.actor.name,
                   capability: subject.label,
                   target: targetLabel,
@@ -427,8 +428,8 @@ export function AuditLogDetailDrawer({
                         state="neutral"
                         text={
                           <span className="inline-flex items-center gap-1">
-                            <DecorativeIcon name={targetConfig.icon} size="xs" />
-                            {localize(targetConfig.labelKey)}
+                            <DecorativeIcon name={targetBadge.icon} size="xs" />
+                            {targetBadge.label}
                           </span>
                         }
                       />
@@ -461,17 +462,21 @@ export function AuditLogDetailDrawer({
                   </DetailRow>
                 )}
 
-                <DetailRow label={localize('com_audit_detail_capability')}>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm text-(--cui-color-text-default)">{subject.label}</span>
-                    <CopyableMono
-                      value={subject.value}
-                      field={localize('com_audit_field_capability')}
-                      onCopied={onCopied}
-                      onCopyFailed={onCopyFailed}
-                    />
-                  </div>
-                </DetailRow>
+                {subject.value && (
+                  <DetailRow label={localize('com_audit_detail_capability')}>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm text-(--cui-color-text-default)">
+                        {subject.label}
+                      </span>
+                      <CopyableMono
+                        value={subject.value}
+                        field={localize('com_audit_field_capability')}
+                        onCopied={onCopied}
+                        onCopyFailed={onCopyFailed}
+                      />
+                    </div>
+                  </DetailRow>
+                )}
 
                 <DetailRow label={localize('com_audit_detail_entry_id')}>
                   <CopyableMono

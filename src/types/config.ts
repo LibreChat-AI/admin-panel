@@ -110,37 +110,58 @@ export interface FieldShape {
   options?: FieldShape[];
 }
 
-/** One entry of a Zod v3 `_def.checks` list (number and string checks). */
-export interface ZodCheck {
-  kind: string;
-  value?: number | string | bigint;
+/**
+ * The definition of one Zod 4 check (`_zod.def` of an entry in a schema's
+ * `checks`): number bounds (`greater_than`, `less_than`), `number_format`
+ * (`safeint` for `.int()`), string lengths (`min_length`, `max_length`,
+ * `length_equals`) and `string_format` (`url`, `email`, `regex`, …).
+ */
+export interface ZodCheckDef {
+  check: string;
+  value?: number | bigint | Date;
   inclusive?: boolean;
-  regex?: RegExp;
+  format?: string;
+  pattern?: RegExp;
+  minimum?: number;
+  maximum?: number;
+  length?: number;
 }
 
+export interface ZodCheckLike {
+  _zod: { def: ZodCheckDef };
+}
+
+/** The parts of a Zod 4 schema definition (`_zod.def`) the schema walk reads. */
 export interface ZodDef {
-  typeName?: string;
-  description?: string;
-  options?: ZodSchemaLike[];
+  /** `object`, `string`, `optional`, `pipe`, `union`, … */
+  type?: string;
+  options?: readonly ZodSchemaLike[];
   discriminator?: string;
-  checks?: ZodCheck[];
-  valueType?: ZodSchemaLike;
-  /** A Zod default's factory; its result is JSON-like config data. */
-  defaultValue?: () => unknown;
+  checks?: ZodCheckLike[];
+  /** A format schema (`z.url()`, `z.int()`) is its own check: its `check` and `format`. */
+  check?: string;
+  format?: string;
+  /** A `default`/`prefault` value (each read gives a fresh copy); JSON-like config data. */
+  defaultValue?: ConfigValue;
   innerType?: ZodSchemaLike;
-  schema?: ZodSchemaLike;
-  type?: ZodSchemaLike;
+  element?: ZodSchemaLike;
+  valueType?: ZodSchemaLike;
   left?: ZodSchemaLike;
   right?: ZodSchemaLike;
   getter?: () => ZodSchemaLike;
+  in?: ZodSchemaLike;
   out?: ZodSchemaLike;
-  values?: string[] | Record<string, string | number>;
-  value?: string | number | boolean;
+  /** An enum's members by name (a numeric native enum also maps each number back to its name). */
+  entries?: Readonly<Record<string, string | number>>;
+  /** A literal's values. */
+  values?: ReadonlyArray<string | number | bigint | boolean | null | undefined>;
 }
 
 export interface ZodSchemaLike {
-  _def?: ZodDef;
+  _zod?: { def: ZodDef };
   shape?: Record<string, ZodSchemaLike>;
+  /** What `.describe()` gave the schema (Zod 4 keeps it in its registry, not the definition). */
+  description?: string;
 }
 
 export interface FieldValidationError {
@@ -235,7 +256,7 @@ export type ControlKind =
   | 'mime-list';
 
 /** Display unit for numeric fields (WS2). */
-export type FieldUnit = 'MB' | 'ms' | 's' | 'minutes' | 'px' | 'hours' | 'credits';
+export type FieldUnit = 'MB' | 'bytes' | 'ms' | 's' | 'minutes' | 'px' | 'hours' | 'credits';
 
 /** Control width token (WS6 applies it through `FieldMeta.width`). */
 export type ControlWidth = 'S' | 'M' | 'L';

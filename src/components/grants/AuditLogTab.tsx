@@ -3,7 +3,6 @@ import { Button, Select, TextField } from '@clickhouse/click-ui';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { PrincipalType, ResourceType } from 'librechat-data-provider';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AuditAction } from '@librechat/data-schemas';
 import type { AuditFilters } from '@/server';
 import type * as t from '@/types';
 import {
@@ -28,8 +27,8 @@ import {
   exportAuditLogServerFn,
 } from '@/server';
 import { useAnnouncement, useDebouncedFilter, useLocalize } from '@/hooks';
+import { LABELED_AUDIT_ACTIONS, isAuditEntryId } from '@/constants';
 import { AuditLogDetailDrawer } from './AuditLogDetailDrawer';
-import { AUDIT_ACTIONS, isAuditEntryId } from '@/constants';
 import { AuditLogTableRow } from './AuditLogTableRow';
 import { DateFilter } from './DateFilter';
 
@@ -60,7 +59,7 @@ export function AuditLogTab() {
   const navigate = useNavigate({ from: '/grants' });
   const { entryId } = useSearch({ from: '/_app/grants' });
 
-  const [actionFilter, setActionFilter] = useState<AuditAction[]>([]);
+  const [actionFilter, setActionFilter] = useState<t.LabeledAuditAction[]>([]);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   /** Bumped each clear so DatePicker remounts and drops its internal selection state. */
@@ -383,7 +382,7 @@ export function AuditLogTab() {
             role="group"
             className="flex flex-wrap items-center gap-1.5"
           >
-            {AUDIT_ACTIONS.map((act) => {
+            {LABELED_AUDIT_ACTIONS.map((act) => {
               const selected = actionFilter.includes(act);
               return (
                 <Button

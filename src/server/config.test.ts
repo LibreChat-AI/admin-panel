@@ -1,5 +1,6 @@
-import { createRequire } from 'module';
+import { z } from 'zod';
 import { describe, it, expect } from 'vitest';
+import { configSchema, endpointSchema } from 'librechat-data-provider';
 import type * as t from '@/types';
 import {
   extractSchemaTree,
@@ -19,52 +20,7 @@ import {
   getArrayItemType,
   splitUnionTypes,
 } from '@/components/configuration/controls';
-import { resolveSubSchema, planConfigChanges, validateFieldValue } from '@/utils';
-
-interface ZodV3Schema extends t.ZodSchemaLike {
-  object: (shape: Record<string, ZodV3Schema>) => ZodV3Schema;
-  string: () => ZodV3Schema;
-  number: () => ZodV3Schema;
-  boolean: () => ZodV3Schema;
-  null: () => ZodV3Schema;
-  enum: (values: string[]) => ZodV3Schema;
-  array: (element: ZodV3Schema) => ZodV3Schema;
-  record: (key: ZodV3Schema, value: ZodV3Schema) => ZodV3Schema;
-  union: (options: ZodV3Schema[]) => ZodV3Schema;
-  intersection: (left: ZodV3Schema, right: ZodV3Schema) => ZodV3Schema;
-  lazy: (getter: () => ZodV3Schema) => ZodV3Schema;
-  pipe: (target: ZodV3Schema) => ZodV3Schema;
-  transform: (fn: (val: unknown) => unknown) => ZodV3Schema;
-  url: () => ZodV3Schema;
-  refine: (fn: (val: unknown) => boolean, opts?: unknown) => ZodV3Schema;
-  optional: () => ZodV3Schema;
-  nullable: () => ZodV3Schema;
-  default: (val: unknown) => ZodV3Schema;
-  and: (other: ZodV3Schema) => ZodV3Schema;
-}
-
-interface ZodV3Module {
-  object: (shape: Record<string, ZodV3Schema>) => ZodV3Schema;
-  string: () => ZodV3Schema;
-  number: () => ZodV3Schema;
-  boolean: () => ZodV3Schema;
-  null: () => ZodV3Schema;
-  enum: (values: string[]) => ZodV3Schema;
-  array: (element: ZodV3Schema) => ZodV3Schema;
-  record: (key: ZodV3Schema, value: ZodV3Schema) => ZodV3Schema;
-  union: (options: ZodV3Schema[]) => ZodV3Schema;
-  intersection: (left: ZodV3Schema, right: ZodV3Schema) => ZodV3Schema;
-  lazy: (getter: () => ZodV3Schema) => ZodV3Schema;
-}
-
-/**
- * extractSchemaTree was written against the Zod v3 internal API (_def.typeName).
- * librechat-data-provider bundles zod@3.x, so we resolve that same version here
- * to build test schemas that are structurally compatible.
- */
-const require3 = createRequire(import.meta.url);
-const ldpPath = require3.resolve('librechat-data-provider');
-const z3 = require3(require3.resolve('zod', { paths: [ldpPath] })) as ZodV3Module;
+import { schemaType, resolveSubSchema, planConfigChanges, validateFieldValue } from '@/utils';
 
 function findField(fields: t.SchemaField[], key: string): t.SchemaField | undefined {
   for (const f of fields) {
@@ -79,10 +35,10 @@ function findField(fields: t.SchemaField[], key: string): t.SchemaField | undefi
 
 describe('applyLangfuseSchemaVisibility', () => {
   const langfuseTree = () =>
-    extractSchemaTree(z3.object({ langfuse: z3.object({ schemaOnlyField: z3.string() }) }));
+    extractSchemaTree(z.object({ langfuse: z.object({ schemaOnlyField: z.string() }) }));
 
   it('removes a Langfuse section supplied by the schema when fanout is disabled', () => {
-    const tree = extractSchemaTree(z3.object({ langfuse: z3.object({ enabled: z3.boolean() }) }));
+    const tree = extractSchemaTree(z.object({ langfuse: z.object({ enabled: z.boolean() }) }));
 
     applyLangfuseSchemaVisibility(tree, { langfuseFanoutEnabled: false });
 
@@ -140,10 +96,10 @@ describe('applyLangfuseSchemaVisibility', () => {
 
 describe('extractSchemaTree', () => {
   it('extracts basic scalar types', () => {
-    const schema = z3.object({
-      title: z3.string(),
-      port: z3.number(),
-      enabled: z3.boolean(),
+    const schema = z.object({
+      title: z.string(),
+      port: z.number(),
+      enabled: z.boolean(),
     });
 
     const tree = extractSchemaTree(schema);
@@ -155,8 +111,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('extracts enum types with values', () => {
-    const schema = z3.object({
-      theme: z3.enum(['dark', 'light', 'system']),
+    const schema = z.object({
+      theme: z.enum(['dark', 'light', 'system']),
     });
 
     const tree = extractSchemaTree(schema);
@@ -169,8 +125,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('unwraps optional and sets isOptional', () => {
-    const schema = z3.object({
-      nickname: z3.string().optional(),
+    const schema = z.object({
+      nickname: z.string().optional(),
     });
 
     const tree = extractSchemaTree(schema);
@@ -181,8 +137,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('unwraps nullable and sets isNullable', () => {
-    const schema = z3.object({
-      bio: z3.string().nullable(),
+    const schema = z.object({
+      bio: z.string().nullable(),
     });
 
     const tree = extractSchemaTree(schema);
@@ -193,8 +149,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('unwraps default and sets isOptional', () => {
-    const schema = z3.object({
-      retries: z3.number().default(3),
+    const schema = z.object({
+      retries: z.number().default(3),
     });
 
     const tree = extractSchemaTree(schema);
@@ -205,11 +161,11 @@ describe('extractSchemaTree', () => {
   });
 
   it('extracts nested objects with children', () => {
-    const schema = z3.object({
-      interface: z3.object({
-        title: z3.string(),
-        privacyPolicy: z3.object({
-          externalUrl: z3.string(),
+    const schema = z.object({
+      interface: z.object({
+        title: z.string(),
+        privacyPolicy: z.object({
+          externalUrl: z.string(),
         }),
       }),
     });
@@ -232,8 +188,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('extracts arrays with object element children', () => {
-    const schema = z3.object({
-      endpoints: z3.array(z3.object({ name: z3.string(), url: z3.string() })),
+    const schema = z.object({
+      endpoints: z.array(z.object({ name: z.string(), url: z.string() })),
     });
 
     const tree = extractSchemaTree(schema);
@@ -247,8 +203,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('extracts arrays of primitives without children', () => {
-    const schema = z3.object({
-      tags: z3.array(z3.string()),
+    const schema = z.object({
+      tags: z.array(z.string()),
     });
 
     const tree = extractSchemaTree(schema);
@@ -262,25 +218,25 @@ describe('extractSchemaTree', () => {
 
 describe('getZodTypeName', () => {
   it('returns string for ZodString', () => {
-    expect(getZodTypeName(z3.string())).toBe('string');
+    expect(getZodTypeName(z.string())).toBe('string');
   });
 
   it('returns number for ZodNumber', () => {
-    expect(getZodTypeName(z3.number())).toBe('number');
+    expect(getZodTypeName(z.number())).toBe('number');
   });
 
   it('returns boolean for ZodBoolean', () => {
-    expect(getZodTypeName(z3.boolean())).toBe('boolean');
+    expect(getZodTypeName(z.boolean())).toBe('boolean');
   });
 
   it('returns enum(...) for ZodEnum', () => {
-    const result = getZodTypeName(z3.enum(['a', 'b']));
+    const result = getZodTypeName(z.enum(['a', 'b']));
     expect(result).toMatch(/^enum\(a/);
     expect(result).toContain('b');
   });
 
   it('unwraps optional wrappers', () => {
-    expect(getZodTypeName(z3.string().optional())).toBe('string');
+    expect(getZodTypeName(z.string().optional())).toBe('string');
   });
 
   it('returns unknown for null/undefined input', () => {
@@ -334,8 +290,8 @@ describe('flattenTree', () => {
 
 describe('schema evolution', () => {
   it('detects a newly added field', () => {
-    const v1 = z3.object({ name: z3.string() });
-    const v2 = z3.object({ name: z3.string(), email: z3.string() });
+    const v1 = z.object({ name: z.string() });
+    const v2 = z.object({ name: z.string(), email: z.string() });
 
     const treeV1 = extractSchemaTree(v1);
     const treeV2 = extractSchemaTree(v2);
@@ -346,8 +302,8 @@ describe('schema evolution', () => {
   });
 
   it('detects a field type change (string to enum)', () => {
-    const v1 = z3.object({ theme: z3.string() });
-    const v2 = z3.object({ theme: z3.enum(['dark', 'light']) });
+    const v1 = z.object({ theme: z.string() });
+    const v2 = z.object({ theme: z.enum(['dark', 'light']) });
 
     const fieldV1 = findField(extractSchemaTree(v1), 'theme')!;
     const fieldV2 = findField(extractSchemaTree(v2), 'theme')!;
@@ -357,8 +313,8 @@ describe('schema evolution', () => {
   });
 
   it('detects a removed field', () => {
-    const v1 = z3.object({ name: z3.string(), deprecated: z3.string() });
-    const v2 = z3.object({ name: z3.string() });
+    const v1 = z.object({ name: z.string(), deprecated: z.string() });
+    const v2 = z.object({ name: z.string() });
 
     const treeV1 = extractSchemaTree(v1);
     const treeV2 = extractSchemaTree(v2);
@@ -368,9 +324,9 @@ describe('schema evolution', () => {
   });
 
   it('detects a new nested section', () => {
-    const v2 = z3.object({
-      existing: z3.object({ a: z3.string() }),
-      newSection: z3.object({ b: z3.number(), c: z3.boolean() }),
+    const v2 = z.object({
+      existing: z.object({ a: z.string() }),
+      newSection: z.object({ b: z.number(), c: z.boolean() }),
     });
 
     const treeV2 = extractSchemaTree(v2);
@@ -384,9 +340,9 @@ describe('schema evolution', () => {
 
 describe('ZodIntersection decomposition', () => {
   it('merges left and right object shapes into flat children', () => {
-    const left = z3.object({ group: z3.string(), apiKey: z3.string() });
-    const right = z3.object({ streamRate: z3.number(), titleModel: z3.string() });
-    const schema = z3.object({ azureOpenAI: z3.intersection(left, right) });
+    const left = z.object({ group: z.string(), apiKey: z.string() });
+    const right = z.object({ streamRate: z.number(), titleModel: z.string() });
+    const schema = z.object({ azureOpenAI: z.intersection(left, right) });
     const tree = extractSchemaTree(schema);
     const azure = findField(tree, 'azureOpenAI');
     expect(azure).toBeDefined();
@@ -397,9 +353,9 @@ describe('ZodIntersection decomposition', () => {
   });
 
   it('resolves intersections inside array element schemas', () => {
-    const groupBase = z3.object({ group: z3.string() });
-    const groupConfig = z3.object({ apiKey: z3.string(), serverless: z3.boolean() });
-    const schema = z3.object({ groups: z3.array(z3.intersection(groupBase, groupConfig)) });
+    const groupBase = z.object({ group: z.string() });
+    const groupConfig = z.object({ apiKey: z.string(), serverless: z.boolean() });
+    const schema = z.object({ groups: z.array(z.intersection(groupBase, groupConfig)) });
     const tree = extractSchemaTree(schema);
     const groups = findField(tree, 'groups');
     expect(groups).toBeDefined();
@@ -412,9 +368,9 @@ describe('ZodIntersection decomposition', () => {
 
 describe('ZodRecord with union value type', () => {
   it('extracts children and sets recordValueAllowsPrimitive for boolean|object union', () => {
-    const modelConfig = z3.object({ deploymentName: z3.string(), version: z3.string().optional() });
-    const schema = z3.object({
-      models: z3.record(z3.string(), z3.union([z3.boolean(), modelConfig])),
+    const modelConfig = z.object({ deploymentName: z.string(), version: z.string().optional() });
+    const schema = z.object({
+      models: z.record(z.string(), z.union([z.boolean(), modelConfig])),
     });
     const tree = extractSchemaTree(schema);
     const models = findField(tree, 'models');
@@ -428,8 +384,8 @@ describe('ZodRecord with union value type', () => {
   });
 
   it('sets recordValueType primitive for simple string records', () => {
-    const schema = z3.object({
-      headers: z3.record(z3.string(), z3.string()),
+    const schema = z.object({
+      headers: z.record(z.string(), z.string()),
     });
     const tree = extractSchemaTree(schema);
     const headers = findField(tree, 'headers');
@@ -442,19 +398,19 @@ describe('ZodRecord with union value type', () => {
 
 describe('ZodLazy handling', () => {
   it('resolves z.lazy() wrapping a simple string to string', () => {
-    const lazyString = z3.lazy(() => z3.string());
+    const lazyString = z.lazy(() => z.string());
     expect(getZodTypeName(lazyString)).toBe('string');
   });
 
   it('resolves a recursive DocumentType-style lazy schema without infinite recursion', () => {
-    const DocumentType: ZodV3Schema = z3.lazy(() =>
-      z3.union([
-        z3.null(),
-        z3.boolean(),
-        z3.number(),
-        z3.string(),
-        z3.array(DocumentType),
-        z3.record(z3.string(), DocumentType),
+    const DocumentType: z.ZodType = z.lazy(() =>
+      z.union([
+        z.null(),
+        z.boolean(),
+        z.number(),
+        z.string(),
+        z.array(DocumentType),
+        z.record(z.string(), DocumentType),
       ]),
     );
     const result = getZodTypeName(DocumentType);
@@ -466,43 +422,42 @@ describe('ZodLazy handling', () => {
   });
 
   it('unwraps z.lazy() in extractSchemaTree fields', () => {
-    const DocumentType: ZodV3Schema = z3.lazy(() =>
-      z3.union([
-        z3.null(),
-        z3.boolean(),
-        z3.number(),
-        z3.string(),
-        z3.array(DocumentType),
-        z3.record(z3.string(), DocumentType),
+    const DocumentType: z.ZodType = z.lazy(() =>
+      z.union([
+        z.null(),
+        z.boolean(),
+        z.number(),
+        z.string(),
+        z.array(DocumentType),
+        z.record(z.string(), DocumentType),
       ]),
     );
-    const schema = z3.object({
+    const schema = z.object({
       additionalModelRequestFields: DocumentType.optional(),
     });
     const tree = extractSchemaTree(schema);
     const field = findField(tree, 'additionalModelRequestFields');
     expect(field).toBeDefined();
     expect(field!.type).toMatch(/^union\(/);
-    expect(field!.type).not.toBe('ZodLazy');
     expect(field!.isOptional).toBe(true);
   });
 });
 
 describe('ZodPipeline handling', () => {
   it('unwraps z.string().transform().pipe(z.string().url()) to string', () => {
-    const pipelined = z3
+    const pipelined = z
       .string()
       .transform((v: unknown) => v)
-      .pipe(z3.string().url());
+      .pipe(z.string().url());
     expect(getZodTypeName(pipelined)).toBe('string');
   });
 
   it('unwraps pipeline inside extractSchemaTree fields', () => {
-    const schema = z3.object({
-      url: z3
+    const schema = z.object({
+      url: z
         .string()
         .transform((v: unknown) => v)
-        .pipe(z3.string().url())
+        .pipe(z.string().url())
         .optional(),
     });
     const tree = extractSchemaTree(schema);
@@ -513,10 +468,10 @@ describe('ZodPipeline handling', () => {
   });
 
   it('unwraps effects-pipeline-effects chain to final type', () => {
-    const chain = z3
+    const chain = z
       .string()
       .transform((v: unknown) => v)
-      .pipe(z3.string().url())
+      .pipe(z.string().url())
       .refine((v: unknown) => !!v);
     expect(getZodTypeName(chain)).toBe('string');
   });
@@ -526,8 +481,7 @@ describe('ZodPipeline handling', () => {
  * Real configSchema integration tests
  * -----------------------------------------------------------------------*/
 
-const ldpModule = require3('librechat-data-provider') as { configSchema: ZodV3Schema };
-const realConfigSchema = ldpModule.configSchema;
+const realConfigSchema = configSchema;
 const realSchemaTree = extractSchemaTree(realConfigSchema);
 
 describe('real configSchema integration', () => {
@@ -603,40 +557,40 @@ describe('real configSchema integration', () => {
 
 describe('resolveSubSchema', () => {
   it('finds top-level fields', () => {
-    const schema = z3.object({ name: z3.string(), port: z3.number() });
+    const schema = z.object({ name: z.string(), port: z.number() });
     const sub = resolveSubSchema(schema, ['name']);
     expect(sub).not.toBeNull();
-    expect(sub!._def?.typeName).toBe('ZodString');
+    expect(schemaType(sub)).toBe('string');
   });
 
   it('navigates nested objects', () => {
-    const schema = z3.object({
-      interface: z3.object({ title: z3.string() }),
+    const schema = z.object({
+      interface: z.object({ title: z.string() }),
     });
     const sub = resolveSubSchema(schema, ['interface', 'title']);
     expect(sub).not.toBeNull();
-    expect(sub!._def?.typeName).toBe('ZodString');
+    expect(schemaType(sub)).toBe('string');
   });
 
   it('navigates ZodRecord dynamic keys', () => {
-    const schema = z3.object({
-      headers: z3.record(z3.string(), z3.string()),
+    const schema = z.object({
+      headers: z.record(z.string(), z.string()),
     });
     const sub = resolveSubSchema(schema, ['headers', 'anyKey']);
     expect(sub).not.toBeNull();
-    expect(sub!._def?.typeName).toBe('ZodString');
+    expect(schemaType(sub)).toBe('string');
   });
 
   it('navigates through optional wrappers', () => {
-    const schema = z3.object({
-      settings: z3.object({ debug: z3.boolean() }).optional(),
+    const schema = z.object({
+      settings: z.object({ debug: z.boolean() }).optional(),
     });
     const sub = resolveSubSchema(schema, ['settings', 'debug']);
     expect(sub).not.toBeNull();
   });
 
   it('returns null for non-existent paths', () => {
-    const schema = z3.object({ name: z3.string() });
+    const schema = z.object({ name: z.string() });
     expect(resolveSubSchema(schema, ['nonexistent'])).toBeNull();
     expect(resolveSubSchema(schema, ['name', 'child'])).toBeNull();
   });
@@ -753,17 +707,17 @@ describe('validateFieldValue', () => {
 
 /* ---------------------------------------------------------------------------
  * Regression — resolveSubSchema must keep walking through synthetic unions.
- * The anyOfSchema wrapper used to drop _def.options, so the second segment
+ * The anyOfSchema wrapper used to drop its union options, so the second segment
  * after a multi-candidate union could not be resolved and validateFieldValue
  * silently passed everything under unioned objects.
  * -----------------------------------------------------------------------*/
 
 describe('resolveSubSchema — traversal through synthesized union', () => {
   it('walks into a nested field after a union with multiple candidates', () => {
-    const schema = z3.object({
-      payload: z3.union([
-        z3.object({ headers: z3.record(z3.string(), z3.string()) }),
-        z3.object({ headers: z3.record(z3.string(), z3.string()) }),
+    const schema = z.object({
+      payload: z.union([
+        z.object({ headers: z.record(z.string(), z.string()) }),
+        z.object({ headers: z.record(z.string(), z.string()) }),
       ]),
     });
     const sub = resolveSubSchema(schema, ['payload', 'headers', 'Authorization']);
@@ -816,7 +770,20 @@ const SAMPLE_OVERRIDES: Record<string, unknown> = {
   'skillSync.github.sources': [
     { id: 'sample', owner: 'foo', repo: 'bar', paths: ['skills/'], credentialKey: 'sample-key' },
   ],
+  'fileConfig.vectorOwnershipTrackingStart': '2026-01-01T00:00:00Z',
+  'endpoints.agents.streamKeepaliveIntervalMs': 1000,
+  'endpoints.agents.pullRequests.token': '${GITHUB_PULL_REQUEST_TOKEN}',
+  'endpoints.agents.pullRequests.oauth.clientId': '${GITHUB_CLIENT_ID}',
+  'endpoints.agents.pullRequests.oauth.clientSecret': '${GITHUB_CLIENT_SECRET}',
+  'endpoints.agents.pullRequests.allowedRepositories': ['owner/name'],
 };
+
+/** A number the field's bounds allow: 1, or its minimum when that is higher. */
+function sampleNumber(constraints: t.FieldConstraints | undefined): number {
+  const min = constraints?.min;
+  if (min === undefined || min < 1) return 1;
+  return constraints?.minExclusive ? min + 1 : min;
+}
 
 /** Generates a representative value that a given UI control would produce. */
 function sampleValueForControl(field: t.SchemaField, path?: string): unknown {
@@ -826,12 +793,12 @@ function sampleValueForControl(field: t.SchemaField, path?: string): unknown {
     case 'toggle':
       return true;
     case 'number':
-      return 1;
+      return sampleNumber(field.constraints);
     case 'text':
     case 'textarea':
     case 'secret':
     case 'ref-select':
-      return 'sample';
+      return field.constraints?.url ? 'https://example.com' : 'sample';
     case 'select': {
       const opts = getEnumOptions(field.type);
       return opts.length > 0 ? coerceEnumValue(opts[0].value) : 'default';
@@ -1024,6 +991,12 @@ describe('YAML-editor fallback audit', () => {
   const expectedCodeFields: Record<string, string> = {
     'modelSpecs.list.preset.additionalModelRequestFields':
       'admin-panel — arbitrary JSON (record/array/scalars); YAML is the faithful editor',
+    'interface.theme':
+      'admin-panel — new in data-provider 0.8.530: a bundled theme name or a theme definition object',
+    'mcpServers.oauthToolCatalog.inputSchema.properties.type':
+      'admin-panel — new in data-provider 0.8.530: a JSON Schema type name or a list of them',
+    'mcpServers.oauthToolCatalog.inputSchema.properties.items.type':
+      'admin-panel — new in data-provider 0.8.530: a JSON Schema type name or a list of them',
   };
 
   it('every code-fallback field is accounted for in the audit', () => {
@@ -1060,8 +1033,7 @@ describe('YAML-editor fallback audit', () => {
  * Custom endpoint validation and schema extraction
  * -----------------------------------------------------------------------*/
 
-const ldpEndpoint = (require3('librechat-data-provider') as { endpointSchema: ZodV3Schema })
-  .endpointSchema;
+const ldpEndpoint = endpointSchema;
 
 describe('custom endpoint schema', () => {
   const endpointTree = extractSchemaTree(ldpEndpoint);
@@ -1245,7 +1217,8 @@ describe('validateFieldValue for endpoints', () => {
 
     expect(result).toEqual({
       success: false,
-      error: 'endpoints.custom[1].models.default: Required',
+      error:
+        'endpoints.custom[1].models.default: Invalid input: expected array, received undefined',
     });
   });
 
@@ -1295,14 +1268,14 @@ describe('parseConfigYaml (import)', () => {
 
   it('keeps keys the bundled schema does not know and reports them', () => {
     const result = parseConfigYaml(
-      'version: 1.3.3\ninterface:\n  replyNotifications:\n    sound: false\n',
+      'version: 1.3.3\ninterface:\n  replyNotifications:\n    vibrate: false\n',
     );
     expect(result.success).toBe(true);
     expect(result.appConfig).toEqual({
       version: '1.3.3',
-      interface: { replyNotifications: { sound: false } },
+      interface: { replyNotifications: { vibrate: false } },
     });
-    expect(result.unknownPaths).toEqual(['interface.replyNotifications.sound']);
+    expect(result.unknownPaths).toEqual(['interface.replyNotifications.vibrate']);
   });
 
   it('keeps keys the admin API would drop; the import plan leaves out only the leaves carrying them', () => {
@@ -1386,7 +1359,11 @@ describe('parseConfigYaml (import)', () => {
             value: 'teleport',
             options: expect.arrayContaining(['subagents', 'skills', 'tools']),
           },
-          { path: 'interface.retentionMode', value: 'someday', options: ['all', 'temporary'] },
+          {
+            path: 'interface.retentionMode',
+            value: 'someday',
+            options: ['all', 'temporary', 'ephemeral'],
+          },
         ]),
       );
       expect(result.unknownEnumValues).toHaveLength(2);
@@ -1396,8 +1373,32 @@ describe('parseConfigYaml (import)', () => {
       const result = parseConfigYaml('endpoints:\n  agents:\n    capabilities: tools\n');
       expect(result.success).toBe(false);
       expect(result.validationErrors).toEqual([
-        { path: 'endpoints.agents.capabilities', message: expect.stringMatching(/Expected array/) },
+        {
+          path: 'endpoints.agents.capabilities',
+          message: expect.stringMatching(/expected array/i),
+        },
       ]);
+    });
+
+    it('imports one in a one-member enum list, which zod 4 reports like a literal', () => {
+      const result = parseConfigYaml(
+        'filters:\n  conversationStarters:\n    pii:\n      fields: [subject]\n',
+      );
+      expect(result.success).toBe(true);
+      expect(result.unknownEnumValues).toEqual([
+        { path: 'filters.conversationStarters.pii.fields.0', value: 'subject', options: ['text'] },
+      ]);
+    });
+
+    it('still fails on a literal the schema fixes', () => {
+      const result = parseConfigYaml(
+        'endpoints:\n  agents:\n    managementApi:\n      auth:\n        oidc:\n          tokenUse: id\n',
+      );
+      expect(result.success).toBe(false);
+      expect(result.validationErrors?.map((error) => error.path)).toEqual([
+        'endpoints.agents.managementApi.auth.oidc.tokenUse',
+      ]);
+      expect(result.unknownEnumValues).toEqual([]);
     });
 
     it('still fails on a value that is not text', () => {

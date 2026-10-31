@@ -1,11 +1,11 @@
 import { Badge } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import {
-  ACTION_BADGE_STATE,
-  ACTION_LABEL_KEY,
   auditSubject,
-  auditTargetConfig,
+  auditTargetBadge,
   formatTimestamp,
+  auditActionLabel,
+  auditActionBadgeState,
 } from './auditLogUtils';
 import { DecorativeIcon } from '@/components/shared';
 import { ROW, ROW_BUTTON } from './rows';
@@ -15,7 +15,7 @@ import { cn } from '@/utils';
 /** One audit entry; its target's name is the button that opens the entry's drawer. */
 export function AuditLogTableRow({ entry, isLast, onOpen, buttonRef }: t.AuditLogTableRowProps) {
   const localize = useLocalize();
-  const targetConfig = auditTargetConfig(entry.target.type);
+  const targetBadge = auditTargetBadge(entry.target.type, localize);
   const subject = auditSubject(entry, localize);
   const target = entry.target.name ?? entry.target.id ?? '';
   return (
@@ -23,8 +23,8 @@ export function AuditLogTableRow({ entry, isLast, onOpen, buttonRef }: t.AuditLo
       <td className="px-4 py-3">
         <Badge
           size="sm"
-          state={ACTION_BADGE_STATE[entry.action]}
-          text={localize(ACTION_LABEL_KEY[entry.action])}
+          state={auditActionBadgeState(entry.action)}
+          text={auditActionLabel(entry.action, localize)}
         />
       </td>
       <td className="px-4 py-3">
@@ -34,8 +34,8 @@ export function AuditLogTableRow({ entry, isLast, onOpen, buttonRef }: t.AuditLo
             state="neutral"
             text={
               <span className="inline-flex items-center gap-1">
-                <DecorativeIcon name={targetConfig.icon} size="xs" />
-                {localize(targetConfig.labelKey)}
+                <DecorativeIcon name={targetBadge.icon} size="xs" />
+                {targetBadge.label}
               </span>
             }
           />

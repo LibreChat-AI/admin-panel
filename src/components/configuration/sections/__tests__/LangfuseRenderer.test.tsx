@@ -111,6 +111,7 @@ const destinations = [
   { key: 'eu', baseUrl: 'https://cloud.langfuse.com' },
   { key: 'us', baseUrl: 'https://us.cloud.langfuse.com' },
 ];
+const promptSync = { available: false, enabled: false };
 
 function renderLangfuse(overrides: Partial<t.FieldRendererProps> = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -156,7 +157,7 @@ async function renderVerified(status: TLangfuseConnectionStatus) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGet.mockResolvedValue({ configured: false, enabled: false, destinations });
+  mockGet.mockResolvedValue({ configured: false, enabled: false, destinations, promptSync });
   mockTest.mockImplementation(verifyOnNextTask);
 });
 
@@ -188,6 +189,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-1234567890abcdef',
       secretKeyPreview: 'sk-lf-...515f',
@@ -209,6 +211,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-1234567890abcdef',
       secretKeyPreview: 'sk-lf-...515f',
@@ -239,6 +242,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-existing',
       secretKeyPreview: 'sk-lf-...515f',
@@ -266,6 +270,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-1234567890abcdef',
       secretKeyPreview: 'sk-lf-...515f',
@@ -283,6 +288,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'removed-region',
       publicKey: 'pk-lf-1234567890abcdef',
       secretKeyPreview: 'sk-lf-...515f',
@@ -302,6 +308,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-new',
       secretKeyPreview: 'sk-lf-...cret',
@@ -345,6 +352,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-old',
       secretKeyPreview: 'sk-lf-...515f',
@@ -384,6 +392,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-stored',
       secretKeyPreview: 'sk-lf-...515f',
@@ -414,6 +423,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-stored',
       secretKeyPreview: 'sk-lf-...515f',
@@ -471,6 +481,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-existing',
       secretKeyPreview: 'sk-lf-...515f',
@@ -495,6 +506,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: false,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-existing',
       secretKeyPreview: 'sk-lf-...515f',
@@ -521,6 +533,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: false,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-existing',
       secretKeyPreview: 'sk-lf-...515f',
@@ -546,6 +559,7 @@ describe('LangfuseRenderer', () => {
       configured: true,
       enabled: true,
       destinations,
+      promptSync,
       destination: 'eu',
       publicKey: 'pk-lf-existing',
       secretKeyPreview: 'sk-lf-...515f',

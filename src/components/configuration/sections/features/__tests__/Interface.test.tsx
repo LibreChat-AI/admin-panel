@@ -16,12 +16,15 @@ describe('InterfaceRenderer', () => {
     renderSection(InterfaceRenderer, { section: 'interface' });
     expect(groupHeadings()).toEqual([
       'Chat controls',
+      'Appearance',
       'Onboarding & legal',
       'Retention',
       'Sharing',
       'Scheduling',
+      'Reply notifications',
       'Trace viewer',
       'MCP menu',
+      'Timing and caching',
     ]);
   });
 

@@ -77,10 +77,10 @@ import {
   removeConfigPathValue,
 } from './keyed';
 import { findYamlManagedValues, getWriteSkipReason } from './writes';
+import { schemaType, resolveSubSchema, unwrapSchema } from './schema';
 import { isBlankText, findBlankText, findUnsafeKeys } from './keys';
 import { getSecretCarry, usesChangeBatch } from './contract';
 import { selectsHiddenEndpoint } from './dependents';
-import { resolveSubSchema, unwrapSchema } from './schema';
 import { scopeGateSkipReason } from './scopes';
 
 /** Whether a write at `path` sets a process-backed (stdio) MCP server field, which the admin API rejects. */
@@ -302,7 +302,7 @@ export function parseIndexedArrayPath(
   if (!match) return null;
   const [, arrayPath, indexStr] = match;
   const schema = resolveSubSchema(configSchema as t.ZodSchemaLike, arrayPath.split('.'));
-  if (!schema || unwrapSchema(schema)?._def?.typeName !== 'ZodArray') return null;
+  if (!schema || schemaType(unwrapSchema(schema)) !== 'array') return null;
   return { arrayPath, index: Number(indexStr) };
 }
 

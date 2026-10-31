@@ -85,6 +85,14 @@ function unused(fields: string[]): t.ProviderGroupDef {
   };
 }
 
+/** The models a built-in provider lists, before (or instead of) the ones it fetches. */
+const MODELS: t.ProviderGroupDef = {
+  key: 'models',
+  labelKey: 'com_config_providers_group_models',
+  fields: ['models'],
+  expanded: true,
+};
+
 const LABEL_GROUPS = [TITLES, ACTIVITY, REASONING];
 const STANDARD_TAIL = [...LABEL_GROUPS, STREAMING, ADVANCED];
 
@@ -121,8 +129,8 @@ const ASSISTANTS_LAYOUT: t.ProviderGroupDef[] = [
  */
 export const PROVIDER_LAYOUTS: Readonly<Record<string, t.ProviderGroupDef[]>> = {
   [GLOBAL_PROVIDER_KEY]: STANDARD_TAIL,
-  openAI: [...STANDARD_TAIL, unused(['baseURL'])],
-  google: [...STANDARD_TAIL, unused(['baseURL'])],
+  openAI: [MODELS, ...STANDARD_TAIL, unused(['baseURL'])],
+  google: [MODELS, ...STANDARD_TAIL, unused(['baseURL'])],
   anthropic: [
     {
       key: 'models',
@@ -182,13 +190,16 @@ export const PROVIDER_LAYOUTS: Readonly<Record<string, t.ProviderGroupDef[]>> = 
         'repositoryInstructions',
         'fileSharing',
         'statefulCodeSessions',
+        'workspaceAttachments',
+        'hostFileEdits',
+        'pullRequests',
       ],
     },
     {
       key: 'background',
       labelKey: 'com_config_providers_group_background',
       descriptionKey: 'com_config_providers_group_background_desc',
-      fields: ['backgroundTasks', 'eventDriven'],
+      fields: ['backgroundTasks', 'eventDriven', 'subagentActivity'],
     },
     {
       key: 'approval',
@@ -209,6 +220,7 @@ export const PROVIDER_LAYOUTS: Readonly<Record<string, t.ProviderGroupDef[]>> = 
       fields: [
         'maxSubagents',
         'streamRate',
+        'streamKeepaliveIntervalMs',
         'maxToolResultChars',
         'maxProviderErrorChars',
         'modelResponseHeadersTimeoutMs',
@@ -218,6 +230,8 @@ export const PROVIDER_LAYOUTS: Readonly<Record<string, t.ProviderGroupDef[]>> = 
         'maxDeltaEventsPerTurn',
         'maxRetainedToolCountChars',
         'skills',
+        'linkedInstructions',
+        'avatarRefresh',
       ],
     },
     {
