@@ -16,8 +16,8 @@ export const SOCIAL_LOGIN_PROVIDERS: Readonly<Record<string, string>> = {
 
 /**
  * LibreChat's rate limiters with the `.env` fallbacks it uses when
- * librechat.yaml sets none (api/server/middleware/limiters). Agent events
- * are limited per user only.
+ * librechat.yaml sets none (api/server/middleware/limiters). Agent events,
+ * prompt resolution and email change requests are limited per user only.
  */
 export const RATE_LIMITERS: readonly t.RateLimiterInfo[] = [
   {
@@ -44,6 +44,21 @@ export const RATE_LIMITERS: readonly t.RateLimiterInfo[] = [
     key: 'agentEvents',
     envPrefix: 'AGENT_EVENT',
     defaults: { userMax: 40, userWindowInMinutes: 1 },
+  },
+  {
+    key: 'promptResolve',
+    envPrefix: 'PROMPT_RESOLVE',
+    defaults: { userMax: 60, userWindowInMinutes: 1 },
+  },
+  {
+    key: 'emailChange',
+    envPrefix: 'EMAIL_CHANGE',
+    defaults: { userMax: 3, userWindowInMinutes: 2 },
+  },
+  {
+    key: 'emailChangeConfirm',
+    envPrefix: 'EMAIL_CHANGE_CONFIRM',
+    defaults: { ipMax: 20, ipWindowInMinutes: 2, userMax: 2, userWindowInMinutes: 2 },
   },
 ];
 

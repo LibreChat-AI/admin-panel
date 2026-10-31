@@ -193,13 +193,23 @@ export const INTERFACE_GROUPS: readonly t.FeatureGroupDef[] = [
       'defaultPinnedTools',
       'codeHighlightThrottleMs',
       'buildInfo',
+      'agentSelectorLimit',
+      'composerRecentFiles',
+      'runningChatRename',
+      'artifactUndocking',
     ],
+  },
+  {
+    key: 'appearance',
+    labelKey: 'com_config_features_group_appearance',
+    descriptionKey: 'com_config_features_group_appearance_desc',
+    fields: ['theme', 'colorModeFromUrl', 'landingHeading', 'landingFooter', 'mascot'],
   },
   {
     key: 'onboarding',
     labelKey: 'com_config_features_group_onboarding',
     descriptionKey: 'com_config_features_group_onboarding_desc',
-    fields: ['customWelcome', 'privacyPolicy', 'termsOfService'],
+    fields: ['customWelcome', 'privacyPolicy', 'termsOfService', 'analyticsConsent'],
     flatten: ['privacyPolicy', 'termsOfService'],
   },
   {
@@ -212,14 +222,21 @@ export const INTERFACE_GROUPS: readonly t.FeatureGroupDef[] = [
     key: 'sharing',
     labelKey: 'com_config_features_group_sharing',
     descriptionKey: 'com_config_features_group_sharing_desc',
-    fields: ['sharedLinks', 'skills'],
-    flatten: ['sharedLinks', 'skills'],
+    fields: ['sharedLinks', 'skills', 'marketplace'],
+    flatten: ['sharedLinks', 'skills', 'marketplace'],
   },
   {
     key: 'scheduling',
     labelKey: 'com_config_features_group_scheduling',
     descriptionKey: 'com_config_features_group_scheduling_desc',
     fields: ['schedules'],
+  },
+  {
+    key: 'notifications',
+    labelKey: 'com_config_features_group_notifications',
+    descriptionKey: 'com_config_features_group_notifications_desc',
+    fields: ['replyNotifications'],
+    flatten: ['replyNotifications'],
   },
   {
     key: 'traceViewer',
@@ -234,6 +251,19 @@ export const INTERFACE_GROUPS: readonly t.FeatureGroupDef[] = [
     descriptionKey: 'com_config_features_group_mcp_desc',
     fields: ['mcpServers'],
     flatten: ['mcpServers'],
+  },
+  {
+    key: 'performance',
+    labelKey: 'com_config_features_group_performance',
+    descriptionKey: 'com_config_features_group_performance_desc',
+    fields: [
+      'historyCacheTtlMs',
+      'historyCacheRecent',
+      'historyCacheMaxBytes',
+      'steerArmConfirmationTimeoutMs',
+      'queuedTurnReconciliationTimeoutMs',
+      'queuedSendLockTimeoutMs',
+    ],
   },
 ];
 

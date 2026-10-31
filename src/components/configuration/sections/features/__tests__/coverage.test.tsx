@@ -57,7 +57,25 @@ const FIXTURES: CoverageFixture[] = [
       interface: {
         skills: { defaultActiveOnShare: true },
         sharedLinks: { snapshotFiles: true },
-        schedules: { maxPerUser: 5 },
+        schedules: {
+          maxPerUser: 5,
+          mcpConsent: {
+            resources: {
+              github: {
+                url: 'https://mcp.example.com',
+                credentialMode: 'stored_oauth',
+                issuer: 'https://issuer.example.com',
+                audience: 'mcp',
+                scopes: ['read'],
+              },
+            },
+            readOnlyPolicy: {
+              github: {
+                tools: { list_issues: { effect: 'read_only', definitionSha256: 'a'.repeat(64) } },
+              },
+            },
+          },
+        },
       },
       webSearch: { searchProvider: 'searxng', scraperProvider: 'firecrawl', rerankerType: 'jina' },
       memory: { agent: { provider: 'openAI', model: 'gpt-4o' } },

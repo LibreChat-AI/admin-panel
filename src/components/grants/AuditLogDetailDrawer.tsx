@@ -4,14 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import type * as t from '@/types';
 import {
-  ACTION_BADGE_STATE,
-  ACTION_LABEL_KEY,
-  ACTION_SUMMARY_KEY,
   auditGrantee,
   auditSubject,
-  auditTargetConfig,
   capabilityLabel,
   formatTimestamp,
+  auditActionLabel,
+  auditTargetConfig,
+  auditActionBadgeState,
+  auditActionSummaryKey,
 } from './auditLogUtils';
 import { CloseButton, DecorativeIcon, LoadingState } from '@/components/shared';
 import { useLocalize, useReturnFocus } from '@/hooks';
@@ -369,8 +369,8 @@ export function AuditLogDetailDrawer({
             <div className="flex items-center gap-2">
               <Badge
                 size="sm"
-                state={ACTION_BADGE_STATE[latestEntry.action]}
-                text={localize(ACTION_LABEL_KEY[latestEntry.action])}
+                state={auditActionBadgeState(latestEntry.action)}
+                text={auditActionLabel(latestEntry.action, localize)}
               />
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
@@ -382,7 +382,8 @@ export function AuditLogDetailDrawer({
           <div className="flex-1 overflow-y-auto">
             <div className="flex flex-col gap-5 px-4 py-4">
               <p className="text-sm text-(--cui-color-text-default)">
-                {localize(ACTION_SUMMARY_KEY[latestEntry.action], {
+                {localize(auditActionSummaryKey(latestEntry.action), {
+                  action: latestEntry.action,
                   actor: latestEntry.actor.name,
                   capability: subject.label,
                   target: targetLabel,

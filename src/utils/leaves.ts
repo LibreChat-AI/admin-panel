@@ -1,7 +1,7 @@
 import { configSchema } from 'librechat-data-provider';
 import type * as t from '@/types';
+import { schemaType, isUnionSchema, resolveSubSchema, unwrapSchema } from './schema';
 import { APP_SERVICE_KEY_ALIASES, BUNDLED_CONFIG_FEATURES } from '@/constants';
-import { isUnionSchema, resolveSubSchema, unwrapSchema } from './schema';
 import { hasDottedKey, isConfigRecord } from './format';
 import { isUnsafeConfigKey } from './keys';
 
@@ -10,16 +10,16 @@ const IMPORT_METADATA_KEYS = new Set(['version']);
 const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Schema nodes whose keys are free names (where LibreChat keeps dotted keys), not setting names. */
-const FREE_KEY_TYPES: ReadonlySet<string> = new Set(['ZodRecord', 'ZodAny', 'ZodUnknown']);
+const FREE_KEY_TYPES: ReadonlySet<string> = new Set(['record', 'any', 'unknown']);
 
 /** Schema nodes whose value is a group of settings (an MCP server, a file config endpoint). */
-const GROUP_TYPES: ReadonlySet<string> = new Set(['ZodObject', 'ZodRecord', 'ZodIntersection']);
+const GROUP_TYPES: ReadonlySet<string> = new Set(['object', 'record', 'intersection']);
 
 /** Type names of a schema node, one per union option (wrappers stripped, nested unions flattened). */
 function typeNamesOf(schema: t.ZodSchemaLike): string[] {
   const node = unwrapSchema(schema);
-  if (!isUnionSchema(node)) return [node?._def?.typeName ?? ''];
-  return (node._def?.options ?? []).flatMap(typeNamesOf);
+  if (!isUnionSchema(node)) return [schemaType(node) ?? ''];
+  return (node._zod?.def.options ?? []).flatMap(typeNamesOf);
 }
 
 /**

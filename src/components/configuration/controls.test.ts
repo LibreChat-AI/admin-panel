@@ -301,7 +301,9 @@ describe('orderFields (SCH-5)', () => {
     expect(ordered.map((f) => f.key)).toEqual([
       'enabled',
       'startBalance',
+      'display',
       'autoRefillEnabled',
+      'refillMode',
       'refillAmount',
       'refillIntervalValue',
       'refillIntervalUnit',

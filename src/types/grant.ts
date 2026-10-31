@@ -1,11 +1,23 @@
+import type { AdminAuditLogEntry, AuditAction } from '@librechat/data-schemas';
 import type { PrincipalType, ResourceType } from 'librechat-data-provider';
-import type { AdminAuditLogEntry } from '@librechat/data-schemas';
 import type { Ref } from 'react';
 
 export interface AuditLogEntryWithDiff extends AdminAuditLogEntry {
   before?: readonly string[];
   after?: readonly string[];
 }
+
+/** Audit actions the audit log tab names (`LABELED_AUDIT_ACTIONS`): capability grants and Insights. */
+export type LabeledAuditAction = Extract<
+  AuditAction,
+  | 'grant.assigned'
+  | 'grant.removed'
+  | 'permission.insights_assigned'
+  | 'permission.insights_removed'
+>;
+
+/** How an audit action's badge reads: granted, revoked, or (an action the tab doesn't name) neutral. */
+export type AuditBadgeState = 'success' | 'danger' | 'neutral';
 
 /** `target.type` values the audit log can filter on: principals for grants, agents for Insights. */
 export type AuditTargetType =

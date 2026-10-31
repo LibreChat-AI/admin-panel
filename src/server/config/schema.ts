@@ -4,6 +4,7 @@ import { createServerFn } from '@tanstack/react-start';
 import type { TStartupConfig } from 'librechat-data-provider';
 import type * as t from '@/types';
 import {
+  schemaType,
   unwrapSchema,
   innerSchemaOf,
   isUnionSchema,
@@ -13,7 +14,6 @@ import {
   filterSecretPreviewFields,
   filterInterfacePermissionChildren,
 } from '@/utils';
-import { RUNTIME_NUMBER_LIMITS } from '@/constants';
 import { apiFetch } from '../utils/api';
 
 /**
@@ -34,7 +34,11 @@ export function applyLangfuseSchemaVisibility(
   return tree;
 }
 
-/** A Zod node with its wrappers removed, and what the wrappers said about it. */
+/**
+ * A Zod node with its wrappers removed, and what the wrappers said about it.
+ * A `.required()` field (`nonoptional`) is required even where it wraps an
+ * optional schema; a default still makes it optional to write.
+ */
 interface UnwrappedNode {
   schema: t.ZodSchemaLike;
   isOptional: boolean;
@@ -63,17 +67,22 @@ interface FieldParts {
   constraints?: t.FieldConstraints;
 }
 
-const ABSENT_TYPES: ReadonlySet<string> = new Set(['ZodUndefined', 'ZodNull', 'ZodVoid']);
+const ABSENT_TYPES: ReadonlySet<string> = new Set(['undefined', 'null', 'void']);
+
+/** Wrappers that give a field a default, which makes it optional to write. */
+const DEFAULT_TYPES: ReadonlySet<string> = new Set(['default', 'prefault']);
+
+/** `number_format` checks of whole numbers (`.int()` is `safeint`). */
+const INT_FORMATS: ReadonlySet<string> = new Set(['safeint', 'int32', 'uint32']);
 
 /** Record value types worth sending to the client: choices a value select can offer. */
 const CHOICE_TYPE = /^(enum|literal)\(|^union\((enum|literal)\(/;
 
 const ZOD_TO_KV: Record<string, t.KVValueType> = {
-  ZodString: 'string',
-  ZodNumber: 'number',
-  ZodBoolean: 'boolean',
-  ZodEnum: 'string',
-  ZodLiteral: 'string',
+  string: 'string',
+  number: 'number',
+  boolean: 'boolean',
+  literal: 'string',
 };
 
 function unwrapNode(value: t.ZodSchemaLike): UnwrappedNode {
@@ -81,19 +90,22 @@ function unwrapNode(value: t.ZodSchemaLike): UnwrappedNode {
   let schema = value;
   let isOptional = false;
   let isNullable = false;
+  let isRequired = false;
   let description: string | undefined;
-  while (schema?._def?.typeName && ZOD_WRAPPER_TYPES.has(schema._def.typeName)) {
+  while (schema?._zod && ZOD_WRAPPER_TYPES.has(schema._zod.def.type ?? '')) {
     if (seen.has(schema)) break;
     seen.add(schema);
-    const def = schema._def;
-    description ??= def.description;
-    if (def.typeName === 'ZodOptional' || def.typeName === 'ZodDefault') isOptional = true;
-    if (def.typeName === 'ZodNullable') isNullable = true;
+    const def = schema._zod.def;
+    description ??= schema.description;
+    if (def.type === 'nonoptional') isRequired = true;
+    if (def.type === 'optional' && !isRequired) isOptional = true;
+    if (DEFAULT_TYPES.has(def.type ?? '')) isOptional = true;
+    if (def.type === 'nullable') isNullable = true;
     const next = innerSchemaOf(def);
     if (!next) break;
     schema = next;
   }
-  description ??= schema?._def?.description;
+  description ??= schema?.description;
   return { schema: resolveIntersection(schema) ?? schema, isOptional, isNullable, description };
 }
 
@@ -102,13 +114,13 @@ function isObjectNode(schema: t.ZodSchemaLike | undefined): boolean {
 }
 
 function isAbsentNode(schema: t.ZodSchemaLike): boolean {
-  return ABSENT_TYPES.has(schema?._def?.typeName ?? '');
+  return ABSENT_TYPES.has(schemaType(schema) ?? '');
 }
 
 /** Union members with their wrappers removed, leaving out `undefined`/`null` members. */
 function presentMembers(schema: t.ZodSchemaLike): t.ZodSchemaLike[] {
   if (!isUnionSchema(schema)) return [];
-  return (schema._def?.options ?? [])
+  return (schema._zod?.def.options ?? [])
     .map((option) => unwrapNode(option).schema)
     .filter((option) => !isAbsentNode(option));
 }
@@ -122,24 +134,28 @@ function objectVariants(schema: t.ZodSchemaLike): t.ZodSchemaLike[] | undefined 
 /** `boolean | object`: a feature switch whose object form gives fine-grained control. */
 function isBooleanObjectUnion(schema: t.ZodSchemaLike): boolean {
   const members = presentMembers(schema);
-  return (
-    members.some((member) => member._def?.typeName === 'ZodBoolean') && members.some(isObjectNode)
-  );
+  return members.some((member) => schemaType(member) === 'boolean') && members.some(isObjectNode);
+}
+
+/** An enum's members' type: `number` for a numeric native enum, else `string`. */
+function enumKVType(schema: t.ZodSchemaLike): t.KVValueType {
+  const entries = Object.values(schema._zod?.def.entries ?? {});
+  return entries.some((value) => typeof value === 'number') ? 'number' : 'string';
 }
 
 function inferRecordKVTypes(schema: t.ZodSchemaLike): t.KVValueType[] | undefined {
-  const typeName = schema?._def?.typeName;
-  if (typeName === 'ZodNativeEnum') {
-    return [getZodTypeName(schema).includes('=') ? 'number' : 'string'];
-  }
-  if (typeName && typeName in ZOD_TO_KV) return [ZOD_TO_KV[typeName]];
+  const type = schemaType(schema);
+  if (type === 'enum') return [enumKVType(schema)];
+  if (type && type in ZOD_TO_KV) return [ZOD_TO_KV[type]];
   if (!isUnionSchema(schema)) return undefined;
   const types = new Set<t.KVValueType>();
   for (const member of presentMembers(schema)) {
-    const memberType = member._def?.typeName;
-    if (memberType && memberType in ZOD_TO_KV) {
+    const memberType = schemaType(member);
+    if (memberType === 'enum') {
+      types.add(enumKVType(member));
+    } else if (memberType && memberType in ZOD_TO_KV) {
       types.add(ZOD_TO_KV[memberType]);
-    } else if (memberType === 'ZodRecord' || memberType === 'ZodArray' || isObjectNode(member)) {
+    } else if (memberType === 'record' || memberType === 'array' || isObjectNode(member)) {
       types.add('json');
     }
   }
@@ -161,15 +177,17 @@ function withStep(constraints: t.FieldConstraints): t.FieldConstraints | undefin
   return Object.keys(result).length > 0 ? result : undefined;
 }
 
-function numberConstraints(checks: t.ZodCheck[]): t.FieldConstraints {
+function numberConstraints(checks: t.ZodCheckDef[]): t.FieldConstraints {
   const constraints: t.FieldConstraints = {};
   for (const check of checks) {
-    if (check.kind === 'int') constraints.int = true;
-    if (check.kind === 'min' && typeof check.value === 'number') {
+    if (check.check === 'number_format' && INT_FORMATS.has(check.format ?? '')) {
+      constraints.int = true;
+    }
+    if (check.check === 'greater_than' && typeof check.value === 'number') {
       constraints.min = check.value;
       if (check.inclusive === false) constraints.minExclusive = true;
     }
-    if (check.kind === 'max' && typeof check.value === 'number') {
+    if (check.check === 'less_than' && typeof check.value === 'number') {
       constraints.max = check.value;
       if (check.inclusive === false) constraints.maxExclusive = true;
     }
@@ -177,29 +195,42 @@ function numberConstraints(checks: t.ZodCheck[]): t.FieldConstraints {
   return constraints;
 }
 
-function stringConstraints(checks: t.ZodCheck[]): t.FieldConstraints {
+function stringConstraints(checks: t.ZodCheckDef[]): t.FieldConstraints {
   const constraints: t.FieldConstraints = {};
   for (const check of checks) {
-    if (check.kind === 'url') constraints.url = true;
-    if (check.kind === 'email') constraints.email = true;
-    if (check.kind === 'regex' && check.regex) constraints.regex = check.regex.source;
-    if ((check.kind === 'min' || check.kind === 'length') && typeof check.value === 'number') {
-      constraints.minLength = check.value;
+    if (check.check === 'string_format' && check.format === 'url') constraints.url = true;
+    if (check.check === 'string_format' && check.format === 'email') constraints.email = true;
+    if (check.check === 'string_format' && check.format === 'regex' && check.pattern) {
+      constraints.regex = check.pattern.source;
     }
-    if ((check.kind === 'max' || check.kind === 'length') && typeof check.value === 'number') {
-      constraints.maxLength = check.value;
+    if (check.check === 'min_length' && typeof check.minimum === 'number') {
+      constraints.minLength = check.minimum;
+    }
+    if (check.check === 'max_length' && typeof check.maximum === 'number') {
+      constraints.maxLength = check.maximum;
+    }
+    if (check.check === 'length_equals' && typeof check.length === 'number') {
+      constraints.minLength = check.length;
+      constraints.maxLength = check.length;
     }
   }
   return constraints;
 }
 
+/** A scalar's checks: its `checks`, after the schema itself when it is a format (`z.url()`). */
+function checkDefsOf(def: t.ZodDef): t.ZodCheckDef[] {
+  const own = def.check ? [{ check: def.check, format: def.format }] : [];
+  return [...own, ...(def.checks ?? []).map((check) => check._zod.def)];
+}
+
 /** Validation limits from a scalar's Zod checks (`min`, `max`, `int`, `url`, `regex`, …). */
 export function extractConstraints(schema: t.ZodSchemaLike): t.FieldConstraints | undefined {
-  const def = schema?._def;
-  const checks = def?.checks;
-  if (!def || !checks?.length) return undefined;
-  if (def.typeName === 'ZodNumber') return withStep(numberConstraints(checks));
-  if (def.typeName === 'ZodString') return withStep(stringConstraints(checks));
+  const def = schema?._zod?.def;
+  if (!def) return undefined;
+  const checks = checkDefsOf(def);
+  if (checks.length === 0) return undefined;
+  if (def.type === 'number') return withStep(numberConstraints(checks));
+  if (def.type === 'string') return withStep(stringConstraints(checks));
   return undefined;
 }
 
@@ -296,7 +327,7 @@ function mergeVariantFields(
 
 function discriminatorValue(member: t.ZodSchemaLike, discriminator: string): string | undefined {
   const node = member.shape?.[discriminator];
-  const value = node ? unwrapSchema(node)._def?.value : undefined;
+  const value = node ? unwrapSchema(node)._zod?.def.values?.[0] : undefined;
   return value === undefined ? undefined : String(value);
 }
 
@@ -346,7 +377,7 @@ function variantField(
   path: string[],
 ): t.SchemaField {
   const lists = members.map((member) => extractSchemaTree(member, path, base.depth + 1));
-  const discriminator = schema._def?.discriminator;
+  const discriminator = schema._zod?.def.discriminator;
   const variants = lists.map((fields, index) => ({
     key: variantKey(members[index], fields, lists, index, discriminator),
     fields,
@@ -362,7 +393,8 @@ function variantField(
 }
 
 function arrayField(base: FieldParts, schema: t.ZodSchemaLike, path: string[]): t.SchemaField {
-  const element = schema._def?.type ? unwrapNode(schema._def.type).schema : undefined;
+  const elementSchema = schema._zod?.def.element;
+  const element = elementSchema ? unwrapNode(elementSchema).schema : undefined;
   const elementPath = [...path, '[]'];
   const depth = base.depth + 1;
   const type = getZodTypeName(schema);
@@ -377,7 +409,7 @@ function arrayField(base: FieldParts, schema: t.ZodSchemaLike, path: string[]): 
 
 function recordField(base: FieldParts, schema: t.ZodSchemaLike, path: string[]): t.SchemaField {
   const type = getZodTypeName(schema);
-  const valueSchema = schema._def?.valueType;
+  const valueSchema = schema._zod?.def.valueType;
   if (!valueSchema) return finalizeField({ ...base, type });
   const value = unwrapNode(valueSchema).schema;
   const valuePath = [...path, '{}'];
@@ -440,15 +472,13 @@ function buildField(
     const children = mergeVariantFields(objects, path, depth + 1);
     return finalizeField({ ...base, type: getZodTypeName(schema), children });
   }
-  const typeName = schema?._def?.typeName;
-  if (typeName === 'ZodArray') return arrayField(base, schema, path);
-  if (typeName === 'ZodRecord') return recordField(base, schema, path);
-  const limits = RUNTIME_NUMBER_LIMITS[base.path];
-  const constraints = extractConstraints(schema);
+  const type = schemaType(schema);
+  if (type === 'array') return arrayField(base, schema, path);
+  if (type === 'record') return recordField(base, schema, path);
   return finalizeField({
     ...base,
     type: getZodTypeName(schema),
-    constraints: limits ? { ...constraints, ...limits } : constraints,
+    constraints: extractConstraints(schema),
   });
 }
 
@@ -483,18 +513,23 @@ export function flattenTree(fields: t.SchemaField[]): t.SchemaField[] {
 
 const MAX_ZOD_TYPE_DEPTH = 10;
 
-function nativeEnumTypeName(raw: string[] | Record<string, string | number>): string {
-  const entries = Array.isArray(raw)
-    ? raw.map((v): [string, string] => [v, v])
-    : Object.entries(raw);
-  const numeric = entries.filter(
-    (entry): entry is [string, number] => typeof entry[1] === 'number',
-  );
+/** `enum(a | b)`, or `enum(OFF=0 | ON=1)` for a numeric native enum (whose entries map numbers back to names). */
+function enumTypeName(entries: Record<string, string | number>): string {
+  const pairs = Object.entries(entries);
+  const numeric = pairs.filter((entry): entry is [string, number] => typeof entry[1] === 'number');
   if (numeric.length > 0) {
     return `enum(${numeric.map(([label, val]) => `${label}=${val}`).join(' | ')})`;
   }
-  const strings = entries.map(([, v]) => v).filter((v): v is string => typeof v === 'string');
+  const strings = pairs.map(([, v]) => v).filter((v): v is string => typeof v === 'string');
   return strings.length > 0 ? `enum(${strings.join(' | ')})` : 'enum';
+}
+
+/** `literal("a")`; a literal of several values reads as the union of each. */
+function literalTypeName(values: NonNullable<t.ZodDef['values']>): string {
+  const literals = values.map((value) =>
+    typeof value === 'bigint' ? `literal(${value})` : `literal(${JSON.stringify(value)})`,
+  );
+  return literals.length === 1 ? literals[0] : `union(${literals.join(' | ')})`;
 }
 
 export function getZodTypeName(
@@ -512,51 +547,40 @@ export function getZodTypeName(
   seen.add(schema);
 
   const innerSchema = unwrapSchema(schema);
-
-  if (!innerSchema || typeof innerSchema !== 'object' || !innerSchema._def) {
-    return 'unknown';
-  }
+  const def = innerSchema && typeof innerSchema === 'object' ? innerSchema._zod?.def : undefined;
+  if (!def) return 'unknown';
 
   if (innerSchema !== schema) {
     if (seen.has(innerSchema)) return 'unknown';
     seen.add(innerSchema);
   }
 
-  const typeName = innerSchema._def.typeName;
+  const type = def.type;
 
-  if (typeName === 'ZodString') return 'string';
-  if (typeName === 'ZodNumber') return 'number';
-  if (typeName === 'ZodBoolean') return 'boolean';
-  if (typeName === 'ZodNull') return 'null';
-  if (typeName === 'ZodUndefined') return 'undefined';
-  if (typeName === 'ZodArray') {
-    const elementType = innerSchema._def.type;
-    if (!elementType) return 'array<unknown>';
-    const elementTypeName = getZodTypeName(elementType, seen, depth + 1);
-    return `array<${elementTypeName}>`;
+  if (type === 'string') return 'string';
+  if (type === 'number') return 'number';
+  if (type === 'boolean') return 'boolean';
+  if (type === 'null') return 'null';
+  if (type === 'undefined') return 'undefined';
+  if (type === 'array') {
+    if (!def.element) return 'array<unknown>';
+    return `array<${getZodTypeName(def.element, seen, depth + 1)}>`;
   }
-  if (typeName === 'ZodObject') return 'object';
-  if (typeName === 'ZodIntersection') {
+  if (type === 'object') return 'object';
+  if (type === 'intersection') {
     return resolveIntersection(innerSchema) ? 'object' : 'unknown';
   }
-  if (typeName === 'ZodEnum') {
-    const values = innerSchema._def?.values ?? [];
-    return `enum(${Array.isArray(values) ? values.join(' | ') : Object.values(values).join(' | ')})`;
-  }
-  if (typeName === 'ZodNativeEnum') return nativeEnumTypeName(innerSchema._def?.values ?? {});
+  if (type === 'enum') return enumTypeName(def.entries ?? {});
   if (isUnionSchema(innerSchema)) {
-    const options = innerSchema._def.options || [];
+    const options = def.options || [];
     const types = options.map((opt: t.ZodSchemaLike) => getZodTypeName(opt, seen, depth + 1));
     return `union(${types.join(' | ')})`;
   }
-  if (typeName === 'ZodLiteral') {
-    const literalValue = innerSchema._def.value;
-    return `literal(${JSON.stringify(literalValue)})`;
-  }
-  if (typeName === 'ZodRecord') return 'record';
-  if (typeName === 'ZodAny') return 'any';
-  if (typeName === 'ZodUnknown') return 'unknown';
-  return typeName || 'unknown';
+  if (type === 'literal') return literalTypeName(def.values ?? []);
+  if (type === 'record') return 'record';
+  if (type === 'any') return 'any';
+  if (type === 'unknown') return 'unknown';
+  return type || 'unknown';
 }
 
 /** Shared queryOptions for the schema tree used by command palette search. */
@@ -598,13 +622,12 @@ export const getConfigSchemaFields = createServerFn({ method: 'GET' }).handler(a
 function getFieldDefault(schema: t.ZodSchemaLike): { hasDefault: boolean; value?: t.ConfigValue } {
   const seen = new Set<t.ZodSchemaLike>();
   let current = schema;
-  while (current?._def && !seen.has(current)) {
+  while (current?._zod && !seen.has(current)) {
     seen.add(current);
-    if (current._def.typeName === 'ZodDefault') {
-      return { hasDefault: true, value: current._def.defaultValue?.() as t.ConfigValue };
-    }
-    if (!ZOD_WRAPPER_TYPES.has(current._def.typeName ?? '')) break;
-    const next = innerSchemaOf(current._def);
+    const def = current._zod.def;
+    if (DEFAULT_TYPES.has(def.type ?? '')) return { hasDefault: true, value: def.defaultValue };
+    if (!ZOD_WRAPPER_TYPES.has(def.type ?? '')) break;
+    const next = innerSchemaOf(def);
     if (!next) break;
     current = next;
   }

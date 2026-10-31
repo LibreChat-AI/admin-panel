@@ -122,7 +122,7 @@ test('creating a new role is a separate, labelled option', async ({ page }) => {
   await openWizard(page, 'balance:\n  refillIntervalValue: 9\n');
   await page.getByRole('radio', { name: /^Create a new role or group/ }).click();
   await expect(page.getByText(/Also creates the role or group itself/)).toBeVisible();
-  await page.getByLabel('Name').fill(name);
+  await page.getByRole('dialog').getByLabel('Name', { exact: true }).fill(name);
   const { apply } = await previewAndApply(page, new RegExp(`into New Role: ${name}$`));
   await apply.click();
   await expect(

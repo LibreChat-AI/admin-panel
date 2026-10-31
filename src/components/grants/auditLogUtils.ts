@@ -2,7 +2,7 @@ import { ResourceType } from 'librechat-data-provider';
 import type { AdminAuditLogEntry, AuditAction } from '@librechat/data-schemas';
 import type { PrincipalType } from 'librechat-data-provider';
 import type * as t from '@/types';
-import { getScopeTypeConfig } from '@/constants';
+import { LABELED_AUDIT_ACTIONS, getScopeTypeConfig } from '@/constants';
 
 /** The capability a grant entry concerns now lives in `metadata.capability`
  * (other event categories omit it). Returns '' when absent or non-string. */
@@ -11,26 +11,50 @@ export function auditCapability(entry: Pick<AdminAuditLogEntry, 'metadata'>): st
   return typeof cap === 'string' ? cap : '';
 }
 
-export const ACTION_BADGE_STATE: Record<AuditAction, 'success' | 'danger'> = {
+export const ACTION_BADGE_STATE: Record<t.LabeledAuditAction, t.AuditBadgeState> = {
   'grant.assigned': 'success',
   'grant.removed': 'danger',
   'permission.insights_assigned': 'success',
   'permission.insights_removed': 'danger',
 };
 
-export const ACTION_LABEL_KEY: Record<AuditAction, string> = {
+export const ACTION_LABEL_KEY: Record<t.LabeledAuditAction, string> = {
   'grant.assigned': 'com_audit_action_assigned',
   'grant.removed': 'com_audit_action_removed',
   'permission.insights_assigned': 'com_audit_action_insights_assigned',
   'permission.insights_removed': 'com_audit_action_insights_removed',
 };
 
-export const ACTION_SUMMARY_KEY: Record<AuditAction, string> = {
+export const ACTION_SUMMARY_KEY: Record<t.LabeledAuditAction, string> = {
   'grant.assigned': 'com_audit_detail_summary_assigned',
   'grant.removed': 'com_audit_detail_summary_removed',
   'permission.insights_assigned': 'com_audit_detail_summary_insights_assigned',
   'permission.insights_removed': 'com_audit_detail_summary_insights_removed',
 };
+
+/** Summary of an entry whose action the tab doesn't name: who did it, to what, by the action's own name. */
+const OTHER_ACTION_SUMMARY_KEY = 'com_audit_detail_summary_other';
+
+const LABELED_ACTIONS: ReadonlySet<AuditAction> = new Set(LABELED_AUDIT_ACTIONS);
+
+export function isLabeledAuditAction(action: AuditAction): action is t.LabeledAuditAction {
+  return LABELED_ACTIONS.has(action);
+}
+
+/** An entry's badge state: neutral for an action the tab doesn't name. */
+export function auditActionBadgeState(action: AuditAction): t.AuditBadgeState {
+  return isLabeledAuditAction(action) ? ACTION_BADGE_STATE[action] : 'neutral';
+}
+
+/** An entry's action as the tab names it, or by its own name (`role.created`) when it names none. */
+export function auditActionLabel(action: AuditAction, localize: (key: string) => string): string {
+  return isLabeledAuditAction(action) ? localize(ACTION_LABEL_KEY[action]) : action;
+}
+
+/** The summary text key for an entry's action; one the tab doesn't name gets a generic summary. */
+export function auditActionSummaryKey(action: AuditAction): string {
+  return isLabeledAuditAction(action) ? ACTION_SUMMARY_KEY[action] : OTHER_ACTION_SUMMARY_KEY;
+}
 
 const INSIGHTS_PERMISSION = 'VIEW_INSIGHTS';
 

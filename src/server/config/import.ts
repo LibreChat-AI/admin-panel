@@ -2,9 +2,9 @@ import { z } from 'zod';
 import yaml from 'js-yaml';
 import { configSchema } from 'librechat-data-provider';
 import { createServerFn } from '@tanstack/react-start';
-import type { ZodIssue } from 'zod/v3';
+import type { core } from 'zod';
 import type * as t from '@/types';
-import { isConfigRecord, isUnknownEnumValue, findUnknownImportPaths } from '@/utils';
+import { isConfigRecord, findUnknownEnumValue, findUnknownImportPaths } from '@/utils';
 
 /** Leaf paths of `raw` the bundled config schema does not describe (AppService aliases resolved). */
 export function findUnknownConfigPaths(raw: Record<string, t.ConfigValue>): string[] {
@@ -38,19 +38,20 @@ function mcpShapeErrors(servers: t.ConfigValue): t.ImportValidationError[] {
 
 /**
  * The schema's issues, split: text values an enum doesn't list
- * (`isUnknownEnumValue`), which import keeps and the review names, and
+ * (`findUnknownEnumValue`), which import keeps and the review names, and
  * every other issue, which fails the parse.
  */
-function splitIssues(issues: ZodIssue[]): {
+function splitIssues(issues: core.$ZodIssue[]): {
   errors: t.ImportValidationError[];
   unknownEnumValues: t.ImportEnumValue[];
 } {
   const errors: t.ImportValidationError[] = [];
   const unknownEnumValues: t.ImportEnumValue[] = [];
   for (const issue of issues) {
-    const path = issue.path.join('.');
-    if (issue.code === 'invalid_enum_value' && isUnknownEnumValue(issue)) {
-      unknownEnumValues.push({ path, value: String(issue.received), options: issue.options });
+    const path = issue.path.map(String).join('.');
+    const unknown = findUnknownEnumValue(issue, configSchema);
+    if (unknown) {
+      unknownEnumValues.push({ path, ...unknown });
     } else {
       errors.push({ path, message: issue.message });
     }
@@ -107,8 +108,8 @@ export function parseConfigYaml(yamlContent: string): t.ImportParseResult {
 
   const appConfig = rawConfig as t.ConfigRecord;
   const { mcpServers, ...rest } = appConfig;
-  const result = configSchema.safeParse({ ...rest, version: '1.0.0' });
-  const { errors, unknownEnumValues } = splitIssues(result.success ? [] : result.error.errors);
+  const result = configSchema.safeParse({ ...rest, version: '1.0.0' }, { reportInput: true });
+  const { errors, unknownEnumValues } = splitIssues(result.success ? [] : result.error.issues);
   const validationErrors = [...errors, ...mcpShapeErrors(mcpServers)];
   if (validationErrors.length > 0) {
     return failure('Config validation failed', { validationErrors });

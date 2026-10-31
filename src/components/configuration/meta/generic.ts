@@ -197,7 +197,9 @@ const STATIC_META: t.FieldMetaRegistry = {
     order: [
       'enabled',
       'startBalance',
+      'display',
       'autoRefillEnabled',
+      'refillMode',
       'refillAmount',
       'refillIntervalValue',
       'refillIntervalUnit',
@@ -207,7 +209,13 @@ const STATIC_META: t.FieldMetaRegistry = {
       {
         key: 'autoRefill',
         toggle: 'autoRefillEnabled',
-        fields: ['autoRefillEnabled', 'refillAmount', 'refillIntervalValue', 'refillIntervalUnit'],
+        fields: [
+          'autoRefillEnabled',
+          'refillMode',
+          'refillAmount',
+          'refillIntervalValue',
+          'refillIntervalUnit',
+        ],
       },
     ],
   },

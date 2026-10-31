@@ -305,7 +305,7 @@ describe('ImportYamlDialog wizard', () => {
       within(notice)
         .getAllByRole('listitem')
         .map((item) => item.textContent),
-    ).toEqual(['interface.retentionMode: "someday" · this panel lists all, temporary']);
+    ).toEqual(['interface.retentionMode: "someday" · this panel lists all, temporary, ephemeral']);
     const skipped = within(dialog).getByRole('region', { name: /won't be imported/ });
     expect(skipped.textContent).toMatch(/Size: read from librechat\.yaml only/);
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /^Include Retention/ }));

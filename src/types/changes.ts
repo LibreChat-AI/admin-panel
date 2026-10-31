@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { core } from 'zod';
 import type { SaveEntry, WriteTarget, SaveContext, SavePayload, SkippedChange } from './config-ui';
 import type { ConfigValue, ConfigRecord, FlatConfigMap, ZodSchemaLike } from './config';
 import type { ConfigScope, EntryOverrideNote } from './scope';
@@ -209,7 +210,7 @@ export interface ConfigIssue {
    * The value an enum refused (`invalid_enum_value`, outside a union's
    * branches): text there is a member the bundled schema may not know yet.
    */
-  received?: SchemaIssue['received'];
+  received?: string | number | boolean | null;
 }
 
 /** A location in a config document as the admin API reports it. */
@@ -521,31 +522,15 @@ export interface TombstoneOrder {
   late: string[];
 }
 
-/** The parts of a zod (v3) issue the save pipeline reads (WS1). */
-export interface SchemaIssue {
-  code: string;
-  path: Array<string | number>;
-  message: string;
-  expected?: string | number | boolean | null;
-  received?: string | number | boolean | null;
-  minimum?: number | bigint;
-  maximum?: number | bigint;
-  inclusive?: boolean;
-  type?: string;
-  options?: Array<string | number>;
-  validation?: string | Record<string, string>;
-  unionErrors?: Array<{ issues: SchemaIssue[] }>;
-}
-
 /** What a schema's `safeParse` returns, as far as validation reads it (WS1). */
 export interface SchemaParseResult {
   success: boolean;
-  error?: { issues: SchemaIssue[] };
+  error?: { issues: core.$ZodIssue[] };
 }
 
 /** A schema that can validate a value (a Zod schema, as far as validation uses it). */
 export type ParseableSchema = ZodSchemaLike & {
-  safeParse(value: ConfigValue): SchemaParseResult;
+  safeParse(value: ConfigValue, params?: core.ParseContext<core.$ZodIssue>): SchemaParseResult;
 };
 
 /** A keyed collection entry change (WS1). */

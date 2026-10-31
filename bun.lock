@@ -6,7 +6,7 @@
       "name": "librechat-admin-panel",
       "dependencies": {
         "@clickhouse/click-ui": "0.15.0",
-        "@librechat/data-schemas": "^0.0.74",
+        "@librechat/data-schemas": "^0.0.77",
         "@radix-ui/react-dialog": "1.3.1",
         "@tailwindcss/vite": "^4.3.3",
         "@tanstack/react-devtools": "0.10.13",
@@ -27,7 +27,7 @@
         "input-otp": "^1.5.0",
         "iron-webcrypto": "2.0.0",
         "js-yaml": "^4.3.2",
-        "librechat-data-provider": "^0.8.524",
+        "librechat-data-provider": "^0.8.530",
         "lodash": "4.18.1",
         "lucide-react": "^1.61.0",
         "mongoose": "8.24.7",
@@ -267,7 +267,7 @@
 
     "@kobalte/utils": ["@kobalte/utils@0.9.2", "", { "dependencies": { "@solid-primitives/event-listener": "^2.2.14", "@solid-primitives/keyed": "^1.2.0", "@solid-primitives/map": "^0.4.7", "@solid-primitives/media": "^2.2.4", "@solid-primitives/props": "^3.1.8", "@solid-primitives/refs": "^1.0.5", "@solid-primitives/utils": "^6.2.1" }, "peerDependencies": { "solid-js": "^1.8.8" } }, "sha512-jRVXr+zsVHxzDXRoh+CDeXzvCsFJ6uiHhqqNQ26Cw9ZsZ3D6nqPUBt1gGVtj2ZPmRL3a9Uk1v8D1aJ8/I12Dow=="],
 
-    "@librechat/data-schemas": ["@librechat/data-schemas@0.0.74", "", { "dependencies": { "mdast-util-directive": "^3.0.0", "mdast-util-from-markdown": "^2.0.1", "mdast-util-gfm": "^3.0.0", "mdast-util-math": "^3.0.0", "micromark-extension-directive": "^3.0.1", "micromark-extension-gfm": "^3.0.0", "micromark-extension-llm-math": "^3.1.0", "micromark-util-decode-string": "^2.0.0" }, "peerDependencies": { "jsonwebtoken": "^9.0.2", "klona": "^2.0.6", "librechat-data-provider": "*", "lodash": "^4.17.23", "meilisearch": "^0.38.0", "mongoose": "^8.24.1", "nanoid": "^3.3.18", "winston": "^3.17.0", "winston-daily-rotate-file": "^5.0.0" } }, "sha512-KYcZyY2MuzMhYPiRfzJWPscuRmL3zKBYecZ80A+hdaaWVGP6JyNHUJc29XGLthG6w4AXrEGcO3h36TQdz+Nu3Q=="],
+    "@librechat/data-schemas": ["@librechat/data-schemas@0.0.77", "", { "dependencies": { "mdast-util-directive": "^3.0.0", "mdast-util-from-markdown": "^2.0.1", "mdast-util-gfm": "^3.0.0", "mdast-util-math": "^3.0.0", "micromark-extension-directive": "^3.0.1", "micromark-extension-gfm": "^3.0.0", "micromark-extension-llm-math": "^3.1.0", "micromark-util-decode-string": "^2.0.0" }, "peerDependencies": { "jsonwebtoken": "^9.0.2", "klona": "^2.0.6", "librechat-data-provider": "*", "lodash": "^4.17.23", "meilisearch": "^0.38.0", "mongoose": "^8.24.1", "nanoid": "^3.3.18", "winston": "^3.17.0", "winston-daily-rotate-file": "^5.0.0" } }, "sha512-1u0ijpuGzBRTHIXWqJAeuClA4iDsaupjA7/2jCqYPMAfs573jltpNbHeiX9aEpNnMwaabmUr/oi3FADl+QVg3w=="],
 
     "@mongodb-js/saslprep": ["@mongodb-js/saslprep@1.6.1", "", { "dependencies": { "sparse-bitfield": "^3.0.3" } }, "sha512-D4CQtk9IwjCLAvCf1xvHEod3960q8XMUzfmdRU9qjUNlHnesGuTOvJcOTaPm9koZ1caUKA2aTbszZiAkcmSgmg=="],
 
@@ -961,7 +961,7 @@
 
     "fn.name": ["fn.name@1.1.0", "", {}, "sha512-GRnmB5gPyJpAhTQdSZTSp9uaPSvl09KoYcMQtsB9rQoOmzs9dH6ffeccH+Z+cv6P68Hu5bC6JjRh4Ah/mHSNRw=="],
 
-    "follow-redirects": ["follow-redirects@1.16.1", "", { "peerDependencies": { "debug": "*" }, "optionalPeers": ["debug"] }, "sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg=="],
+    "follow-redirects": ["follow-redirects@1.16.2", "", { "peerDependencies": { "debug": "*" }, "optionalPeers": ["debug"] }, "sha512-/kVP2U8z596Ia0gwFrwyIeo74ta5aVmSeU1FfAUMAmcEP5EP7zydmag3SLiN64NaRKef3lxsq7i/g7ltJQDGow=="],
 
     "form-data": ["form-data@4.0.6", "", { "dependencies": { "asynckit": "^0.4.0", "combined-stream": "^1.0.8", "es-set-tostringtag": "^2.1.0", "hasown": "^2.0.4", "mime-types": "^2.1.35" } }, "sha512-vKatAh4SlVfgbv+YtmhiRjhEMJsYpsG1Y2rMQtR+SVSbytsSD1YGzDIcrAJmdFec88u/+VoGmxnl+80gL1tRCQ=="],
 
@@ -1125,7 +1125,7 @@
 
     "levn": ["levn@0.4.1", "", { "dependencies": { "prelude-ls": "^1.2.1", "type-check": "~0.4.0" } }, "sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ=="],
 
-    "librechat-data-provider": ["librechat-data-provider@0.8.524", "", { "dependencies": { "axios": "^1.20.0", "croner": "^10.0.1", "dayjs": "^1.11.13", "js-yaml": "^4.3.2", "re2js": "^2.8.6", "zod": "^3.22.4" }, "peerDependencies": { "@tanstack/react-query": "^4.28.0" } }, "sha512-AqRhbSVdVT9cn1Kt9i5qrUD19amcvqMNDbOAsoZdyvkTwESgwn6tz8BKFrC1G/AivSHC4EpcWTlw0CIuJXhMUA=="],
+    "librechat-data-provider": ["librechat-data-provider@0.8.530", "", { "dependencies": { "axios": "^1.20.0", "croner": "^10.0.1", "dayjs": "^1.11.13", "js-yaml": "^4.3.2", "re2js": "^2.9.1", "zod": "^4.6.7" }, "peerDependencies": { "@tanstack/react-query": "^4.28.0" } }, "sha512-9vaQAsgesgYkVdxMYa+OQf+TGTXoAwWBjp8DdEkifW1sabXXtLMi9tohmHW0aacwVH3+Gk8lte0kaQ5VzHEMmw=="],
 
     "lightningcss": ["lightningcss@1.32.0", "", { "dependencies": { "detect-libc": "^2.0.3" }, "optionalDependencies": { "lightningcss-android-arm64": "1.32.0", "lightningcss-darwin-arm64": "1.32.0", "lightningcss-darwin-x64": "1.32.0", "lightningcss-freebsd-x64": "1.32.0", "lightningcss-linux-arm-gnueabihf": "1.32.0", "lightningcss-linux-arm64-gnu": "1.32.0", "lightningcss-linux-arm64-musl": "1.32.0", "lightningcss-linux-x64-gnu": "1.32.0", "lightningcss-linux-x64-musl": "1.32.0", "lightningcss-win32-arm64-msvc": "1.32.0", "lightningcss-win32-x64-msvc": "1.32.0" } }, "sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ=="],
 
@@ -1393,7 +1393,7 @@
 
     "queue-microtask": ["queue-microtask@1.2.3", "", {}, "sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A=="],
 
-    "re2js": ["re2js@2.9.0", "", {}, "sha512-rZpqkd4ETP3GrQ5mDLzADr14OleeKdb/40lG84WE8absRfsVLJpWt2ifjtYYeoPqeouIkcxhTlurxIXfR5kR5Q=="],
+    "re2js": ["re2js@2.9.1", "", {}, "sha512-JIT3bEEUZTOR2YS1walNEIfH4cF/cQeZcBUFq7ldqO6lR6g0X5CBq/S8rsa9omzZcsNf8qc36jCkWpKKtncrZg=="],
 
     "react": ["react@19.3.1", "", {}, "sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw=="],
 
@@ -1868,8 +1868,6 @@
     "eslint-plugin-click-ui/eslint": ["eslint@8.57.1", "", { "dependencies": { "@eslint-community/eslint-utils": "^4.2.0", "@eslint-community/regexpp": "^4.6.1", "@eslint/eslintrc": "^2.1.4", "@eslint/js": "8.57.1", "@humanwhocodes/config-array": "^0.13.0", "@humanwhocodes/module-importer": "^1.0.1", "@nodelib/fs.walk": "^1.2.8", "@ungap/structured-clone": "^1.2.0", "ajv": "^6.12.4", "chalk": "^4.0.0", "cross-spawn": "^7.0.2", "debug": "^4.3.2", "doctrine": "^3.0.0", "escape-string-regexp": "^4.0.0", "eslint-scope": "^7.2.2", "eslint-visitor-keys": "^3.4.3", "espree": "^9.6.1", "esquery": "^1.4.2", "esutils": "^2.0.2", "fast-deep-equal": "^3.1.3", "file-entry-cache": "^6.0.1", "find-up": "^5.0.0", "glob-parent": "^6.0.2", "globals": "^13.19.0", "graphemer": "^1.4.0", "ignore": "^5.2.0", "imurmurhash": "^0.1.4", "is-glob": "^4.0.0", "is-path-inside": "^3.0.3", "js-yaml": "^4.1.0", "json-stable-stringify-without-jsonify": "^1.0.1", "levn": "^0.4.1", "lodash.merge": "^4.6.2", "minimatch": "^3.1.2", "natural-compare": "^1.4.0", "optionator": "^0.9.3", "strip-ansi": "^6.0.1", "text-table": "^0.2.0" }, "bin": { "eslint": "bin/eslint.js" } }, "sha512-ypowyDxpVSYpkXr9WPv2PAZCtNip1Mv5KTW0SCurXv/9iOpcrH9PaqUElksqEB6pChqHGDRCFTyrZlGhnLNGiA=="],
 
     "glob/minimatch": ["minimatch@3.1.5", "", { "dependencies": { "brace-expansion": "^1.1.7" } }, "sha512-VgjWUsnnT6n+NUk6eZq77zeFdpW2LWDzP6zFGrCbHXiYNul5Dzqk2HHQ5uFH2DNW5Xbp8+jVzaeNt94ssEEl4w=="],
-
-    "librechat-data-provider/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "logform/@colors/colors": ["@colors/colors@1.6.0", "", {}, "sha512-Ir+AOibqzrIsL6ajt3Rz3LskB7OiMVHqltZmspbW/TJuTVuyOMirVqAkjfY6JISiLHgyNqicAC8AyHHGzNd/dA=="],
 

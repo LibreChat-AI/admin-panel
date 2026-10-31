@@ -1,11 +1,11 @@
 import { Badge } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import {
-  ACTION_BADGE_STATE,
-  ACTION_LABEL_KEY,
   auditSubject,
   auditTargetConfig,
   formatTimestamp,
+  auditActionLabel,
+  auditActionBadgeState,
 } from './auditLogUtils';
 import { DecorativeIcon } from '@/components/shared';
 import { ROW, ROW_BUTTON } from './rows';
@@ -23,8 +23,8 @@ export function AuditLogTableRow({ entry, isLast, onOpen, buttonRef }: t.AuditLo
       <td className="px-4 py-3">
         <Badge
           size="sm"
-          state={ACTION_BADGE_STATE[entry.action]}
-          text={localize(ACTION_LABEL_KEY[entry.action])}
+          state={auditActionBadgeState(entry.action)}
+          text={auditActionLabel(entry.action, localize)}
         />
       </td>
       <td className="px-4 py-3">

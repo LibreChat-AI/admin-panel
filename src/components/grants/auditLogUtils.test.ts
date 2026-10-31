@@ -3,6 +3,10 @@ import {
   ACTION_BADGE_STATE,
   ACTION_LABEL_KEY,
   ACTION_SUMMARY_KEY,
+  auditActionLabel,
+  auditActionBadgeState,
+  auditActionSummaryKey,
+  isLabeledAuditAction,
   auditCapability,
   auditGrantee,
   auditSubject,
@@ -14,8 +18,8 @@ import {
   isoDateToDate,
   localDayBoundaryIso,
 } from './auditLogUtils';
+import { AUDIT_ACTIONS, LABELED_AUDIT_ACTIONS } from '@/constants';
 import translation from '@/locales/en/translation.json';
-import { AUDIT_ACTIONS } from '@/constants';
 
 const identityLocalize = (k: string) => k;
 
@@ -29,10 +33,39 @@ describe('ACTION_BADGE_STATE', () => {
 
   it('has a localized label and summary for every audit action', () => {
     const localeKeys = new Set(Object.keys(translation));
-    for (const action of AUDIT_ACTIONS) {
+    for (const action of LABELED_AUDIT_ACTIONS) {
       expect(localeKeys.has(ACTION_LABEL_KEY[action])).toBe(true);
       expect(localeKeys.has(ACTION_SUMMARY_KEY[action])).toBe(true);
     }
+  });
+});
+
+describe('audit actions the tab does not name', () => {
+  const localeKeys = new Set(Object.keys(translation));
+  const unlabeled = AUDIT_ACTIONS.filter((action) => !isLabeledAuditAction(action));
+
+  it('leaves 35 of the 39 published actions unnamed', () => {
+    expect(AUDIT_ACTIONS).toHaveLength(39);
+    expect(unlabeled).toHaveLength(35);
+    expect(unlabeled).toContain('role.created');
+  });
+
+  it('shows each by its own name, on a neutral badge, with a generic summary', () => {
+    for (const action of unlabeled) {
+      expect(auditActionLabel(action, identityLocalize)).toBe(action);
+      expect(auditActionBadgeState(action)).toBe('neutral');
+      expect(auditActionSummaryKey(action)).toBe('com_audit_detail_summary_other');
+    }
+    expect(localeKeys.has('com_audit_detail_summary_other')).toBe(true);
+    expect(translation.com_audit_detail_summary_other).toContain('{{action}}');
+  });
+
+  it('keeps the named actions on their own label, badge and summary', () => {
+    expect(auditActionLabel('grant.removed', identityLocalize)).toBe('com_audit_action_removed');
+    expect(auditActionBadgeState('grant.removed')).toBe('danger');
+    expect(auditActionSummaryKey('permission.insights_assigned')).toBe(
+      'com_audit_detail_summary_insights_assigned',
+    );
   });
 });
 
