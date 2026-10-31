@@ -14,6 +14,10 @@ const contextBar = (page: Page) => page.getByRole('region', { name: 'Profile bei
 const background = (locator: Locator) =>
   locator.evaluate((element) => getComputedStyle(element).backgroundColor);
 
+/** The profile selector's highlighted option; the page's native selects have selected options too. */
+const highlightedProfile = (page: Page) =>
+  page.getByRole('dialog').getByRole('listbox').getByRole('option', { selected: true });
+
 async function openSelector(page: Page) {
   await page.getByRole('button', { name: /^Select scope:/ }).click();
   return page.getByPlaceholder('Search profiles…');
@@ -97,7 +101,7 @@ test.describe('Configuration: profile lifecycle', () => {
   test('create, keep and delete a user profile with the keyboard alone', async ({ page }) => {
     await page.goto('/configuration?tab=system');
     await page.waitForLoadState('networkidle');
-    const highlighted = page.getByRole('option', { selected: true });
+    const highlighted = highlightedProfile(page);
     const createSearch = page.getByPlaceholder('Search roles, groups and users…');
 
     const search = await openSelector(page);

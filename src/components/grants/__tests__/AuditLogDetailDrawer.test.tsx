@@ -125,3 +125,33 @@ describe('AuditLogDetailDrawer copy buttons', () => {
     expect(within(drawer).queryAllByRole('img')).toEqual([]);
   });
 });
+
+describe('AuditLogDetailDrawer for an action the tab does not name', () => {
+  /** A newer LibreChat's entry: an action, category and target type the panel doesn't mirror, and no capability. */
+  const NEWER: t.AuditLogEntryWithDiff = {
+    ...ENTRY,
+    category: 'workflow',
+    action: 'workflow.started',
+    target: { type: 'workflow', id: 'w-1', name: 'Nightly' },
+    metadata: {},
+  };
+
+  it('names the action and the target type by their own names', () => {
+    const drawer = renderEntry({ entry: NEWER });
+    expect(within(drawer).getAllByText('workflow.started').length).toBeGreaterThan(0);
+    expect(within(drawer).getByText('workflow')).toBeInTheDocument();
+    expect(within(drawer).queryByText('Base configuration')).not.toBeInTheDocument();
+  });
+
+  it('leaves out the capability row when the entry concerns no capability', () => {
+    const drawer = renderEntry({ entry: NEWER });
+    expect(within(drawer).queryByText('Capability')).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole('button', { name: /copy capability$/ })).toBeNull();
+    expect(within(drawer).getByRole('button', { name: 'w-1, copy target ID' })).toBeInTheDocument();
+  });
+
+  it('keeps the capability row of a grant', () => {
+    const drawer = renderEntry();
+    expect(within(drawer).getByText('Capability')).toBeInTheDocument();
+  });
+});

@@ -72,6 +72,9 @@ const ABSENT_TYPES: ReadonlySet<string> = new Set(['undefined', 'null', 'void'])
 /** Wrappers that give a field a default, which makes it optional to write. */
 const DEFAULT_TYPES: ReadonlySet<string> = new Set(['default', 'prefault']);
 
+/** Wrappers that make a field optional to write: a default, or a `.catch()` fallback for a missing value. */
+const OPTIONAL_INPUT_TYPES: ReadonlySet<string> = new Set([...DEFAULT_TYPES, 'catch']);
+
 /** `number_format` checks of whole numbers (`.int()` is `safeint`). */
 const INT_FORMATS: ReadonlySet<string> = new Set(['safeint', 'int32', 'uint32']);
 
@@ -99,7 +102,7 @@ function unwrapNode(value: t.ZodSchemaLike): UnwrappedNode {
     description ??= schema.description;
     if (def.type === 'nonoptional') isRequired = true;
     if (def.type === 'optional' && !isRequired) isOptional = true;
-    if (DEFAULT_TYPES.has(def.type ?? '')) isOptional = true;
+    if (OPTIONAL_INPUT_TYPES.has(def.type ?? '')) isOptional = true;
     if (def.type === 'nullable') isNullable = true;
     const next = innerSchemaOf(def);
     if (!next) break;

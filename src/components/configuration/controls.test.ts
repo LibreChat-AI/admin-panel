@@ -272,6 +272,17 @@ describe('formatFieldValue / getDefaultHint', () => {
   it('shows option labels, units and grouped numbers', () => {
     const retention = schemaField('interface.retentionMode');
     expect(getDefaultHint(retention, 'temporary', localize)).toBe('Temporary chats only');
+    expect(getFieldOptions(retention, localize).map((option) => option.label)).toEqual([
+      'All chats',
+      'Temporary chats only',
+      'Every chat temporary',
+    ]);
+    expect(formatFieldValue(schemaField('emailChange.tokenTTLSeconds'), 900, localize)).toBe(
+      '900 s',
+    );
+    expect(formatFieldValue(schemaField('interface.historyCacheMaxBytes'), 2048, localize)).toBe(
+      '2,048 bytes',
+    );
     expect(getDefaultHint(schemaField('balance.startBalance'), 20000, localize)).toBe(
       '20,000 credits',
     );

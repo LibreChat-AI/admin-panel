@@ -16,6 +16,7 @@ import {
   AUDIT_ACTIONS,
   AUDIT_CATEGORIES,
   AUDIT_OUTCOMES,
+  AUDIT_LOG_CATEGORIES,
   AUDIT_SEVERITIES,
   AUDIT_ACTOR_TYPES,
   READ_AUDIT_LOG_CAPABILITY,
@@ -266,11 +267,17 @@ const auditFilterSchema = z.object({
 
 export type AuditFilters = z.infer<typeof auditFilterSchema>;
 
+/**
+ * An audit entry as the admin API sends it. `category` and `action` are any
+ * text: a newer LibreChat logs ones the panel doesn't mirror, and one such
+ * entry must not fail the page (or a deep-linked `?entryId=`). The filters
+ * keep their enums, since LibreChat refuses a value it doesn't know.
+ */
 const adminAuditLogEntrySchema = z.object({
   id: z.string(),
   schemaVersion: z.number(),
-  category: z.enum(AUDIT_CATEGORIES),
-  action: z.enum(AUDIT_ACTIONS),
+  category: z.string(),
+  action: z.string(),
   outcome: z.enum(AUDIT_OUTCOMES),
   severity: z.enum(AUDIT_SEVERITIES),
   actor: z.object({
@@ -345,11 +352,15 @@ export const getAuditLogPageFn = createServerFn({ method: 'GET' })
     await requireCapability(READ_AUDIT_LOG_CAPABILITY);
     /**
      * The LibreChat `/api/admin/audit-log` endpoint is a general-purpose event
-     * log, but this UI only renders (and `adminAuditLogEntrySchema` only parses)
-     * grant rows. Force `category=grant` so a non-grant event can never reach
-     * the strict parser and error the whole tab.
+     * log, but this tab lists capability grants and Insights permission
+     * changes only: ask for their categories (`AUDIT_LOG_CATEGORIES`), which
+     * the tab's action filters stay inside.
      */
-    const withDefaults: AuditFilters = { limit: AUDIT_LOG_PAGE_SIZE, ...data, category: ['grant'] };
+    const withDefaults: AuditFilters = {
+      limit: AUDIT_LOG_PAGE_SIZE,
+      ...data,
+      category: [...AUDIT_LOG_CATEGORIES],
+    };
     const response = await apiFetch(`/api/admin/audit-log${buildAuditLogQuery(withDefaults)}`);
     if (!response.ok) {
       await extractApiError(response, 'Failed to fetch audit log');
@@ -409,8 +420,8 @@ export const exportAuditLogServerFn = createServerFn({ method: 'POST' })
   .validator(auditFilterSchema)
   .handler(async ({ data }: { data: AuditFilters }): Promise<Response> => {
     await requireCapability(READ_AUDIT_LOG_CAPABILITY);
-    /** Grant-scoped like the page fetch — this UI only deals with grant events. */
-    const scoped: AuditFilters = { ...data, category: ['grant'] };
+    /** Scoped like the page fetch: the tab's grant and Insights entries. */
+    const scoped: AuditFilters = { ...data, category: [...AUDIT_LOG_CATEGORIES] };
     const response = await apiFetch(
       `/api/admin/audit-log/export.csv${buildAuditLogQuery(scoped)}`,
       {

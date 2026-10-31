@@ -439,7 +439,6 @@ describe('ZodLazy handling', () => {
     const field = findField(tree, 'additionalModelRequestFields');
     expect(field).toBeDefined();
     expect(field!.type).toMatch(/^union\(/);
-    expect(field!.type).not.toBe('ZodLazy');
     expect(field!.isOptional).toBe(true);
   });
 });

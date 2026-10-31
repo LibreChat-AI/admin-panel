@@ -107,6 +107,7 @@ describe('toConfigIssues — zod 4 issues', () => {
     mode: z.enum(['all', 'temporary']),
     fields: z.array(z.enum(['text'])).optional(),
     tokenUse: z.literal('access').optional(),
+    stage: z.literal(['beta', 'stable']).optional(),
     name: z.string(),
     count: z.number().int().gt(0).optional(),
     tags: z.array(z.string()).min(1).optional(),
@@ -153,6 +154,21 @@ describe('toConfigIssues — zod 4 issues', () => {
       message: 'must be "access"',
     });
     expect(isUnknownEnumValue(literal)).toBe(false);
+  });
+
+  it('calls a literal with more than one value an enum, as LibreChat reports it', () => {
+    const expected = {
+      path: 'base.stage',
+      code: 'invalid_enum_value',
+      params: { options: '"beta", "stable"' },
+      message: 'must be one of "beta", "stable"',
+      received: 'zz',
+    };
+    expect(issue({ stage: 'zz' })).toEqual([expected]);
+    const result = parseSafely(schema, { ...valid, stage: 'zz' });
+    expect(
+      result.success || !result.error ? [] : toConfigIssues(result.error.issues, 'base'),
+    ).toEqual([expected]);
   });
 
   it('calls a missing value required, an enum included, and a number in an enum a block', () => {
@@ -210,6 +226,7 @@ describe('findUnknownEnumValue', () => {
     mode: z.enum(['all', 'temporary']),
     fields: z.array(z.enum(['text'])),
     tokenUse: z.literal('access'),
+    stage: z.literal(['beta', 'stable']).optional(),
     choice: z.union([z.object({ mode: z.enum(['x', 'y']) }), z.string()]),
   });
   const unknownOf = (value: t.ConfigRecord) => {
@@ -223,6 +240,9 @@ describe('findUnknownEnumValue', () => {
       { value: 'someday', options: ['all', 'temporary'] },
     ]);
     expect(unknownOf({ ...valid, fields: ['zz'] })).toEqual([{ value: 'zz', options: ['text'] }]);
+    expect(unknownOf({ ...valid, stage: 'zz' })).toEqual([
+      { value: 'zz', options: ['beta', 'stable'] },
+    ]);
   });
 
   it("finds none for a number, a literal, or an enum inside a union's branch", () => {

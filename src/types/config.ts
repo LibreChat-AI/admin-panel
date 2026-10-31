@@ -256,7 +256,7 @@ export type ControlKind =
   | 'mime-list';
 
 /** Display unit for numeric fields (WS2). */
-export type FieldUnit = 'MB' | 'ms' | 's' | 'minutes' | 'px' | 'hours' | 'credits';
+export type FieldUnit = 'MB' | 'bytes' | 'ms' | 's' | 'minutes' | 'px' | 'hours' | 'credits';
 
 /** Control width token (WS6 applies it through `FieldMeta.width`). */
 export type ControlWidth = 'S' | 'M' | 'L';

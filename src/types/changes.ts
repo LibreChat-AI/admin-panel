@@ -210,8 +210,11 @@ export interface ConfigIssue {
    * The value an enum refused (`invalid_enum_value`, outside a union's
    * branches): text there is a member the bundled schema may not know yet.
    */
-  received?: string | number | boolean | null;
+  received?: IssuePrimitive;
 }
+
+/** A value zod reports in an issue (an issue's `input`, an enum's `values`) that JSON can hold as is. */
+export type IssuePrimitive = string | number | boolean | null;
 
 /** A location in a config document as the admin API reports it. */
 export interface ReportedLocation {
@@ -223,9 +226,9 @@ export interface ReportedLocation {
 
 /** Bounds and options of an issue the admin API reports (`issueParams`); never a submitted value. */
 export interface ReportedIssueParams {
-  expected?: string | number | boolean | null;
+  expected?: IssuePrimitive;
   received?: string;
-  options?: Array<string | number | boolean | null>;
+  options?: IssuePrimitive[];
   minimum?: number;
   maximum?: number;
   inclusive?: boolean;

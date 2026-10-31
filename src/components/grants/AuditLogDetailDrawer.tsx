@@ -9,7 +9,7 @@ import {
   capabilityLabel,
   formatTimestamp,
   auditActionLabel,
-  auditTargetConfig,
+  auditTargetBadge,
   auditActionBadgeState,
   auditActionSummaryKey,
 } from './auditLogUtils';
@@ -330,7 +330,7 @@ export function AuditLogDetailDrawer({
 
   if (!latestEntry) return null;
 
-  const targetConfig = auditTargetConfig(latestEntry.target.type);
+  const targetBadge = auditTargetBadge(latestEntry.target.type, localize);
   const subject = auditSubject(latestEntry, localize);
   const grantee = auditGrantee(latestEntry);
   const targetLabel = latestEntry.target.name ?? latestEntry.target.id ?? '';
@@ -428,8 +428,8 @@ export function AuditLogDetailDrawer({
                         state="neutral"
                         text={
                           <span className="inline-flex items-center gap-1">
-                            <DecorativeIcon name={targetConfig.icon} size="xs" />
-                            {localize(targetConfig.labelKey)}
+                            <DecorativeIcon name={targetBadge.icon} size="xs" />
+                            {targetBadge.label}
                           </span>
                         }
                       />
@@ -462,17 +462,21 @@ export function AuditLogDetailDrawer({
                   </DetailRow>
                 )}
 
-                <DetailRow label={localize('com_audit_detail_capability')}>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm text-(--cui-color-text-default)">{subject.label}</span>
-                    <CopyableMono
-                      value={subject.value}
-                      field={localize('com_audit_field_capability')}
-                      onCopied={onCopied}
-                      onCopyFailed={onCopyFailed}
-                    />
-                  </div>
-                </DetailRow>
+                {subject.value && (
+                  <DetailRow label={localize('com_audit_detail_capability')}>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm text-(--cui-color-text-default)">
+                        {subject.label}
+                      </span>
+                      <CopyableMono
+                        value={subject.value}
+                        field={localize('com_audit_field_capability')}
+                        onCopied={onCopied}
+                        onCopyFailed={onCopyFailed}
+                      />
+                    </div>
+                  </DetailRow>
+                )}
 
                 <DetailRow label={localize('com_audit_detail_entry_id')}>
                   <CopyableMono

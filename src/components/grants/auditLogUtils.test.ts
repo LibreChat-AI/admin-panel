@@ -10,7 +10,7 @@ import {
   auditCapability,
   auditGrantee,
   auditSubject,
-  auditTargetConfig,
+  auditTargetBadge,
   buildEntryPermalink,
   capabilityLabel,
   dateToIsoDate,
@@ -60,6 +60,13 @@ describe('audit actions the tab does not name', () => {
     expect(translation.com_audit_detail_summary_other).toContain('{{action}}');
   });
 
+  it('shows an action no published release lists the same way', () => {
+    expect(isLabeledAuditAction('workflow.started')).toBe(false);
+    expect(auditActionLabel('workflow.started', identityLocalize)).toBe('workflow.started');
+    expect(auditActionBadgeState('workflow.started')).toBe('neutral');
+    expect(auditActionSummaryKey('workflow.started')).toBe('com_audit_detail_summary_other');
+  });
+
   it('keeps the named actions on their own label, badge and summary', () => {
     expect(auditActionLabel('grant.removed', identityLocalize)).toBe('com_audit_action_removed');
     expect(auditActionBadgeState('grant.removed')).toBe('danger');
@@ -103,14 +110,27 @@ describe('auditGrantee', () => {
   });
 });
 
-describe('auditTargetConfig', () => {
+describe('auditTargetBadge', () => {
   it('labels agent targets as agents', () => {
-    expect(auditTargetConfig('agent').labelKey).toBe('com_audit_target_agent');
+    expect(auditTargetBadge('agent', identityLocalize)).toEqual({
+      icon: 'sparkle',
+      label: 'com_audit_target_agent',
+    });
   });
 
   it('uses the scope config for principal targets', () => {
-    expect(auditTargetConfig('role').labelKey).toBe('com_scope_roles');
+    expect(auditTargetBadge('role', identityLocalize)).toEqual({
+      icon: 'briefcase',
+      label: 'com_scope_roles',
+    });
   });
+
+  it.each(['config', 'mcp_server', 'audit_log', 'public'])(
+    'shows a target type it has no name for (%s) by that name, on a neutral dot',
+    (type) => {
+      expect(auditTargetBadge(type, identityLocalize)).toEqual({ icon: 'dot', label: type });
+    },
+  );
 });
 
 describe('auditCapability', () => {

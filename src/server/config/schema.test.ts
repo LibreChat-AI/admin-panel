@@ -265,6 +265,8 @@ describe('extractSchemaTree — Zod 4 schema internals', () => {
     trimmed: z.string().transform((value) => value.trim()),
     coerced: z.preprocess((value) => Number(value), z.number().int()),
     lazy: z.lazy(() => z.boolean()),
+    caught: z.number().int().min(1).catch(5),
+    frozen: z.object({ tags: z.array(z.string()).readonly() }).readonly(),
     described: z.string().describe('The described setting').optional(),
     wrappedDescription: z.string().optional().describe('Described on the wrapper'),
     mode: z.nativeEnum(NumericMode),
@@ -283,6 +285,16 @@ describe('extractSchemaTree — Zod 4 schema internals', () => {
     expect(field(tree, 'withDefault')).toMatchObject({ type: 'object', isOptional: true });
     expect(field(tree, 'plain').isOptional).toBe(true);
     expect(extractSchemaDefaults(schema)).toMatchObject({ withDefault: { size: 3 }, plain: 'x' });
+  });
+
+  it('steps through `.catch()` (optional to write) and `.readonly()`', () => {
+    expect(field(tree, 'caught')).toMatchObject({
+      type: 'number',
+      isOptional: true,
+      constraints: { int: true, min: 1 },
+    });
+    expect(field(tree, 'frozen')).toMatchObject({ type: 'object', isOptional: false });
+    expect(field(tree, 'frozen.tags').type).toBe('array<string>');
   });
 
   it("reads a pipe's output, and a transform's input", () => {
@@ -338,7 +350,8 @@ describe('extractSchemaTree — Zod 4 schema internals', () => {
   });
 
   it('walks the real schema with no Zod 4 type left unread', () => {
-    const wrapper = /\b(nonoptional|prefault|default|optional|nullable|pipe|transform|lazy)\b/;
+    const wrapper =
+      /\b(nonoptional|prefault|default|optional|nullable|catch|readonly|pipe|transform|lazy)\b/;
     const unread = flattenTree(realTree).filter((f) =>
       wrapper.test(f.type.replace(/(enum|literal)\([^)]*\)/g, '')),
     );

@@ -42,6 +42,24 @@ describe('ContentFiltersRenderer', () => {
     expect(screen.getByText(/^Not filtered: Prompts/)).not.toHaveTextContent('Memories');
   });
 
+  it('names the Redact action, and an action a newer LibreChat adds by its own name', () => {
+    renderSection(ContentFiltersRenderer, {
+      section: 'filters',
+      yaml: {
+        filters: {
+          messages: { pii: { action: 'redact', maxMatches: 64 } },
+          memories: { pii: { action: 'quarantine' } },
+        },
+      },
+    });
+    const list = screen.getByRole('list', { name: 'Filtered content' });
+    const [messages, memories] = within(list).getAllByRole('listitem');
+    expect(within(messages).getByText('Redact')).toBeInTheDocument();
+    expect(within(messages).queryByText('Block')).not.toBeInTheDocument();
+    expect(within(memories).getByText('quarantine')).toBeInTheDocument();
+    expect(screen.getByText(/Redact replaces each match with a placeholder/)).toBeInTheDocument();
+  });
+
   it('reads an explicit empty starter list as no built-in patterns', () => {
     renderSection(ContentFiltersRenderer, {
       section: 'filters',

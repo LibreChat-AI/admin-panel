@@ -92,6 +92,18 @@ export const AUDIT_CATEGORIES = [
   'audit',
 ] as const satisfies readonly AuditCategory[];
 
+/**
+ * The categories LibreChat files the tab's actions under (its
+ * `AUDIT_ACTION_CATEGORY`): capability grants under `grant`, Insights
+ * permission changes under `permission`. The tab asks for these alone, and
+ * LibreChat's query matches a category filter and an action filter both, so
+ * an action filter finds nothing outside them.
+ */
+export const AUDIT_LOG_CATEGORIES = [
+  'grant',
+  'permission',
+] as const satisfies readonly AuditCategory[];
+
 export const AUDIT_OUTCOMES = [
   'success',
   'failure',

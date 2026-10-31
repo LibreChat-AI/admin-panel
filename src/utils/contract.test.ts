@@ -166,6 +166,10 @@ describe('write rules', () => {
       permissions: 'yamlOnly',
       openapi: 'yamlOnly',
       cache: 'yamlOnly',
+      clientLimits: 'yamlOnly',
+      telemetry: 'yamlOnly',
+      conversationList: 'yamlOnly',
+      passwordHashing: 'yamlOnly',
     });
     expect(YAML_MANAGED_FIELDS).toEqual(BUNDLED_WRITE_RULES.yamlManagedFields);
     expect(isYamlManagedPath('registration.socialLogins')).toBe(true);
@@ -197,6 +201,32 @@ describe('write rules', () => {
     expect(isStartupOnlyPath('endpoints.agents.eventDriven', rules)).toBe(true);
     expect(isStartupOnlyPath('endpoints.agents.toolApproval.hooks', rules)).toBe(false);
     expect(isStartupOnlyPath('mcpSettings.catalogRecovery.maxStateEntries', rules)).toBe(false);
+  });
+
+  it('keeps what LibreChat reads from librechat.yaml without listing it read-only on every server', () => {
+    const server = resolveWriteRules(
+      {
+        baseOnlySections: ['filters', 'mcpAppSandbox', 'turnstile'],
+        baseOnlyPaths: [],
+        deploymentOnlyPaths: { ...DEPLOYMENT_ONLY, 'telemetry.stackTraceLimit': 'operator' },
+        derivedPaths: [],
+      },
+      BUNDLED_CONFIG_FEATURES,
+    );
+    for (const rules of [server, BUNDLED_WRITE_RULES]) {
+      expect(getReadOnlyReason('clientLimits.refreshMs', rules)).toBe('yamlOnly');
+      expect(getReadOnlyReason('telemetry.rum.enabled', rules)).toBe('yamlOnly');
+      expect(getReadOnlyReason('conversationList.maxEndpointNameLength', rules)).toBe('yamlOnly');
+      expect(getReadOnlyReason('passwordHashing.maxWorkers', rules)).toBe('yamlOnly');
+      expect(getReadOnlyReason('interface.colorModeFromUrl', rules)).toBeUndefined();
+      expect(isYamlManagedPath('fileConfig.skills.deletionCleanupConcurrency', rules)).toBe(true);
+      expect(isStartupOnlyPath('fileConfig.skills.deletionCleanupConcurrency', rules)).toBe(false);
+      expect(isYamlManagedPath('fileConfig.skills.importCleanupConcurrency', rules)).toBe(false);
+      expect(isStartupOnlyPath('interface.colorModeFromUrl', rules)).toBe(true);
+      expect(isYamlManagedPath('interface.landingFooter', rules)).toBe(false);
+    }
+    expect(isYamlManagedPath('telemetry.stackTraceLimit', server)).toBe(true);
+    expect(getReadOnlyReason('skillSync.github.enabled', server)).toBeUndefined();
   });
 
   it('lets Base set the social sign-in buttons once Base overrides apply before sign-in', () => {

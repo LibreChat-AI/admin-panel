@@ -4,7 +4,8 @@ import { isConfigRecord } from './format';
 /**
  * Zod 4 wrapper types that `unwrapSchema` (and the schema tree walk) step
  * through. `prefault` is a default applied before parsing, `nonoptional` an
- * object's `.required()` field.
+ * object's `.required()` field, `catch` a fallback for a value that fails,
+ * and `readonly` freezes the parsed value.
  */
 export const ZOD_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   'optional',
@@ -12,6 +13,8 @@ export const ZOD_WRAPPER_TYPES: ReadonlySet<string> = new Set([
   'prefault',
   'nullable',
   'nonoptional',
+  'catch',
+  'readonly',
   'pipe',
   'lazy',
 ]);

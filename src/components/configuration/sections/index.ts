@@ -74,4 +74,8 @@ export const READ_ONLY_DETAIL_KEYS: Readonly<Record<string, string>> = {
   turnstile: 'com_config_readonly_detail_turnstile',
   permissions: 'com_config_readonly_detail_permissions',
   openapi: 'com_config_readonly_detail_openapi',
+  clientLimits: 'com_config_readonly_detail_client_limits',
+  telemetry: 'com_config_readonly_detail_telemetry',
+  conversationList: 'com_config_readonly_detail_conversation_list',
+  passwordHashing: 'com_config_readonly_detail_password_hashing',
 };

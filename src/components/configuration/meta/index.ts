@@ -26,10 +26,16 @@ const REGISTRY = buildFieldMetaRegistry(META_SOURCES);
 
 const NON_LABEL_SEGMENT = /^(\d+|\[\]|\{\})$/;
 
-/** Metadata implied by a field's key when the registry sets none (units, prompts, secrets). */
+/**
+ * Metadata implied by a field's key when the registry sets none (units,
+ * prompts, secrets). A rate such as `requestsPerFiveMinutes` counts
+ * requests, so it has no unit.
+ */
 const KEY_RULES: Array<[RegExp, t.FieldMeta]> = [
   [/Ms$/, { unit: 'ms' }],
-  [/Minutes$/, { unit: 'minutes' }],
+  [/Seconds$/, { unit: 's' }],
+  [/(?<!Per\w*)Minutes$/, { unit: 'minutes' }],
+  [/Bytes$/, { unit: 'bytes' }],
   [
     /(Prompt|PromptTemplate)$|^(prompt|updatePrompt|instructions|customWelcome)$/,
     { multiline: true },
@@ -49,8 +55,9 @@ function keyMeta(path: string): t.FieldMeta | undefined {
 
 /**
  * Field metadata for a data or schema path, resolving `[]`/`{}` wildcards
- * (WS2). Key-name rules fill in what the registry leaves unset: `…Ms` and
- * `…Minutes` units, multiline prompts, and secret API keys.
+ * (WS2). Key-name rules fill in what the registry leaves unset: `…Ms`,
+ * `…Seconds`, `…Minutes` and `…Bytes` units, multiline prompts, and secret
+ * API keys.
  */
 export function getFieldMeta(path: string): t.FieldMeta | undefined {
   if (metaCache.has(path)) return metaCache.get(path);

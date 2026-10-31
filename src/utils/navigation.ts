@@ -27,7 +27,8 @@ const PRINCIPAL_TYPES: ReadonlySet<string> = new Set([
   PrincipalType.USER,
 ]);
 
-function isScopePrincipalType(value: string): value is t.ScopePrincipalType {
+/** Whether `value` is a kind of principal a profile is for: a role, a group or a user. */
+export function isScopePrincipalType(value: string): value is t.ScopePrincipalType {
   return PRINCIPAL_TYPES.has(value);
 }
 

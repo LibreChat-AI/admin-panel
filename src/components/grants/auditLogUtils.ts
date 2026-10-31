@@ -1,12 +1,11 @@
 import { ResourceType } from 'librechat-data-provider';
-import type { AdminAuditLogEntry, AuditAction } from '@librechat/data-schemas';
-import type { PrincipalType } from 'librechat-data-provider';
 import type * as t from '@/types';
 import { LABELED_AUDIT_ACTIONS, getScopeTypeConfig } from '@/constants';
+import { isScopePrincipalType } from '@/utils';
 
 /** The capability a grant entry concerns now lives in `metadata.capability`
  * (other event categories omit it). Returns '' when absent or non-string. */
-export function auditCapability(entry: Pick<AdminAuditLogEntry, 'metadata'>): string {
+export function auditCapability(entry: Pick<t.AuditLogEntryWithDiff, 'metadata'>): string {
   const cap = entry.metadata?.capability;
   return typeof cap === 'string' ? cap : '';
 }
@@ -35,37 +34,38 @@ export const ACTION_SUMMARY_KEY: Record<t.LabeledAuditAction, string> = {
 /** Summary of an entry whose action the tab doesn't name: who did it, to what, by the action's own name. */
 const OTHER_ACTION_SUMMARY_KEY = 'com_audit_detail_summary_other';
 
-const LABELED_ACTIONS: ReadonlySet<AuditAction> = new Set(LABELED_AUDIT_ACTIONS);
+const LABELED_ACTIONS: ReadonlySet<string> = new Set(LABELED_AUDIT_ACTIONS);
 
-export function isLabeledAuditAction(action: AuditAction): action is t.LabeledAuditAction {
+/** Whether the tab names `action`: any text, since a newer LibreChat may log actions the panel doesn't mirror. */
+export function isLabeledAuditAction(action: string): action is t.LabeledAuditAction {
   return LABELED_ACTIONS.has(action);
 }
 
 /** An entry's badge state: neutral for an action the tab doesn't name. */
-export function auditActionBadgeState(action: AuditAction): t.AuditBadgeState {
+export function auditActionBadgeState(action: string): t.AuditBadgeState {
   return isLabeledAuditAction(action) ? ACTION_BADGE_STATE[action] : 'neutral';
 }
 
 /** An entry's action as the tab names it, or by its own name (`role.created`) when it names none. */
-export function auditActionLabel(action: AuditAction, localize: (key: string) => string): string {
+export function auditActionLabel(action: string, localize: (key: string) => string): string {
   return isLabeledAuditAction(action) ? localize(ACTION_LABEL_KEY[action]) : action;
 }
 
 /** The summary text key for an entry's action; one the tab doesn't name gets a generic summary. */
-export function auditActionSummaryKey(action: AuditAction): string {
+export function auditActionSummaryKey(action: string): string {
   return isLabeledAuditAction(action) ? ACTION_SUMMARY_KEY[action] : OTHER_ACTION_SUMMARY_KEY;
 }
 
 const INSIGHTS_PERMISSION = 'VIEW_INSIGHTS';
 
-function isInsightsAction(action: AuditAction): boolean {
+function isInsightsAction(action: string): boolean {
   return action === 'permission.insights_assigned' || action === 'permission.insights_removed';
 }
 
 /** Capability grants carry `metadata.capability`; Insights entries change the
  * agent-level `VIEW_INSIGHTS` permission bit instead. */
 export function auditSubject(
-  entry: Pick<AdminAuditLogEntry, 'action' | 'metadata'>,
+  entry: Pick<t.AuditLogEntryWithDiff, 'action' | 'metadata'>,
   localize: (key: string) => string,
 ): t.AuditSubject {
   if (isInsightsAction(entry.action)) {
@@ -77,7 +77,7 @@ export function auditSubject(
 
 /** Insights entries target the agent; the affected principal lives in metadata. */
 export function auditGrantee(
-  entry: Pick<AdminAuditLogEntry, 'metadata'>,
+  entry: Pick<t.AuditLogEntryWithDiff, 'metadata'>,
 ): t.AuditGrantee | undefined {
   const type = entry.metadata?.principalType;
   const id = entry.metadata?.principalId;
@@ -85,16 +85,21 @@ export function auditGrantee(
   return { type, id };
 }
 
-const AGENT_TARGET_CONFIG: Pick<t.ScopeTypeConfigEntry, 'icon' | 'labelKey'> = {
-  icon: 'sparkle',
-  labelKey: 'com_audit_target_agent',
-};
-
-export function auditTargetConfig(
+/**
+ * An entry's target type as its badge shows it: a principal's or an agent's
+ * icon and name, else (a type a newer LibreChat logs, such as `mcp_server`)
+ * a neutral dot and the type's own name.
+ */
+export function auditTargetBadge(
   targetType: string,
-): Pick<t.ScopeTypeConfigEntry, 'icon' | 'labelKey'> {
-  if (targetType === ResourceType.AGENT) return AGENT_TARGET_CONFIG;
-  return getScopeTypeConfig(targetType as PrincipalType);
+  localize: (key: string) => string,
+): t.AuditTargetBadge {
+  if (targetType === ResourceType.AGENT) {
+    return { icon: 'sparkle', label: localize('com_audit_target_agent') };
+  }
+  if (!isScopePrincipalType(targetType)) return { icon: 'dot', label: targetType };
+  const config = getScopeTypeConfig(targetType);
+  return { icon: config.icon, label: localize(config.labelKey) };
 }
 
 /** Parse a `YYYY-MM-DD` filter value as a local-time date so the DatePicker

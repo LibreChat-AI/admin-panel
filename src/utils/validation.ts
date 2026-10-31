@@ -294,17 +294,15 @@ function classifyContractIssue(
   }
 }
 
-type IssuePrimitive = string | number | boolean | null;
-
 const PRIMITIVE_TYPES: ReadonlySet<string> = new Set(['string', 'number', 'boolean']);
 
 /** Whether a value zod reports (an issue's `input`, an enum's `values`) is JSON-like text, number, flag or null. */
-function isIssuePrimitive(value: core.$ZodIssueBase['input']): value is IssuePrimitive {
+function isIssuePrimitive(value: core.$ZodIssueBase['input']): value is t.IssuePrimitive {
   return value === null || PRIMITIVE_TYPES.has(typeof value);
 }
 
 /** The value an issue of a `reportInput` parse refused, when it is a primitive. */
-function refusedValue(issue: core.$ZodIssue): IssuePrimitive | undefined {
+function refusedValue(issue: core.$ZodIssue): t.IssuePrimitive | undefined {
   return 'input' in issue && isIssuePrimitive(issue.input) ? issue.input : undefined;
 }
 
@@ -314,26 +312,27 @@ function toBound(value: number | bigint): number {
 }
 
 /**
- * Whether the schema node at `path` of `schema` is an enum: zod 4 reports an
- * enum's refusal and a literal's alike (`invalid_value`). Without a schema,
- * or where the path ends at neither (a union's own path), more than one
- * allowed value means an enum.
+ * Whether an `invalid_value` issue is an enum's refusal rather than a
+ * literal's: zod 4 reports both alike. LibreChat's `getConfigIssueCode`
+ * decides by the allowed values alone (more than one is an enum, so a
+ * multi-value literal is one too); the panel does the same, except that the
+ * schema node at the issue's path keeps a one-member enum an enum, as zod 3
+ * reported it.
  */
 function isEnumRefusal(
   issue: core.$ZodIssueInvalidValue,
   schema: t.ZodSchemaLike | undefined,
 ): boolean {
+  if (issue.values.length !== 1) return true;
   const node = schema ? resolveSubSchema(schema, issue.path.map(String)) : null;
-  const type = node ? schemaType(unwrapSchema(node)) : undefined;
-  if (type === 'enum' || type === 'literal') return type === 'enum';
-  return issue.values.length !== 1;
+  return node != null && schemaType(unwrapSchema(node)) === 'enum';
 }
 
 /**
- * A zod 4 issue in the names and parameters the admin API reports (as
- * LibreChat's `getConfigIssueCode` maps them), so a schema issue and a
- * reported one are worded alike. `schema` (what was parsed) tells an enum
- * from a literal.
+ * A zod 4 issue in the codes and parameters the admin API reports
+ * (LibreChat's `getConfigIssueCode`), so a schema issue and a reported one
+ * are worded alike; only a one-member enum differs (`isEnumRefusal`).
+ * `schema` (what was parsed) tells that enum from a literal.
  */
 function toContractIssue(
   issue: core.$ZodIssue,
@@ -450,14 +449,14 @@ export function isUnknownEnumValue(issue: Pick<t.ConfigIssue, 'code' | 'received
 /**
  * The text value an enum of `schema` doesn't list (`isUnknownEnumValue`), for
  * an issue of `schema.safeParse(value, { reportInput: true })`, with the
- * values the enum lists; undefined for any other issue: a literal's, a
- * union's (an enum inside one of its branches stays the union's failure), or
- * one whose value isn't text.
+ * values the enum lists; undefined for any other issue: a one-value
+ * literal's, a union's (an enum inside one of its branches stays the union's
+ * failure), or one whose value isn't text.
  */
 export function findUnknownEnumValue(
   issue: core.$ZodIssue,
   schema: t.ZodSchemaLike,
-): { value: string; options: Array<string | number> } | undefined {
+): Omit<t.ImportEnumValue, 'path'> | undefined {
   if (issue.code !== 'invalid_value' || !isEnumRefusal(issue, schema)) return undefined;
   const value = refusedValue(issue);
   if (typeof value !== 'string') return undefined;

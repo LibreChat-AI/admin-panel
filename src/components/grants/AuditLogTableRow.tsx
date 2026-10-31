@@ -2,7 +2,7 @@ import { Badge } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import {
   auditSubject,
-  auditTargetConfig,
+  auditTargetBadge,
   formatTimestamp,
   auditActionLabel,
   auditActionBadgeState,
@@ -15,7 +15,7 @@ import { cn } from '@/utils';
 /** One audit entry; its target's name is the button that opens the entry's drawer. */
 export function AuditLogTableRow({ entry, isLast, onOpen, buttonRef }: t.AuditLogTableRowProps) {
   const localize = useLocalize();
-  const targetConfig = auditTargetConfig(entry.target.type);
+  const targetBadge = auditTargetBadge(entry.target.type, localize);
   const subject = auditSubject(entry, localize);
   const target = entry.target.name ?? entry.target.id ?? '';
   return (
@@ -34,8 +34,8 @@ export function AuditLogTableRow({ entry, isLast, onOpen, buttonRef }: t.AuditLo
             state="neutral"
             text={
               <span className="inline-flex items-center gap-1">
-                <DecorativeIcon name={targetConfig.icon} size="xs" />
-                {localize(targetConfig.labelKey)}
+                <DecorativeIcon name={targetBadge.icon} size="xs" />
+                {targetBadge.label}
               </span>
             }
           />
