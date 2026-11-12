@@ -45,6 +45,30 @@ export function UserSearchInline({
   });
 
   const results = searchQuery.data ?? [];
+  const hasResults = showResults && debouncedQuery.trim().length > 0;
+  const listOpen = hasResults && results.length > 0;
+  const noUsersFound = hasResults && results.length === 0 && !searchQuery.isLoading;
+  const popupShown = listOpen || noUsersFound;
+  const optionId = (index: number) => `${listboxId}-option-${index}`;
+
+  /**
+   * Escape with the suggestions shown closes only them, and a second one closes
+   * the dialog around the field. Radix dialogs close on Escape from a capture
+   * listener on `document`, before any React handler runs; this one is on
+   * `window`, which the event reaches first.
+   */
+  useEffect(() => {
+    if (!popupShown) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.target !== inputRef.current) return;
+      event.stopPropagation();
+      event.preventDefault();
+      setShowResults(false);
+      setActiveIndex(-1);
+    };
+    window.addEventListener('keydown', closeOnEscape, true);
+    return () => window.removeEventListener('keydown', closeOnEscape, true);
+  }, [popupShown]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -93,12 +117,8 @@ export function UserSearchInline({
     } else if (e.key === 'Enter' && activeIndex >= 0) {
       e.preventDefault();
       handleSelect(results[activeIndex]);
-    } else if (e.key === 'Escape') {
-      setShowResults(false);
     }
   };
-
-  const hasResults = showResults && debouncedQuery.trim().length > 0;
 
   const renderDropdownContent = (rect: { top: number; left: number; width: number }) => {
     const positionStyle = {
@@ -120,6 +140,7 @@ export function UserSearchInline({
           {results.map((user, i) => (
             <li
               key={user.id}
+              id={optionId(i)}
               role="option"
               aria-selected={i === activeIndex}
               onMouseDown={(e) => e.preventDefault()}
@@ -134,16 +155,26 @@ export function UserSearchInline({
               <Avatar name={user.name} size="sm" />
               <div className="flex flex-col">
                 <span className="font-medium">{user.name}</span>
-                <span className="text-xs text-(--cui-color-text-muted)">{user.email}</span>
+                <span
+                  className={cn(
+                    'text-xs',
+                    i === activeIndex
+                      ? 'text-(--cui-color-text-default)'
+                      : 'text-(--cui-color-text-muted)',
+                  )}
+                >
+                  {user.email}
+                </span>
               </div>
             </li>
           ))}
         </ul>
       );
     }
-    if (!searchQuery.isLoading) {
+    if (noUsersFound) {
       return (
         <div
+          aria-hidden="true"
           style={positionStyle}
           className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-panel) px-3 py-3 text-center text-sm text-(--cui-color-text-muted) shadow-lg"
         >
@@ -205,13 +236,17 @@ export function UserSearchInline({
         }}
         placeholder={localize('com_access_add_members_placeholder')}
         aria-label={localize('com_access_add_members_placeholder')}
-        aria-expanded={hasResults && results.length > 0}
+        aria-expanded={listOpen}
         aria-autocomplete="list"
         aria-controls={listboxId}
+        aria-activedescendant={listOpen && activeIndex >= 0 ? optionId(activeIndex) : undefined}
         role="combobox"
         disabled={disabled}
-        className="w-full rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) py-2 pr-3 pl-9 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+        className="w-full rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) py-2 pr-3 pl-9 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted)"
       />
+      <span role="status" className="sr-only">
+        {noUsersFound ? localize('com_access_no_users_found') : ''}
+      </span>
       {hasResults &&
         dropdownRect &&
         createPortal(renderDropdownContent(dropdownRect), document.body)}

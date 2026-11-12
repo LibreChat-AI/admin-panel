@@ -1,233 +1,116 @@
-import { memo, useCallback, useRef } from 'react';
+import { memo, useCallback, useEffect, useRef } from 'react';
 import type * as t from '@/types';
-import { controlSortKey } from './utils';
+import { revealConfigPath } from './reveal';
 import { useLocalize } from '@/hooks';
+import { entryHasPath } from './toc';
+import { cn } from '@/utils';
 
-const EXPAND_SETTLE_MS = 280;
+const ITEM =
+  'toc-item block w-full min-w-0 cursor-pointer truncate border-none bg-transparent text-left text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)';
 
-function getStickyHeaderOffset(el: HTMLElement, container: HTMLElement): number {
-  let current: HTMLElement | null = el.parentElement;
-  while (current && current !== container) {
-    if (current.tagName === 'SECTION' && current.id?.startsWith('section-')) {
-      const header = current.querySelector(':scope > [role="button"], :scope > button');
-      if (header) {
-        const style = window.getComputedStyle(header);
-        if (style.position === 'sticky') return header.getBoundingClientRect().height;
-      }
-    }
-    current = current.parentElement;
-  }
-  return 0;
+function Markers({ dirty, error }: { dirty: boolean; error: boolean }) {
+  const localize = useLocalize();
+  if (!dirty && !error) return null;
+  return (
+    <span className="ml-1.5 inline-flex shrink-0 items-center gap-1 align-middle">
+      {error && (
+        <span className="inline-block size-1.5 rounded-full bg-(--cui-color-text-danger)">
+          <span className="sr-only">{localize('com_config_shell_toc_error')}</span>
+        </span>
+      )}
+      {dirty && (
+        <span className="inline-block size-1.5 rounded-full bg-(--cui-color-accent-warning)">
+          <span className="sr-only">{localize('com_config_shell_toc_dirty')}</span>
+        </span>
+      )}
+    </span>
+  );
 }
 
+/**
+ * "On this page" navigation (SH-4): sections, with their entries or groups
+ * shown for the active section only; dirty and error markers; every item has
+ * a title; clicking reveals the target (expanding what leads to it).
+ */
 export const ConfigTableOfContents = memo(function ConfigTableOfContents({
-  sections,
+  entries,
   scrollContainer,
   tocRef,
   showConfiguredOnly,
   configuredPaths,
   onNavigate,
+  dirtyPaths,
+  errorPaths,
 }: t.ConfigTableOfContentsProps) {
   const localize = useLocalize();
-  const navRef = useRef<HTMLElement | null>(null);
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const cancelRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => () => cancelRef.current?.(), []);
 
   const handleClick = useCallback(
-    (id: string) => {
+    (entry: t.TocEntry, isSection: boolean) => {
       if (!scrollContainer) return;
-      onNavigate?.(id);
-
-      clearTimeout(scrollTimerRef.current);
-
-      const scrollToEl = (el: HTMLElement) => {
-        const containerRect = scrollContainer.getBoundingClientRect();
-        const elRect = el.getBoundingClientRect();
-        const stickyOffset = getStickyHeaderOffset(el, scrollContainer);
-        const top = scrollContainer.scrollTop + elRect.top - containerRect.top - stickyOffset;
-        scrollContainer.scrollTo({ top, behavior: 'smooth' });
-      };
-
-      const expandAncestors = (targetId: string): boolean => {
-        let needsExpand = false;
-        const parts = targetId.split('.');
-        for (let i = 1; i <= parts.length; i++) {
-          const ancestorId = parts.slice(0, i).join('.');
-          const ancestor = document.getElementById(ancestorId);
-          if (ancestor) {
-            const grid = ancestor.querySelector('.config-section-grid-closed');
-            if (grid) {
-              ancestor.dispatchEvent(new Event('config:expand'));
-              needsExpand = true;
-            }
-          }
-        }
-        return needsExpand;
-      };
-
-      // For entry-level TOC items (e.g. section-mcpServers-cloudflare), expand
-      // the parent ConfigSection if it's collapsed. The parent section's DOM id
-      // is the section prefix portion of the item id (e.g. section-mcpServers).
-      const expandParentSection = (targetId: string): boolean => {
-        // Walk up candidate prefixes to find a collapsed parent section.
-        // TOC item ids are formatted as `section-{sectionId}-{entryKey}`.
-        const sectionPrefix = 'section-';
-        if (!targetId.startsWith(sectionPrefix)) return false;
-        const rest = targetId.slice(sectionPrefix.length);
-        const hyphenIdx = rest.indexOf('-');
-        if (hyphenIdx === -1) return false;
-        const parentId = sectionPrefix + rest.slice(0, hyphenIdx);
-        const parent = document.getElementById(parentId);
-        if (!parent) return false;
-        const grid = parent.querySelector(':scope > .config-section-grid-closed');
-        if (!grid) return false;
-        parent.dispatchEvent(new Event('config:expand'));
-        return true;
-      };
-
-      const parentExpanded = expandParentSection(id);
-      const existing = document.getElementById(id);
-      const needsExpand = expandAncestors(id);
-
-      // Expand collapsed entry cards (ObjectEntryCard) — they use their own
-      // expand state rather than config:expand events on section elements.
-      const expandCard = (el: HTMLElement): boolean => {
-        const grid = el.querySelector(':scope > .config-section-grid-closed');
-        if (!grid) return false;
-        const header = el.querySelector<HTMLElement>(':scope > [role="button"]');
-        if (header) header.click();
-        return true;
-      };
-
-      // Expand collapsed Radix accordion items (MultiAccordion.Item).
-      const expandAccordionItem = (el: HTMLElement): boolean => {
-        if (el.getAttribute('data-state') !== 'closed') return false;
-        const trigger = el.querySelector<HTMLElement>(':scope > button[data-state="closed"]');
-        if (trigger) {
-          trigger.click();
-          return true;
-        }
-        return false;
-      };
-
-      const cardExpanded = existing
-        ? expandCard(existing) || expandAccordionItem(existing)
-        : false;
-      const needsSettle = parentExpanded || needsExpand || cardExpanded;
-
-      if (needsSettle) {
-        scrollTimerRef.current = setTimeout(() => {
-          expandAncestors(id);
-          const el = document.getElementById(id) ?? existing;
-          if (el) {
-            expandCard(el);
-            expandAccordionItem(el);
-          }
-          setTimeout(() => {
-            const target = document.getElementById(id) ?? existing;
-            if (target) scrollToEl(target);
-          }, 50);
-        }, EXPAND_SETTLE_MS);
-      } else if (existing) {
-        scrollToEl(existing);
-      }
+      onNavigate?.(entry.id);
+      cancelRef.current?.();
+      cancelRef.current = revealConfigPath(
+        scrollContainer,
+        { path: entry.path, sectionId: isSection ? undefined : entry.sectionId },
+        { align: 'start', focus: false, highlight: false },
+      );
     },
     [scrollContainer, onNavigate],
   );
 
+  /** Configured-only keeps what is set, and what a pending edit sets, reachable. */
+  const isShown = (entry: t.TocEntry, isSection: boolean) =>
+    !showConfiguredOnly ||
+    !configuredPaths ||
+    entryHasPath(entry, configuredPaths, isSection) ||
+    (!!dirtyPaths?.length && entryHasPath(entry, dirtyPaths, isSection, false));
+
+  const renderItem = (entry: t.TocEntry, isSection: boolean) => (
+    <button
+      type="button"
+      data-toc-id={entry.id}
+      title={entry.label}
+      onClick={() => handleClick(entry, isSection)}
+      className={cn(
+        ITEM,
+        isSection
+          ? 'toc-item-parent py-1.5 pr-1 pl-3 text-[13px] font-medium'
+          : 'toc-item-child py-1 pr-1 pl-6 text-xs',
+      )}
+    >
+      {entry.label}
+      <Markers
+        dirty={!!dirtyPaths?.length && entryHasPath(entry, dirtyPaths, isSection, false)}
+        error={!!errorPaths?.length && entryHasPath(entry, errorPaths, isSection, false)}
+      />
+    </button>
+  );
+
   return (
     <nav
-      ref={(el) => {
-        navRef.current = el;
-        tocRef(el);
-      }}
+      ref={tocRef}
       aria-label={localize('com_config_on_this_page')}
       className="hidden w-48 max-w-48 min-w-48 shrink-0 grow-0 overflow-hidden xl:block"
     >
-      <div className="sticky top-4 flex max-h-[calc(100vh-8rem)] flex-col overflow-x-hidden overflow-y-auto">
+      <div
+        data-toc-scroller
+        className="sticky top-4 flex max-h-[calc(100vh-8rem)] flex-col overflow-x-hidden overflow-y-auto"
+      >
         <ul className="toc-list flex flex-col">
-          {sections.map((section) => {
-            if (showConfiguredOnly && configuredPaths) {
-              const dataKey = section.schemaKey ?? section.id;
-              const prefix = `${dataKey}.`;
-              const hasConfigured = [...configuredPaths].some(
-                (p) => p === dataKey || p.startsWith(prefix),
-              );
-              if (!hasConfigured) return null;
-            }
-            const sectionDomId = `section-${section.id}`;
-
-            // Use explicit tocItems when provided, filtering by configured state.
-            let tocItems = section.tocItems;
-            if (tocItems && showConfiguredOnly && configuredPaths) {
-              tocItems = tocItems.filter((item) => {
-                const dataPath = item.dataPath ?? item.id.replace(/^section-/, '');
-                const prefix = `${dataPath}.`;
-                return [...configuredPaths].some((p) => p === dataPath || p.startsWith(prefix));
-              });
-            }
-            const children = tocItems
-              ? null
-              : section.fields
-                  .filter(
-                    (f) =>
-                      (f.children && f.children.length > 0 && !f.isArray && f.type !== 'record') ||
-                      (f.isArray && f.children && f.children.length > 0) ||
-                      (f.type === 'record' && f.recordValueType === 'complex'),
-                  )
-                  .sort((a, b) => controlSortKey(a) - controlSortKey(b));
-
+          {entries.map((entry) => {
+            if (!isShown(entry, true)) return null;
+            const children = entry.children.filter((child) => isShown(child, false));
             return (
-              <li key={section.id} className="toc-section">
-                <button
-                  type="button"
-                  data-toc-id={sectionDomId}
-                  onClick={() => handleClick(sectionDomId)}
-                  className="toc-item toc-item-parent block w-full cursor-pointer truncate border-none bg-transparent py-1.5 pr-1 pl-3 text-left text-[13px] font-medium text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)"
-                >
-                  {localize(section.titleKey)}
-                </button>
-                {tocItems && tocItems.length > 0 && (
-                  <ul className="toc-children flex flex-col">
-                    {tocItems.map((item) => (
-                      <li key={item.id}>
-                        <button
-                          type="button"
-                          data-toc-id={item.id}
-                          onClick={() => handleClick(item.id)}
-                          className="toc-item toc-item-child block w-full cursor-pointer truncate border-none bg-transparent py-1 pr-1 pl-6 text-left text-xs text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)"
-                          title={item.label}
-                        >
-                          {item.label}
-                        </button>
-                      </li>
+              <li key={entry.id} className="toc-section group/toc">
+                {renderItem(entry, true)}
+                {children.length > 0 && (
+                  <ul className="toc-children hidden flex-col group-has-data-toc-active/toc:flex">
+                    {children.map((child) => (
+                      <li key={child.id}>{renderItem(child, false)}</li>
                     ))}
-                  </ul>
-                )}
-                {children && children.length > 0 && (
-                  <ul className="toc-children flex flex-col">
-                    {children.map((child) => {
-                      if (showConfiguredOnly && configuredPaths) {
-                        const childPrefix = `${section.id}.${child.key}.`;
-                        const childPath = `${section.id}.${child.key}`;
-                        const childHasConfigured = [...configuredPaths].some(
-                          (p) => p === childPath || p.startsWith(childPrefix),
-                        );
-                        if (!childHasConfigured) return null;
-                      }
-                      const childDomId = `section-${section.id}.${child.key}`;
-                      return (
-                        <li key={child.key}>
-                          <button
-                            type="button"
-                            data-toc-id={childDomId}
-                            onClick={() => handleClick(childDomId)}
-                            className="toc-item toc-item-child block w-full cursor-pointer truncate border-none bg-transparent py-1 pr-1 pl-6 text-left text-xs text-(--cui-color-text-muted) transition-colors hover:text-(--cui-color-text-default)"
-                          >
-                            {localize(`com_config_field_${child.key}`)}
-                          </button>
-                        </li>
-                      );
-                    })}
                   </ul>
                 )}
               </li>

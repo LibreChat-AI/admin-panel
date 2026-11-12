@@ -1,39 +1,14 @@
-import { render } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { getPageNumbers, Pagination } from './Pagination';
+import '@/locales/i18n';
 
-vi.mock('@clickhouse/click-ui', () => ({
-  Pagination: ({ currentPage, totalPages, onChange }: {
-    currentPage: number;
-    totalPages: number;
-    onChange: (page: number) => void;
-  }) => (
-    <nav data-testid="cui-pagination" data-current={currentPage} data-total={totalPages}>
-      <button onClick={() => onChange(currentPage - 1)}>prev</button>
-      <button onClick={() => onChange(currentPage + 1)}>next</button>
-    </nav>
-  ),
-}));
-
-const TRANSLATIONS: Record<string, string> = {
-  com_a11y_pagination: 'Pagination',
-  com_a11y_previous_page: 'Previous page',
-  com_a11y_next_page: 'Next page',
-  com_a11y_page_n: 'Page {{page}}',
-};
-
-vi.mock('@/hooks/useLocalize', () => ({
-  default: () => (key: string, opts?: Record<string, string>) => {
-    let str = TRANSLATIONS[key] ?? key;
-    if (opts) for (const [k, v] of Object.entries(opts)) str = str.replace(`{{${k}}}`, v);
-    return str;
-  },
-  useLocalize: () => (key: string, opts?: Record<string, string>) => {
-    let str = TRANSLATIONS[key] ?? key;
-    if (opts) for (const [k, v] of Object.entries(opts)) str = str.replace(`{{${k}}}`, v);
-    return str;
-  },
-}));
+/** A pager that turns pages the way its callers do: the page lives in their state. */
+function Pager({ initialPage, totalPages }: { initialPage: number; totalPages: number }) {
+  const [page, setPage] = useState(initialPage);
+  return <Pagination currentPage={page} totalPages={totalPages} onPageChange={setPage} />;
+}
 
 describe('getPageNumbers', () => {
   it('returns all pages when total <= 7', () => {
@@ -77,12 +52,65 @@ describe('Pagination', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('renders CUI Pagination when totalPages > 1', () => {
-    const { getByTestId } = render(
-      <Pagination currentPage={2} totalPages={5} onPageChange={() => {}} />,
+  it('names its controls in words, not by their icons or the page number', () => {
+    render(<Pagination currentPage={2} totalPages={5} onPageChange={() => {}} />);
+    const nav = screen.getByRole('navigation', { name: 'Pagination' });
+    expect(nav).toContainElement(screen.getByRole('button', { name: 'Previous page' }));
+    expect(nav).toContainElement(screen.getByRole('button', { name: 'Next page' }));
+    expect(screen.getByRole('spinbutton', { name: 'Page 2 of 5' })).toHaveValue(2);
+    expect(nav).toHaveTextContent('of 5');
+    expect(screen.queryByRole('button', { name: /chevron/ })).toBeNull();
+  });
+
+  it('turns pages with Previous, Next and the page field', () => {
+    const onPageChange = vi.fn();
+    render(<Pagination currentPage={2} totalPages={5} onPageChange={onPageChange} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Previous page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
+    const field = screen.getByRole('spinbutton', { name: 'Page 2 of 5' });
+    fireEvent.change(field, { target: { value: '4' } });
+    fireEvent.change(field, { target: { value: '9' } });
+    fireEvent.change(field, { target: { value: '0' } });
+    expect(onPageChange.mock.calls).toEqual([[1], [3], [4]]);
+  });
+
+  it('disables Previous on the first page and Next on the last', () => {
+    const { rerender } = render(
+      <Pagination currentPage={1} totalPages={3} onPageChange={() => {}} />,
     );
-    const nav = getByTestId('cui-pagination');
-    expect(nav).toHaveAttribute('data-current', '2');
-    expect(nav).toHaveAttribute('data-total', '5');
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeEnabled();
+    rerender(<Pagination currentPage={3} totalPages={3} onPageChange={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Previous page' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled();
+  });
+
+  it('keeps focus on an enabled control when Next reaches the last page', () => {
+    render(<Pager initialPage={2} totalPages={3} />);
+    const next = screen.getByRole('button', { name: 'Next page' });
+    next.focus();
+    fireEvent.click(next);
+    expect(screen.getByRole('spinbutton')).toHaveValue(3);
+    expect(next).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Previous page' })).toHaveFocus();
+  });
+
+  it('keeps focus on an enabled control when Previous reaches the first page', () => {
+    render(<Pager initialPage={2} totalPages={3} />);
+    const previous = screen.getByRole('button', { name: 'Previous page' });
+    previous.focus();
+    fireEvent.click(previous);
+    expect(screen.getByRole('spinbutton')).toHaveValue(1);
+    expect(previous).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next page' })).toHaveFocus();
+  });
+
+  it('leaves focus on Next while there are pages after the new one', () => {
+    render(<Pager initialPage={1} totalPages={3} />);
+    const next = screen.getByRole('button', { name: 'Next page' });
+    next.focus();
+    fireEvent.click(next);
+    expect(next).toBeEnabled();
+    expect(next).toHaveFocus();
   });
 });

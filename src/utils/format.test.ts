@@ -1,5 +1,76 @@
 import { describe, it, expect } from 'vitest';
-import { serializeKVPairs, deepSerializeKVPairs } from './format';
+import {
+  splitPathIn,
+  hasDottedKey,
+  flattenObject,
+  getValueAtPath,
+  serializeKVPairs,
+  deepSerializeKVPairs,
+} from './format';
+
+describe('flattenObject', () => {
+  it('flattens nested objects into dot-paths', () => {
+    expect(flattenObject({ balance: { startBalance: 5, refill: { amount: 1 } } })).toEqual({
+      'balance.startBalance': 5,
+      'balance.refill.amount': 1,
+    });
+  });
+
+  it('keeps an object with a dotted key as one leaf (a path would split the key)', () => {
+    const profiles = { 'us.anthropic.claude': 'arn:a', plain: 'arn:b' };
+    expect(flattenObject({ endpoints: { bedrock: { inferenceProfiles: profiles } } })).toEqual({
+      'endpoints.bedrock.inferenceProfiles': profiles,
+    });
+  });
+});
+
+describe('getValueAtPath', () => {
+  const models = {
+    'gpt-4': { deploymentName: 'gpt4' },
+    'gpt-4.1': { deploymentName: 'gpt41' },
+    gpt5: true,
+  };
+  const root = { groups: [{ group: 'eastus', models }] };
+
+  it('reads a record key that holds dots whole, beside a key it starts with', () => {
+    expect(getValueAtPath(root, 'groups.0.models.gpt-4.1.deploymentName')).toBe('gpt41');
+    expect(getValueAtPath(root, 'groups.0.models.gpt-4.1')).toEqual({ deploymentName: 'gpt41' });
+    expect(getValueAtPath(root, 'groups.0.models.gpt-4.deploymentName')).toBe('gpt4');
+    expect(getValueAtPath(root, 'groups.0.models.gpt5')).toBe(true);
+  });
+
+  it('reads nothing where no key matches', () => {
+    expect(getValueAtPath(root, 'groups.0.models.gpt-4.2.deploymentName')).toBeUndefined();
+    expect(getValueAtPath(root, 'groups.1.models')).toBeUndefined();
+  });
+});
+
+describe('splitPathIn', () => {
+  it('keeps the longest key the values hold whole, and splits the rest of the path', () => {
+    const models = { 'gpt-4': {}, 'gpt-4.1': { deploymentName: 'gpt41' } };
+    expect(splitPathIn({ models }, 'models.gpt-4.1.deploymentName')).toEqual([
+      'models',
+      'gpt-4.1',
+      'deploymentName',
+    ]);
+    expect(splitPathIn({ models }, 'models.gpt-5.2.version')).toEqual([
+      'models',
+      'gpt-5',
+      '2',
+      'version',
+    ]);
+    expect(splitPathIn(undefined, 'a.b')).toEqual(['a', 'b']);
+  });
+});
+
+describe('hasDottedKey', () => {
+  it('is true only for an object with a key containing a dot', () => {
+    expect(hasDottedKey({ 'gpt-4.1': true })).toBe(true);
+    expect(hasDottedKey({ gpt4: true, nested: { 'a.b': 1 } })).toBe(false);
+    expect(hasDottedKey(['a.b'])).toBe(false);
+    expect(hasDottedKey('a.b')).toBe(false);
+  });
+});
 
 describe('serializeKVPairs', () => {
   it('converts KV pairs to a record', () => {

@@ -1,5 +1,12 @@
 import { defineConfig, devices } from '@playwright/test';
 
+/**
+ * E2E_BASE_URL points the suite at a running admin panel (with a real LibreChat
+ * backend) instead of starting the dev server and the mock backend. Specs that
+ * need configuration data also require E2E_LIVE=1 (see e2e/live.ts).
+ */
+const liveBaseURL = process.env.E2E_BASE_URL;
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -9,7 +16,7 @@ export default defineConfig({
   reporter: process.env.CI ? 'github' : 'html',
 
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: liveBaseURL ?? 'http://localhost:3000',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
@@ -26,19 +33,21 @@ export default defineConfig({
     },
   ],
 
-  webServer: [
-    {
-      command: 'npx vite dev --port 3000',
-      url: 'http://localhost:3000',
-      reuseExistingServer: true,
-      timeout: 30_000,
-      env: { ...process.env, VITE_API_BASE_URL: 'http://localhost:3081' },
-    },
-    {
-      command: 'node e2e/mock-backend.mjs',
-      url: 'http://localhost:3081/api/admin/oauth/openid/check',
-      reuseExistingServer: true,
-      timeout: 10_000,
-    },
-  ],
+  webServer: liveBaseURL
+    ? undefined
+    : [
+        {
+          command: 'npx vite dev --port 3000',
+          url: 'http://localhost:3000',
+          reuseExistingServer: true,
+          timeout: 30_000,
+          env: { ...process.env, VITE_API_BASE_URL: 'http://localhost:3081' },
+        },
+        {
+          command: 'node e2e/mock-backend.mjs',
+          url: 'http://localhost:3081/api/admin/oauth/openid/check',
+          reuseExistingServer: true,
+          timeout: 10_000,
+        },
+      ],
 });

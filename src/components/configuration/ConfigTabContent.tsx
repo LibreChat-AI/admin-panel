@@ -1,55 +1,100 @@
-import { useMemo } from 'react';
-import { MultiAccordion } from '@clickhouse/click-ui';
+import { Button } from '@clickhouse/click-ui';
+import { useMemo, useEffect, useContext } from 'react';
+import type { KeyboardEvent } from 'react';
 import type * as t from '@/types';
-import { SECTION_RENDERERS, SELF_CONTAINED_SECTION_RENDERERS } from './sections';
-import { FieldRenderer, SingleFieldRenderer } from './FieldRenderer';
+import {
+  SECTION_RENDERERS,
+  READ_ONLY_DETAIL_KEYS,
+  SECTION_GROUP_RENDERERS,
+  UNFOLDED_READ_ONLY_SECTIONS,
+  SELF_CONTAINED_SECTION_RENDERERS,
+} from './sections';
+import {
+  countSection,
+  hasPendingValueIn,
+  countSectionOverrides,
+  countEntrySectionOverrides,
+} from './counts';
+import { useLocalize, useAnnouncement, useConfigContract } from '@/hooks';
+import { ConfigValuesProvider } from '@/contexts/ConfigValuesContext';
+import { RevealTargetContext } from '@/contexts/RevealTargetContext';
+import { FieldRenderer, SingleFieldRenderer } from './renderer';
+import { RowFilterContext } from '@/contexts/RowFilterContext';
+import { deriveFieldValue, isSectionDisabled } from '@/utils';
+import { ScreenReaderAnnouncer } from '@/components/shared';
+import { SECTION_META, isPathInSection } from './configMeta';
+import { ReadOnlySection } from './ReadOnlySection';
+import { UnknownSettings } from './UnknownSettings';
 import { ConfigSection } from './ConfigSection';
 import { CodeField } from './fields/CodeField';
-import { isSectionDisabled } from '@/utils';
 import { InfoBanner } from './InfoBanner';
-import { hasDescendant } from './utils';
-import { useLocalize } from '@/hooks';
+import { ScopeGate } from './ScopeGate';
+import { getWriteRules } from '@/constants';
 
-/** Sections where the configured count should reflect record entries rather
- *  than leaf schema paths. Add section IDs here for any record-type section
- *  whose schema describes the value shape (not the entry keys). */
-const RECORD_ENTRY_COUNT_SECTIONS = new Set(['mcpServers']);
+/**
+ * Enter in an input of the tab form must never submit it (and so "click" its
+ * default button). Dialogs portaled from the tab (Create MCP server, Create
+ * endpoint) are left alone: their keydown bubbles here through the React
+ * tree, but they live outside the form's DOM and keep Enter-to-submit.
+ */
+function preventImplicitSubmit(event: KeyboardEvent<HTMLFormElement>) {
+  const { target } = event;
+  if (event.key !== 'Enter' || !(target instanceof HTMLInputElement)) return;
+  if (event.currentTarget.contains(target)) event.preventDefault();
+}
 
+/** One row's worth of field: a scalar or a list of scalars (no nested fields, records or objects). */
 function isSimpleScalar(f: t.SchemaField): boolean {
-  return !f.children?.length && !f.isArray && f.type !== 'record' && f.type !== 'object';
+  return !f.children?.length && f.type !== 'record' && f.type !== 'object';
 }
 
-function countLeafFields(fields: t.SchemaField[], parentPath: string): string[] {
-  const paths: string[] = [];
-  for (const field of fields) {
-    const path = `${parentPath}.${field.key}`;
-    if (field.children && field.children.length > 0) {
-      paths.push(...countLeafFields(field.children, path));
-    } else {
-      paths.push(path);
-    }
-  }
-  return paths;
+/** Why the tab shows no settings (a filter, "Set values only"), also put in the tab's status region. */
+function EmptyTabState({ message, action, onShown }: t.EmptyTabStateProps) {
+  useEffect(() => {
+    onShown(message);
+    return () => onShown('');
+  }, [message, onShown]);
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 py-16 text-(--cui-color-text-muted)">
+      <span className="text-sm">{message}</span>
+      {action}
+    </div>
+  );
 }
 
-export function ConfigTabContent({
+/**
+ * The open tab's settings. Why it shows none (a filter that matches nothing,
+ * "Set values only") is a status message (WCAG 4.1.3) from a region that
+ * stays mounted while the settings come and go, so screen readers hear it
+ * arrive.
+ */
+export function ConfigTabContent(props: t.ConfigTabContentProps) {
+  const { message, announce } = useAnnouncement();
+  return (
+    <>
+      <ScreenReaderAnnouncer message={message} />
+      <TabSettings {...props} onEmptyState={announce} />
+    </>
+  );
+}
+
+function TabSettings({
   sections,
   configValues,
   editedValues,
   onFieldChange,
   onResetField,
   onDiscardField,
-  profileMap,
   previewMode,
   previewScope,
   previewChangedPaths,
   resolvedValues,
   permissions,
-  onProfileChange,
   showChangedOnly,
   readOnly,
   configuredPaths,
   dbOverridePaths,
+  listOverrideCounts,
   touchedPaths,
   pendingResets,
   sectionPermissions,
@@ -59,20 +104,22 @@ export function ConfigTabContent({
   baseRecordKeys,
   onValidationError,
   editSessionId,
-}: t.ConfigTabContentProps) {
+  unknownSettings,
+  valueLayers,
+  visibilityEdits,
+  onHideField,
+  onUnhideField,
+  onRenameEntry,
+  visibleSectionIds,
+  filterPaths,
+  filterText,
+  onClearFilter,
+  onShowAll,
+  onEmptyState,
+}: t.TabSettingsProps) {
   const localize = useLocalize();
+  const revealTarget = useContext(RevealTargetContext);
   const fieldsDisabled = readOnly;
-
-  const getValue = (path: string, fallback: t.ConfigValue): t.ConfigValue => {
-    if (path in editedValues) {
-      if (editedValues[path] === undefined) return schemaDefaults?.[path] ?? fallback;
-      return editedValues[path];
-    }
-    if (resolvedValues && path in resolvedValues) {
-      return resolvedValues[path];
-    }
-    return fallback;
-  };
 
   const filtering = showChangedOnly;
 
@@ -88,41 +135,77 @@ export function ConfigTabContent({
     return result;
   }, [filtering, previewChangedPaths, sections]);
 
+  /**
+   * Counted over the fields each section shows (custom endpoints and providers
+   * split `endpoints`). In a profile a section's count already is what it
+   * sets, so only collections add the entries it overrides or hides.
+   */
   const sectionCounts = useMemo(() => {
+    const overridesOf = (section: t.ConfigSectionConfig): number => {
+      if (isEditingScope && configuredPaths) {
+        return countEntrySectionOverrides(section, configuredPaths, listOverrideCounts) ?? 0;
+      }
+      if (!dbOverridePaths) return 0;
+      return countSectionOverrides(section, dbOverridePaths, listOverrideCounts);
+    };
     return sections.map((s) => {
-      const key = s.schemaKey ?? s.id;
-
-      // Record-type sections (e.g. mcpServers): count entries in the record
-      // value rather than leaf schema paths, since the schema describes the
-      // *value* shape while configured paths include dynamic entry keys
-      // (mcpServers.cloudflare.type, not mcpServers.type).
-      if (RECORD_ENTRY_COUNT_SECTIONS.has(s.id) && configValues) {
-        const sectionValue = configValues[key];
-        if (sectionValue && typeof sectionValue === 'object' && !Array.isArray(sectionValue)) {
-          const count = Object.keys(sectionValue as Record<string, unknown>).length;
-          return { id: s.id, total: count, configured: count };
-        }
-      }
-
-      const leafPaths = s.sectionField ? [key] : countLeafFields(s.fields, key);
-      if (!configuredPaths || configuredPaths.size === 0) {
-        return { id: s.id, total: leafPaths.length, configured: 0 };
-      }
-      let configured = 0;
-      for (const p of leafPaths) {
-        if (configuredPaths.has(p) || hasDescendant(p, configuredPaths)) configured++;
-      }
-      return { id: s.id, total: leafPaths.length, configured };
+      const dataKey = s.schemaKey ?? s.id;
+      const fields = s.fields.filter((f) => isPathInSection(s.id, dataKey, `${dataKey}.${f.key}`));
+      const section = { ...s, fields };
+      return {
+        id: s.id,
+        ...countSection(section, configuredPaths, configValues),
+        overrides: overridesOf(section),
+      };
     });
-  }, [sections, configuredPaths, configValues]);
+  }, [
+    sections,
+    configuredPaths,
+    configValues,
+    isEditingScope,
+    dbOverridePaths,
+    listOverrideCounts,
+  ]);
 
   const countsById = useMemo(() => {
-    const map: Record<string, { total: number; configured: number }> = {};
-    for (const c of sectionCounts) {
-      map[c.id] = { total: c.total, configured: c.configured };
-    }
+    const map: Record<string, t.SectionCount> = {};
+    for (const { id, ...count } of sectionCounts) map[id] = count;
     return map;
   }, [sectionCounts]);
+
+  const contract = useConfigContract();
+  const valuesData = useMemo<t.ConfigValuesData>(
+    () => ({
+      writeRules: getWriteRules(contract),
+      titleResolution: contract.rules.titleResolution,
+      configValues,
+      editedValues,
+      resolvedValues,
+      schemaDefaults,
+      configuredPaths,
+      overridePaths: dbOverridePaths,
+      pendingResets,
+      isEditingScope,
+      layers: valueLayers,
+      visibilityEdits,
+    }),
+    [
+      configValues,
+      editedValues,
+      resolvedValues,
+      schemaDefaults,
+      configuredPaths,
+      dbOverridePaths,
+      pendingResets,
+      isEditingScope,
+      valueLayers,
+      visibilityEdits,
+      contract,
+    ],
+  );
+
+  const getValue = (path: string, fallback: t.ConfigValue): t.ConfigValue =>
+    deriveFieldValue(path, fallback, valuesData);
 
   if (sections.length === 0) {
     return (
@@ -140,45 +223,83 @@ export function ConfigTabContent({
     filtering && sectionHasChanges ? sections.filter((s) => sectionHasChanges[s.id]) : sections;
 
   if (showConfiguredOnly && !previewMode) {
-    visibleSections = visibleSections.filter((s) => {
-      const counts = countsById[s.id];
-      return counts && counts.configured > 0;
-    });
-  }
-
-  if ((filtering || showConfiguredOnly) && visibleSections.length === 0) {
-    return (
-      <div className="flex items-center justify-center py-16 text-(--cui-color-text-muted)">
-        <span className="text-sm">
-          {localize(filtering ? 'com_scope_no_changed_in_tab' : 'com_config_no_fields')}
-        </span>
-      </div>
+    visibleSections = visibleSections.filter(
+      (s) => (countsById[s.id]?.configured ?? 0) > 0 || hasPendingValueIn(s, editedValues),
     );
   }
 
-  const renderSectionContent = (section: t.ConfigSectionConfig) => {
+  if (visibleSectionIds) {
+    visibleSections = visibleSections.filter((s) => visibleSectionIds.has(s.id));
+  }
+
+  if (visibleSections.length === 0 && filtering) {
+    return (
+      <EmptyTabState message={localize('com_scope_no_changed_in_tab')} onShown={onEmptyState} />
+    );
+  }
+
+  if (visibleSections.length === 0 && visibleSectionIds) {
+    return (
+      <EmptyTabState
+        message={localize('com_config_shell_filter_empty', { query: filterText ?? '' })}
+        onShown={onEmptyState}
+        action={
+          onClearFilter && (
+            <Button
+              htmlType="button"
+              type="secondary"
+              label={localize('com_config_shell_clear_filter')}
+              onClick={onClearFilter}
+            />
+          )
+        }
+      />
+    );
+  }
+
+  if (visibleSections.length === 0 && showConfiguredOnly) {
+    return (
+      <EmptyTabState
+        message={localize('com_config_shell_nothing_customized')}
+        onShown={onEmptyState}
+        action={
+          onShowAll && (
+            <Button
+              htmlType="button"
+              type="secondary"
+              label={localize('com_config_shell_show_all')}
+              onClick={onShowAll}
+            />
+          )
+        }
+      />
+    );
+  }
+
+  const isSectionReadOnly = (section: t.ConfigSectionConfig): boolean =>
+    section.scopeGate != null ||
+    section.readOnlyReason != null ||
+    isSectionDisabled(!!fieldsDisabled, sectionPermissions, section.schemaKey ?? section.id);
+
+  const buildFieldRendererProps = (section: t.ConfigSectionConfig): t.FieldRendererProps => {
     const dataKey = section.schemaKey ?? section.id;
-    const sectionValue = configValues?.[dataKey];
-    const sectionDisabled = isSectionDisabled(!!fieldsDisabled, sectionPermissions, dataKey);
-    const CustomSectionRenderer =
-      section.fields.length > 0 ? SECTION_RENDERERS[section.id] : undefined;
-    const fieldRendererProps: t.FieldRendererProps = {
+    const sectionDisabled = isSectionReadOnly(section);
+    return {
       fields: section.fields,
-      parentValue: sectionValue,
+      parentValue: configValues?.[dataKey],
       parentPath: dataKey,
       getValue,
       onChange: onFieldChange,
       onResetField,
       onDiscardField,
+      onHideField: sectionDisabled ? undefined : onHideField,
       editedValues,
       disabled: sectionDisabled,
-      profileMap,
       previewMode,
       previewScope,
       previewChangedPaths,
       resolvedValues,
       permissions,
-      onProfileChange,
       showChangedOnly,
       configuredPaths,
       dbOverridePaths,
@@ -190,12 +311,28 @@ export function ConfigTabContent({
       yamlBaseKeys: baseRecordKeys?.[dataKey],
       onValidationError,
       editSessionId,
+      onUnhideField: sectionDisabled ? undefined : onUnhideField,
+      onRenameEntry,
     };
-    return (
+  };
+
+  const renderSectionContent = (section: t.ConfigSectionConfig) => {
+    const dataKey = section.schemaKey ?? section.id;
+    const sectionValue = configValues?.[dataKey];
+    const sectionDisabled = isSectionReadOnly(section);
+    const CustomSectionRenderer =
+      section.fields.length > 0 ? SECTION_RENDERERS[section.id] : undefined;
+    const fieldRendererProps = buildFieldRendererProps(section);
+    const content = (
       <>
-        {section.bannerText && (
+        {section.bannerText && !section.readOnlyReason && !section.scopeGate && (
           <div className="mb-4">
-            <InfoBanner text={section.bannerText} />
+            <InfoBanner
+              text={section.bannerText}
+              link={section.bannerLink}
+              dismissible
+              dismissKey={`section:${section.id}`}
+            />
           </div>
         )}
         {section.fields.length > 0 &&
@@ -204,6 +341,12 @@ export function ConfigTabContent({
           ) : (
             <FieldRenderer {...fieldRendererProps} />
           ))}
+        {section.fields.length > 0 &&
+          !CustomSectionRenderer &&
+          !section.isRecord &&
+          !filterPaths && (
+            <UnknownSettings fields={section.fields} value={sectionValue} path={dataKey} />
+          )}
         {section.fields.length === 0 && section.sectionField && (
           <SingleFieldRenderer
             field={section.sectionField}
@@ -214,7 +357,6 @@ export function ConfigTabContent({
             onResetField={onResetField}
             disabled={sectionDisabled}
             permissions={permissions}
-            onProfileChange={onProfileChange}
             previewMode={previewMode}
             previewScope={previewScope}
             previewChangedPaths={previewChangedPaths}
@@ -238,6 +380,36 @@ export function ConfigTabContent({
         )}
       </>
     );
+    if (section.scopeGate) {
+      return (
+        <ScopeGate
+          reason={section.scopeGate}
+          title={section.title ?? localize(section.titleKey)}
+          section={dataKey}
+        >
+          {content}
+        </ScopeGate>
+      );
+    }
+    if (!section.readOnlyReason) return content;
+    /** A single-field section is its row: nothing to fold. */
+    const isEmpty =
+      countsById[section.id]?.configured === 0 &&
+      !UNFOLDED_READ_ONLY_SECTIONS.has(section.id) &&
+      !isInlineSection(section);
+    const detailKey = READ_ONLY_DETAIL_KEYS[section.id];
+    const reveal =
+      revealTarget != null && (revealTarget === dataKey || revealTarget.startsWith(`${dataKey}.`));
+    return (
+      <ReadOnlySection
+        reason={section.readOnlyReason}
+        message={detailKey ? localize(detailKey) : undefined}
+        isEmpty={isEmpty && !filterPaths}
+        reveal={reveal}
+      >
+        {content}
+      </ReadOnlySection>
+    );
   };
 
   const isInlineSection = (section: t.ConfigSectionConfig): boolean =>
@@ -249,9 +421,21 @@ export function ConfigTabContent({
   type SectionGroup =
     | { kind: 'inline'; section: t.ConfigSectionConfig }
     | { kind: 'accordion'; sections: t.ConfigSectionConfig[] }
-    | { kind: 'flat'; section: t.ConfigSectionConfig };
+    | { kind: 'flat'; section: t.ConfigSectionConfig }
+    | { kind: 'group'; key: string; sections: t.ConfigSectionConfig[] };
 
   const groups = visibleSections.reduce<SectionGroup[]>((acc, section) => {
+    /** Sections sharing a `SectionMeta.group` with a group renderer render as one card (e.g. Storage). */
+    const groupKey = SECTION_META[section.id]?.group;
+    if (groupKey && SECTION_GROUP_RENDERERS[groupKey]) {
+      const existing = acc.find(
+        (g): g is Extract<SectionGroup, { kind: 'group' }> =>
+          g.kind === 'group' && g.key === groupKey,
+      );
+      if (existing) existing.sections.push(section);
+      else acc.push({ kind: 'group', key: groupKey, sections: [section] });
+      return acc;
+    }
     if (SELF_CONTAINED_SECTION_RENDERERS.has(section.id)) {
       acc.push({ kind: 'flat', section });
       return acc;
@@ -270,63 +454,93 @@ export function ConfigTabContent({
   }, []);
 
   return (
-    <form
-      aria-label={localize('com_nav_configuration')}
-      onSubmit={(e) => e.preventDefault()}
-      className="flex flex-col gap-6 py-4"
-    >
-      {groups.map((group) => {
-        if (group.kind === 'flat') {
-          return (
-            <div key={group.section.id} id={`section-${group.section.id}`}>
-              {renderSectionContent(group.section)}
-            </div>
-          );
-        }
-        if (group.kind === 'inline') {
-          const { section } = group;
-          const counts = countsById[section.id];
-          return (
-            <ConfigSection
-              key={section.id}
-              sectionId={section.id}
-              title={localize(section.titleKey)}
-              description={section.descriptionKey ? localize(section.descriptionKey) : undefined}
-              learnMoreUrl={section.learnMoreUrl}
-              configuredCount={counts?.configured ?? 0}
-              totalCount={counts?.total ?? 0}
-              inline
-              showConfiguredOnly={showConfiguredOnly}
-            >
-              {renderSectionContent(section)}
-            </ConfigSection>
-          );
-        }
-        return (
-          <MultiAccordion
-            key={group.sections[0].id}
-            type="multiple"
-            showBorder
-            showCheck={false}
-            fillWidth
-            defaultValue={group.sections.map((s) => s.id)}
-            data-top-level-accordion
-          >
-            {group.sections.map((section) => (
-              <MultiAccordion.Item
-                key={section.id}
-                id={`section-${section.id}`}
-                data-section-id={`section-${section.id}`}
-                value={section.id}
-                title={localize(section.titleKey)}
-              >
-                {renderSectionContent(section)}
-              </MultiAccordion.Item>
-            ))}
-          </MultiAccordion>
-        );
-      })}
-    </form>
+    <ConfigValuesProvider value={valuesData}>
+      <RowFilterContext.Provider value={filterPaths ?? null}>
+        <form
+          aria-label={localize('com_nav_configuration')}
+          onSubmit={(e) => e.preventDefault()}
+          onKeyDown={preventImplicitSubmit}
+          className="settings-content flex flex-col gap-4 py-4"
+        >
+          <button type="submit" disabled hidden aria-hidden="true" tabIndex={-1} />
+          {groups.map((group) => {
+            if (group.kind === 'group') {
+              const GroupRenderer = SECTION_GROUP_RENDERERS[group.key];
+              if (!GroupRenderer) return null;
+              return (
+                <GroupRenderer
+                  key={group.key}
+                  sections={group.sections}
+                  propsFor={buildFieldRendererProps}
+                  renderSection={renderSectionContent}
+                  counts={countsById}
+                  showConfiguredOnly={showConfiguredOnly}
+                />
+              );
+            }
+            if (group.kind === 'flat') {
+              return (
+                <div key={group.section.id} id={`section-${group.section.id}`}>
+                  {renderSectionContent(group.section)}
+                </div>
+              );
+            }
+            if (group.kind === 'inline') {
+              const { section } = group;
+              const counts = countsById[section.id];
+              return (
+                <ConfigSection
+                  key={section.id}
+                  sectionId={section.id}
+                  title={section.title ?? localize(section.titleKey)}
+                  description={
+                    section.descriptionKey ? localize(section.descriptionKey) : undefined
+                  }
+                  learnMoreUrl={section.learnMoreUrl}
+                  configuredCount={counts?.configured ?? 0}
+                  totalCount={counts?.total ?? 0}
+                  countsEntries={counts?.entries}
+                  overrideCount={counts?.overrides}
+                  inline
+                  showConfiguredOnly={showConfiguredOnly}
+                >
+                  {renderSectionContent(section)}
+                </ConfigSection>
+              );
+            }
+            return group.sections.map((section) => {
+              const counts = countsById[section.id];
+              return (
+                <ConfigSection
+                  key={section.id}
+                  sectionId={section.id}
+                  title={section.title ?? localize(section.titleKey)}
+                  description={
+                    section.descriptionKey ? localize(section.descriptionKey) : undefined
+                  }
+                  learnMoreUrl={section.learnMoreUrl}
+                  configuredCount={counts?.configured ?? 0}
+                  totalCount={counts?.total ?? 0}
+                  countsEntries={counts?.entries}
+                  overrideCount={counts?.overrides}
+                  defaultExpanded
+                  showConfiguredOnly={showConfiguredOnly}
+                >
+                  {renderSectionContent(section)}
+                </ConfigSection>
+              );
+            });
+          })}
+          {unknownSettings && !filterPaths && (
+            <UnknownSettings
+              fields={unknownSettings.fields}
+              value={unknownSettings.value}
+              path=""
+            />
+          )}
+        </form>
+      </RowFilterContext.Provider>
+    </ConfigValuesProvider>
   );
 }
 

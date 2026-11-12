@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
   ACTION_BADGE_STATE,
+  ACTION_LABEL_KEY,
+  ACTION_SUMMARY_KEY,
+  auditActionLabel,
+  auditActionBadgeState,
+  auditActionSummaryKey,
+  isLabeledAuditAction,
   auditCapability,
+  auditGrantee,
+  auditSubject,
+  auditTargetBadge,
   buildEntryPermalink,
   capabilityLabel,
   dateToIsoDate,
@@ -9,6 +18,8 @@ import {
   isoDateToDate,
   localDayBoundaryIso,
 } from './auditLogUtils';
+import { AUDIT_ACTIONS, LABELED_AUDIT_ACTIONS } from '@/constants';
+import translation from '@/locales/en/translation.json';
 
 const identityLocalize = (k: string) => k;
 
@@ -16,7 +27,110 @@ describe('ACTION_BADGE_STATE', () => {
   it('maps each audit action to a badge state', () => {
     expect(ACTION_BADGE_STATE['grant.assigned']).toBe('success');
     expect(ACTION_BADGE_STATE['grant.removed']).toBe('danger');
+    expect(ACTION_BADGE_STATE['permission.insights_assigned']).toBe('success');
+    expect(ACTION_BADGE_STATE['permission.insights_removed']).toBe('danger');
   });
+
+  it('has a localized label and summary for every audit action', () => {
+    const localeKeys = new Set(Object.keys(translation));
+    for (const action of LABELED_AUDIT_ACTIONS) {
+      expect(localeKeys.has(ACTION_LABEL_KEY[action])).toBe(true);
+      expect(localeKeys.has(ACTION_SUMMARY_KEY[action])).toBe(true);
+    }
+  });
+});
+
+describe('audit actions the tab does not name', () => {
+  const localeKeys = new Set(Object.keys(translation));
+  const unlabeled = AUDIT_ACTIONS.filter((action) => !isLabeledAuditAction(action));
+
+  it('leaves 35 of the 39 published actions unnamed', () => {
+    expect(AUDIT_ACTIONS).toHaveLength(39);
+    expect(unlabeled).toHaveLength(35);
+    expect(unlabeled).toContain('role.created');
+  });
+
+  it('shows each by its own name, on a neutral badge, with a generic summary', () => {
+    for (const action of unlabeled) {
+      expect(auditActionLabel(action, identityLocalize)).toBe(action);
+      expect(auditActionBadgeState(action)).toBe('neutral');
+      expect(auditActionSummaryKey(action)).toBe('com_audit_detail_summary_other');
+    }
+    expect(localeKeys.has('com_audit_detail_summary_other')).toBe(true);
+    expect(translation.com_audit_detail_summary_other).toContain('{{action}}');
+  });
+
+  it('shows an action no published release lists the same way', () => {
+    expect(isLabeledAuditAction('workflow.started')).toBe(false);
+    expect(auditActionLabel('workflow.started', identityLocalize)).toBe('workflow.started');
+    expect(auditActionBadgeState('workflow.started')).toBe('neutral');
+    expect(auditActionSummaryKey('workflow.started')).toBe('com_audit_detail_summary_other');
+  });
+
+  it('keeps the named actions on their own label, badge and summary', () => {
+    expect(auditActionLabel('grant.removed', identityLocalize)).toBe('com_audit_action_removed');
+    expect(auditActionBadgeState('grant.removed')).toBe('danger');
+    expect(auditActionSummaryKey('permission.insights_assigned')).toBe(
+      'com_audit_detail_summary_insights_assigned',
+    );
+  });
+});
+
+describe('auditSubject', () => {
+  it('uses the capability for grant entries', () => {
+    expect(
+      auditSubject(
+        { action: 'grant.assigned', metadata: { capability: 'manage:users' } },
+        identityLocalize,
+      ),
+    ).toEqual({ label: 'manage:users', value: 'manage:users' });
+  });
+
+  it('reports the VIEW_INSIGHTS permission for Insights entries', () => {
+    expect(
+      auditSubject(
+        { action: 'permission.insights_removed', metadata: { principalType: 'user' } },
+        identityLocalize,
+      ),
+    ).toEqual({ label: 'com_audit_insights_permission', value: 'VIEW_INSIGHTS' });
+  });
+});
+
+describe('auditGrantee', () => {
+  it('reads the affected principal from metadata', () => {
+    expect(auditGrantee({ metadata: { principalType: 'group', principalId: 'g1' } })).toEqual({
+      type: 'group',
+      id: 'g1',
+    });
+  });
+
+  it('returns undefined for grant entries without principal metadata', () => {
+    expect(auditGrantee({ metadata: { capability: 'manage:users' } })).toBeUndefined();
+    expect(auditGrantee({ metadata: undefined })).toBeUndefined();
+  });
+});
+
+describe('auditTargetBadge', () => {
+  it('labels agent targets as agents', () => {
+    expect(auditTargetBadge('agent', identityLocalize)).toEqual({
+      icon: 'sparkle',
+      label: 'com_audit_target_agent',
+    });
+  });
+
+  it('uses the scope config for principal targets', () => {
+    expect(auditTargetBadge('role', identityLocalize)).toEqual({
+      icon: 'briefcase',
+      label: 'com_scope_roles',
+    });
+  });
+
+  it.each(['config', 'mcp_server', 'audit_log', 'public'])(
+    'shows a target type it has no name for (%s) by that name, on a neutral dot',
+    (type) => {
+      expect(auditTargetBadge(type, identityLocalize)).toEqual({ icon: 'dot', label: type });
+    },
+  );
 });
 
 describe('auditCapability', () => {

@@ -7,56 +7,182 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'src/**'
-      - 'server.ts'
-      - 'package.json'
-      - 'bun.lock'
-      - 'Dockerfile'
-      - '.github/workflows/docker-publish.yml'
+    paths-ignore:
+      - 'e2e/**'
+      - 'scripts/**'
+      - '*.md'
+      - '.env.example'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  queue: max
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/librechat-ai/librechat-admin-panel
 
 jobs:
-  build:
+  prepare:
+    name: Prepare tags
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
+      publish: ${{ steps.meta.outputs.tags != '' }}
+
+    steps:
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,format=long,prefix=,enable={{is_default_branch}}
+
+      - name: Refuse a publishing run without tags
+        if: github.event_name != 'workflow_dispatch' && steps.meta.outputs.tags == ''
+        run: |
+          echo "::error::No image tags for $GITHUB_REF: release tags must be semver (vX.Y.Z)."
+          exit 1
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: prepare
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        if: needs.prepare.outputs.publish == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          labels: ${{ needs.prepare.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=${{ needs.prepare.outputs.publish }}
+
+      - name: Export digest
+        if: needs.prepare.outputs.publish == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          if [ -z "$DIGEST" ]; then
+            echo "The build produced no digest." >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - name: Upload digest
+        if: needs.prepare.outputs.publish == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
+  merge:
+    name: Merge and tag
+    needs: [prepare, build]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Check whether main's head still builds this image
+        id: head
+        run: |
+          git fetch --quiet origin main
+          context=(. ':(exclude)e2e' ':(exclude)scripts' ':(exclude,glob)*.md' ':(exclude).env.example')
+          latest=false
+          if [ "$GITHUB_REF" = refs/heads/main ] && git merge-base --is-ancestor "$GITHUB_SHA" FETCH_HEAD; then
+            changed=$(git log --full-history --format=%H "$GITHUB_SHA..FETCH_HEAD" -- "${context[@]}") || changed=unknown
+            if [ -z "$changed" ]; then latest=true; fi
+          fi
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          pattern: digests-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/digests
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/clickhouse/librechat-admin-panel
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,format=long,prefix=,enable={{is_default_branch}}
+      - name: Create the manifest list and push its tags
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+          LATEST: ${{ steps.head.outputs.latest }}
+        run: |
+          shopt -s nullglob
+          mkdir -p "$RUNNER_TEMP/digests"
+          cd "$RUNNER_TEMP/digests"
+          digests=(*)
+          if [ "${#digests[@]}" -ne 2 ]; then
+            echo "Expected 2 platform digests (amd64, arm64), found ${#digests[@]}: ${digests[*]}. If the digest artifacts expired, use Re-run all jobs." >&2
+            exit 1
+          fi
+          tag_args=()
+          while IFS= read -r tag; do
+            if [ -n "$tag" ]; then tag_args+=(-t "$tag"); fi
+          done <<< "$TAGS"
+          if [ "${#tag_args[@]}" -eq 0 ]; then
+            echo "No tags to publish; refusing to push an untagged manifest list." >&2
+            exit 1
+          fi
+          if [ "$LATEST" = true ]; then tag_args+=(-t "$IMAGE:latest"); fi
+          docker buildx imagetools create "${tag_args[@]}" "${digests[@]/#/$IMAGE@sha256:}"
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/amd64,linux/arm64
+      - name: Inspect the image
+        env:
+          TAGS: ${{ needs.prepare.outputs.tags }}
+        run: docker buildx imagetools inspect "$(head -n 1 <<< "$TAGS")"

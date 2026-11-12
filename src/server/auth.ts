@@ -1,14 +1,22 @@
 import { z } from 'zod';
 import crypto from 'crypto';
 import { redirect } from '@tanstack/react-router';
-import { queryOptions } from '@tanstack/react-query';
 import { createServerFn } from '@tanstack/react-start';
 import { getRequestHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
+import {
+  SSO_PROVIDERS,
+  SSO_PROVIDER_IDS,
+  EXCHANGE_CODE_PATTERN,
+  TENANT_CONTEXT_REQUIRED_CODE,
+  TWO_FACTOR_FEDERATED_LOGIN_BLOCKED_CODE,
+} from '@/constants';
+import { offeredSsoProviders, toSafeRedirect, ssoStartPath } from '@/utils';
 import { getApiBaseUrl, getServerApiUrl } from './utils/url';
 import { refreshAdminTokenDeduped } from './utils/refresh';
 import { buildOAuthExchangePayload } from './utils/oauth';
 import { useAppSession, getSessionConfig } from './session';
+import { tenantHeaders } from './utils/tenant';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
 function extractCookieValue(response: Response, name: string): string | undefined {
@@ -21,6 +29,17 @@ function extractCookieValue(response: Response, name: string): string | undefine
   return undefined;
 }
 
+/** The first entry of a header each proxy hop may append to (`https, http`), trimmed; `undefined` when blank. */
+function firstHeaderValue(name: string): string | undefined {
+  return getRequestHeader(name)?.split(',')[0].trim() || undefined;
+}
+
+/**
+ * The panel's browser-facing origin, which LibreChat checks against the origin
+ * it bound the exchange code to. Without `Origin` or `Referer` it is rebuilt
+ * from forwarding metadata, where `X-Forwarded-Host` wins over a `Host` the
+ * proxy rewrote to the upstream (`admin-panel:3000`).
+ */
 function getRequestOrigin(): string | undefined {
   const origin = getRequestHeader('origin');
   if (origin) return origin;
@@ -34,46 +53,105 @@ function getRequestOrigin(): string | undefined {
     }
   }
 
-  const host = getRequestHeader('host');
+  const host = firstHeaderValue('x-forwarded-host') ?? getRequestHeader('host');
   if (!host) return undefined;
 
-  const proto = getRequestHeader('x-forwarded-proto') ?? 'http';
+  const proto = firstHeaderValue('x-forwarded-proto') ?? 'http';
   return `${proto}://${host}`;
 }
 
+function failure(code: t.AuthErrorCode): t.AuthFailure {
+  return { error: true, code };
+}
+
+/** The reply's JSON error body; `{}` when it has none (a proxy's HTML page, an empty 429). */
+async function readErrorBody(response: Response): Promise<t.AuthErrorBody> {
+  const body: t.AuthErrorBody | null = await response.json().catch(() => null);
+  return body && typeof body === 'object' ? body : {};
+}
+
+/** The failure each `code` of LibreChat's pre-auth 403s names. */
+const FORBIDDEN_ERROR_CODES: ReadonlyMap<string, t.AuthErrorCode> = new Map([
+  [TENANT_CONTEXT_REQUIRED_CODE, 'tenant_required'],
+  [TWO_FACTOR_FEDERATED_LOGIN_BLOCKED_CODE, 'federated_login'],
+]);
+
+/**
+ * A 403 before sign-in: strict tenant isolation refusing a request that
+ * carried no tenant, or 2FA enforcement refusing a password for an account its
+ * identity provider owns. Any other 403 is `fallback`, as it read before
+ * LibreChat sent these codes.
+ */
+function forbiddenCode(body: t.AuthErrorBody, fallback: t.AuthErrorCode): t.AuthErrorCode {
+  return (body.code ? FORBIDDEN_ERROR_CODES.get(body.code) : undefined) ?? fallback;
+}
+
+/**
+ * Why `POST /api/admin/login/local` refused. LibreChat's `requireLocalAuth`
+ * answers 404 for an unknown email and a wrong password alike, and 422 only
+ * for an unverified email.
+ */
+function loginFailureCode(status: number, body: t.AuthErrorBody): t.AuthErrorCode {
+  switch (status) {
+    case 403:
+      return forbiddenCode(body, 'not_admin');
+    case 404:
+      return 'invalid_credentials';
+    case 422:
+      return 'email_not_verified';
+    case 429:
+      return 'rate_limited';
+    default:
+      return 'login_failed';
+  }
+}
+
+/** Why `POST /api/auth/2fa/verify-temp` refused: a 401 says whether the temp token expired or the code was wrong. */
+function verifyTempFailureCode(status: number, body: t.AuthErrorBody): t.AuthErrorCode {
+  if (status === 401) {
+    const message = typeof body.message === 'string' ? body.message : '';
+    return message.toLowerCase().includes('expired') ? 'totp_expired' : 'totp_invalid';
+  }
+  if (status === 403) return forbiddenCode(body, 'verification_failed');
+  if (status === 429) return 'rate_limited';
+  return 'verification_failed';
+}
+
+const EXCHANGE_ERROR_CODES: ReadonlyMap<string, t.AuthErrorCode> = new Map([
+  ['MISSING_CODE', 'sso_code_invalid'],
+  ['INVALID_CODE_FORMAT', 'sso_code_invalid'],
+  ['INVALID_OR_EXPIRED_CODE', 'sso_code_expired'],
+]);
+
+/** Why `POST /api/admin/oauth/exchange` refused (its `error_code`, else the status). */
+function exchangeFailureCode(status: number, body: t.AuthErrorBody): t.AuthErrorCode {
+  const known = body.error_code ? EXCHANGE_ERROR_CODES.get(body.error_code) : undefined;
+  if (known) return known;
+  if (status === 429) return 'rate_limited';
+  if (status === 403) return forbiddenCode(body, 'not_admin');
+  return 'sso_exchange_failed';
+}
+
 export const adminLoginFn = createServerFn({ method: 'POST' })
-  .inputValidator(
+  .validator(
     z.object({
       email: z.string().email('Valid email address is required'),
       password: z.string().min(1, 'Password is required'),
     }),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<t.AdminLoginResult> => {
     try {
       const response = await fetch(`${getServerApiUrl()}/api/admin/login/local`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...tenantHeaders() },
         body: JSON.stringify(data),
       });
 
-      const responseData = await response.json();
-
       if (!response.ok) {
-        switch (response.status) {
-          case 403:
-            return { error: true, message: 'You do not have admin privileges' };
-          case 404:
-            return { error: true, message: 'User not found' };
-          case 422:
-            return { error: true, message: responseData.message || 'Invalid credentials' };
-          case 429:
-            return { error: true, message: 'Too many login attempts. Please try again later' };
-          default:
-            return { error: true, message: responseData.message || 'Login failed' };
-        }
+        return failure(loginFailureCode(response.status, await readErrorBody(response)));
       }
 
-      const loginData = responseData as t.AdminLoginResponse;
+      const loginData = (await response.json()) as t.AdminLoginResponse;
 
       if (loginData.twoFAPending) {
         return {
@@ -97,55 +175,38 @@ export const adminLoginFn = createServerFn({ method: 'POST' })
       return { error: false, user: loginData.user };
     } catch (error) {
       console.error('Admin login error:', error);
-      return { error: true, message: 'Login failed. Please check your connection and try again.' };
+      return failure('unreachable');
     }
   });
 
 export const adminVerify2FAFn = createServerFn({ method: 'POST' })
-  .inputValidator(
+  .validator(
     z.object({
       tempToken: z.string().min(1, 'Temporary token is required'),
       totpCode: z.string().regex(/^\d{6}$/, 'Code must be 6 digits'),
     }),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<t.AuthResult> => {
     try {
       const response = await fetch(`${getServerApiUrl()}/api/auth/2fa/verify-temp`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...tenantHeaders() },
         body: JSON.stringify({ tempToken: data.tempToken, token: data.totpCode }),
       });
 
-      const responseData = await response.json();
-
       if (!response.ok) {
-        if (response.status === 401) {
-          const msg = typeof responseData.message === 'string' ? responseData.message : '';
-          const isExpired = msg.toLowerCase().includes('expired');
-          return {
-            error: true,
-            expired: isExpired,
-            message: isExpired
-              ? 'Session expired. Please log in again.'
-              : 'Invalid verification code',
-          };
-        }
-        return { error: true, message: responseData.message || '2FA verification failed' };
+        return failure(verifyTempFailureCode(response.status, await readErrorBody(response)));
       }
 
-      const verifyData = responseData as t.TwoFAVerifyResponse;
+      const verifyData = (await response.json()) as t.TwoFAVerifyResponse;
       const adminVerifyResponse = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
         headers: { Authorization: `Bearer ${verifyData.token}` },
       });
 
       if (!adminVerifyResponse.ok) {
-        if (adminVerifyResponse.status === 403) {
-          return { error: true, message: 'You do not have admin privileges' };
-        }
-        if (adminVerifyResponse.status === 401) {
-          return { error: true, message: 'Session is no longer valid' };
-        }
-        return { error: true, message: '2FA verification failed' };
+        if (adminVerifyResponse.status === 403) return failure('not_admin');
+        if (adminVerifyResponse.status === 401) return failure('session_invalid');
+        return failure('verification_failed');
       }
 
       const adminVerifyData = (await adminVerifyResponse.json()) as t.AdminVerifyResponse;
@@ -164,7 +225,7 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
       return { error: false, user: adminVerifyData.user };
     } catch (error) {
       console.error('2FA verification error:', error);
-      return { error: true, message: 'Verification failed. Please try again.' };
+      return failure('verification_failed');
     }
   });
 
@@ -197,7 +258,8 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
       return { valid: false, error: 'Session expired due to inactivity' };
     }
 
-    const needsRevalidation = !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
+    const needsRevalidation =
+      !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
 
     if (needsRevalidation) {
       try {
@@ -271,7 +333,7 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(asyn
 });
 
 export const requireAuthFn = createServerFn({ method: 'GET' })
-  .inputValidator(z.object({ location: z.string() }))
+  .validator(z.object({ location: z.string() }))
   .handler(async ({ data }) => {
     const verifyResult = await verifyAdminTokenFn();
 
@@ -333,113 +395,178 @@ export const getCurrentUserFn = createServerFn({ method: 'GET' }).handler(async 
   }
 });
 
-/** Shared queryOptions so consumers deduplicate the OpenID availability check. */
-export const openIdCheckOptions = queryOptions({
-  queryKey: ['openIdCheck'],
-  queryFn: () => checkOpenIdFn(),
-  staleTime: 60_000,
-});
-
-export const checkOpenIdFn = createServerFn({ method: 'GET' }).handler(async () => {
-  if (process.env.ADMIN_SSO_ENABLED === 'false') {
-    return { available: false, ssoOnly: false };
-  }
-  const checkUrl = `${getServerApiUrl()}/api/admin/oauth/openid/check`;
+/** LibreChat's `GET /api/config`, read with the request's tenant; `undefined` when it cannot be read. */
+async function fetchSsoStartupConfig(): Promise<t.SsoStartupConfig | undefined> {
+  const configUrl = `${getServerApiUrl()}/api/config`;
   try {
-    const response = await fetch(checkUrl);
+    const response = await fetch(configUrl, { headers: tenantHeaders() });
     if (!response.ok) {
-      console.warn('[checkOpenIdFn] OpenID check failed:', response.status, checkUrl);
-      return { available: false, ssoOnly: false };
+      console.warn('[ssoProvidersFn] Startup config request failed:', response.status, configUrl);
+      return undefined;
     }
-    const ssoOnly = process.env.ADMIN_SSO_ONLY === 'true';
-    return { available: true, ssoOnly };
+    const config: t.SsoStartupConfig | null = await response.json().catch(() => null);
+    return config && typeof config === 'object' ? config : undefined;
   } catch (error) {
-    console.warn('[checkOpenIdFn] OpenID check request failed:', checkUrl, error);
-    return { available: false, ssoOnly: false };
+    console.warn('[ssoProvidersFn] Startup config request failed:', configUrl, error);
+    return undefined;
   }
-});
+}
 
-export const openidLoginFn = createServerFn({ method: 'GET' }).handler(async () => {
+/**
+ * Whether the provider's `/check` route answers: LibreChat's OpenID route
+ * does only once its client initialised, which `GET /api/config` cannot tell.
+ */
+async function checkSsoProvider(id: t.SsoProviderId): Promise<boolean> {
+  const checkUrl = `${getServerApiUrl()}${ssoStartPath(id)}/check`;
   try {
-    const baseUrl = getApiBaseUrl();
-    const authUrl = new URL(`${baseUrl}/api/admin/oauth/openid`);
-
-    const codeVerifier = crypto.randomBytes(32).toString('hex');
-    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
-    authUrl.searchParams.set('code_challenge', codeChallenge);
-
-    const session = await useAppSession();
-    await session.update({ codeVerifier });
-
-    return { error: false, authUrl: authUrl.toString() };
+    const response = await fetch(checkUrl, { headers: tenantHeaders() });
+    if (!response.ok) {
+      console.warn(`[ssoProvidersFn] ${id} check failed:`, response.status, checkUrl);
+    }
+    return response.ok;
   } catch (error) {
-    console.error('OpenID login initiation error:', error);
-    return { error: true, message: 'Failed to initiate SSO login' };
+    console.warn(`[ssoProvidersFn] ${id} check request failed:`, checkUrl, error);
+    return false;
   }
-});
+}
 
-export const oauthExchangeFn = createServerFn({ method: 'POST' })
-  .inputValidator(
-    z.object({ code: z.string().regex(/^[a-f0-9]{64}$/, 'Invalid exchange code format') }),
+const CHECKED_SSO_PROVIDERS = SSO_PROVIDER_IDS.filter(
+  (id) => SSO_PROVIDERS[id].availability === 'check',
+);
+
+/** The providers whose `/check` route answered. */
+async function checkSsoProviders(): Promise<Set<t.SsoProviderId>> {
+  const answered = await Promise.all(CHECKED_SSO_PROVIDERS.map(checkSsoProvider));
+  return new Set(CHECKED_SSO_PROVIDERS.filter((_id, index) => answered[index]));
+}
+
+/**
+ * The SSO providers LibreChat offers this request's tenant, and whether the
+ * sign-in page is SSO-only. `ADMIN_SSO_ENABLED=false` offers none and asks
+ * LibreChat nothing; `ADMIN_SSO_ONLY` holds only while one is offered, so a
+ * deployment none resolves for keeps its password form.
+ */
+export const ssoProvidersFn = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<t.SsoProviders> => {
+    if (process.env.ADMIN_SSO_ENABLED === 'false') {
+      return { providers: [], ssoOnly: false };
+    }
+    const [config, checked] = await Promise.all([fetchSsoStartupConfig(), checkSsoProviders()]);
+    const providers = offeredSsoProviders(config, checked);
+    return { providers, ssoOnly: providers.length > 0 && process.env.ADMIN_SSO_ONLY === 'true' };
+  },
+);
+
+/** The longest in-app path an SSO sign-in carries through the admin session; a longer one returns to `/`. */
+const MAX_SSO_REDIRECT_LENGTH = 2048;
+
+/** The in-app path to return to after SSO: a safe one within the length limit, else `/`. */
+function ssoRedirectOf(redirectTo: string | undefined): string {
+  return redirectTo && redirectTo.length <= MAX_SSO_REDIRECT_LENGTH
+    ? toSafeRedirect(redirectTo)
+    : '/';
+}
+
+/**
+ * Starts an SSO sign-in: the PKCE verifier and the in-app path to return to
+ * stay in the admin session, and the browser goes to LibreChat's route of the
+ * provider with only the challenge (LibreChat strips any `redirectTo`).
+ */
+export const ssoStartFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      provider: z.enum(SSO_PROVIDER_IDS),
+      redirectTo: z.string().optional(),
+    }),
   )
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<t.SsoStartResult> => {
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      const requestOrigin = getRequestOrigin();
-      if (requestOrigin) headers['Origin'] = requestOrigin;
+      const authUrl = new URL(`${getApiBaseUrl()}${ssoStartPath(data.provider)}`);
+
+      const codeVerifier = crypto.randomBytes(32).toString('hex');
+      const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('hex');
+      authUrl.searchParams.set('code_challenge', codeChallenge);
 
       const session = await useAppSession();
-      const { codeVerifier } = session.data;
-      const exchangePayload = buildOAuthExchangePayload(data.code, codeVerifier);
-      if (!exchangePayload.ok) {
+      await session.update({
+        codeVerifier,
+        ssoProvider: data.provider,
+        ssoRedirect: ssoRedirectOf(data.redirectTo),
+      });
+
+      return { error: false, authUrl: authUrl.toString() };
+    } catch (error) {
+      console.error(`[ssoStartFn] ${data.provider} sign-in initiation error:`, error);
+      return failure('sso_start_failed');
+    }
+  });
+
+/**
+ * Exchanges LibreChat's one-time code for an admin session. The session is the
+ * provider's that sign-in started with: the callback's `provider` stands in only
+ * for a sign-in started before the panel kept it.
+ */
+export const oauthExchangeFn = createServerFn({ method: 'POST' })
+  .validator(
+    z.object({
+      code: z.string().regex(EXCHANGE_CODE_PATTERN, 'Invalid exchange code format'),
+      provider: z.enum(SSO_PROVIDER_IDS),
+    }),
+  )
+  .handler(async ({ data }): Promise<t.SsoExchangeResult> => {
+    try {
+      const requestOrigin = getRequestOrigin();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...(requestOrigin ? { Origin: requestOrigin } : {}),
+        ...tenantHeaders(),
+      };
+
+      const session = await useAppSession();
+      const exchangeBody = buildOAuthExchangePayload(data.code, session.data.codeVerifier);
+      if (!exchangeBody) {
         console.warn(
           '[oauthExchangeFn] Missing PKCE verifier from admin session; check SESSION_COOKIE_SECURE for HTTP deployments',
         );
-        return { error: true, message: exchangePayload.message };
+        return failure('sso_verifier_lost');
       }
 
       const response = await fetch(`${getServerApiUrl()}/api/admin/oauth/exchange`, {
         method: 'POST',
         headers,
-        body: exchangePayload.body,
+        body: exchangeBody,
       });
 
-      const responseData = await response.json();
-
       if (!response.ok) {
-        const errorCode = responseData.error_code;
-        switch (errorCode) {
-          case 'MISSING_CODE':
-            return { error: true, message: 'Authorization code is required' };
-          case 'INVALID_CODE_FORMAT':
-            return { error: true, message: 'Invalid authorization code format' };
-          case 'INVALID_OR_EXPIRED_CODE':
-            return { error: true, message: 'Authorization code has expired. Please try again.' };
-          default:
-            if (response.status === 429)
-              return { error: true, message: 'Too many requests. Please wait and try again.' };
-            if (response.status === 403)
-              return { error: true, message: 'You do not have admin privileges' };
-            return { error: true, message: responseData.message || 'OAuth exchange failed' };
+        const code = exchangeFailureCode(response.status, await readErrorBody(response));
+        if (code === 'sso_code_expired') {
+          console.warn(
+            "[oauthExchangeFn] LibreChat refused the exchange code as invalid or expired. It binds each code to its ADMIN_PANEL_URL's origin: if that differs from the Origin forwarded here, align ADMIN_PANEL_URL or the proxy's forwarded headers; if it matches, the code expired, was already used, failed its PKCE check, or was issued by a replica whose cache this one does not share. Forwarded Origin:",
+            requestOrigin ?? '(none)',
+          );
         }
+        return failure(code);
       }
 
-      const exchangeData = responseData as t.OAuthExchangeResponse;
+      const exchangeData = (await response.json()) as t.OAuthExchangeResponse;
+      const redirectTo = toSafeRedirect(session.data.ssoRedirect);
       const now = Date.now();
       await session.update({
         user: exchangeData.user,
         token: exchangeData.token,
         refreshToken: exchangeData.refreshToken ?? extractCookieValue(response, 'refreshToken'),
-        tokenProvider: 'openid',
+        tokenProvider: session.data.ssoProvider ?? data.provider,
         expiresAt: exchangeData.expiresAt,
         lastVerified: now,
         lastActivity: now,
         codeVerifier: undefined,
+        ssoProvider: undefined,
+        ssoRedirect: undefined,
       });
 
-      return { error: false, user: exchangeData.user };
+      return { error: false, user: exchangeData.user, redirectTo };
     } catch (error) {
       console.error('OAuth exchange error:', error);
-      return { error: true, message: 'Failed to complete authentication. Please try again.' };
+      return failure('sso_exchange_failed');
     }
   });

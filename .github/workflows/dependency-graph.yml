@@ -1,0 +1,44 @@
+name: Dependency Graph
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'bun.lock'
+      - 'package.json'
+      - 'scripts/dependencies.ts'
+      - '.github/workflows/dependency-graph.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  submit:
+    name: Submit bun.lock
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build the snapshot
+        run: bun scripts/dependencies.ts > "$RUNNER_TEMP/snapshot.json"
+
+      - name: Submit the snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST "repos/$GITHUB_REPOSITORY/dependency-graph/snapshots" \
+            --input "$RUNNER_TEMP/snapshot.json" --jq '"\(.result) \(.message) (snapshot \(.id))"'

@@ -1,13 +1,61 @@
 import { describe, it, expect } from 'vitest';
 import {
+  isSecretPath,
+  holdsSecretAt,
+  isSecretPreviewPath,
   toSecretPreviewKey,
   getSecretPreviewValue,
   secretPathForPreviewPath,
   mapSecretPreviewPaths,
   stripSecretPreviewValues,
   filterSecretPreviewFields,
+  maskSecretValues,
+  maskStoredSecrets,
+  MASKED_SECRET,
 } from './secrets';
 import { createField } from '@/test/fixtures';
+
+describe('isSecretPath', () => {
+  it('marks secret keys, and the key of a secret holder', () => {
+    expect(isSecretPath('endpoints.custom.0.apiKey')).toBe(true);
+    expect(isSecretPath('mcpServers.x.apiKey.key')).toBe(true);
+    expect(isSecretPath('mcpServers.x.oauth.client_secret')).toBe(true);
+    expect(isSecretPath('webSearch.tavilyApiKey')).toBe(true);
+    expect(isSecretPath('langfuse.secretKey')).toBe(true);
+    expect(isSecretPath('apiKey')).toBe(true);
+  });
+
+  it('leaves out the settings beside a secret and a key outside a secret holder', () => {
+    expect(isSecretPath('mcpServers.x.apiKey.source')).toBe(false);
+    expect(isSecretPath('mcpServers.x.headers.key')).toBe(false);
+    expect(isSecretPath('mcpServers.x.apiKey.keyPreview')).toBe(false);
+    expect(isSecretPath('key')).toBe(false);
+  });
+});
+
+describe('isSecretPreviewPath', () => {
+  it("marks a secret's masked preview, by the secret it stands beside", () => {
+    expect(isSecretPreviewPath('mcpServers.x.apiKey.keyPreview')).toBe(true);
+    expect(isSecretPreviewPath('mcpServers.x.oauth.client_secretPreview')).toBe(true);
+    expect(isSecretPreviewPath('webSearch.tavilyApiKeyPreview')).toBe(true);
+    expect(isSecretPreviewPath('mcpServers.x.headers.keyPreview')).toBe(false);
+    expect(isSecretPreviewPath('interface.filePreview')).toBe(false);
+  });
+});
+
+describe('holdsSecretAt', () => {
+  it('reads a secret as stored from its value or its masked preview', () => {
+    const stored = {
+      a: { apiKey: { keyPreview: '...3333' } },
+      b: { apiKey: { key: '${ACME_KEY}' } },
+      c: { apiKey: { keyPreview: '' } },
+    };
+    expect(holdsSecretAt(stored, 'a.apiKey.key')).toBe(true);
+    expect(holdsSecretAt(stored, 'b.apiKey.key')).toBe(true);
+    expect(holdsSecretAt(stored, 'c.apiKey.key')).toBe(false);
+    expect(holdsSecretAt(stored, 'd.apiKey.key')).toBe(false);
+  });
+});
 
 describe('toSecretPreviewKey', () => {
   it('capitalizes the key behind a display prefix', () => {
@@ -142,5 +190,101 @@ describe('filterSecretPreviewFields', () => {
       createField({ key: 'apiKeyPreview', type: 'object', isObject: true }),
     ];
     expect(filterSecretPreviewFields(fields)).toHaveLength(2);
+  });
+});
+
+describe('maskSecretValues', () => {
+  it('masks secret keys at any depth and leaves other values alone', () => {
+    expect(
+      maskSecretValues([{ group: 'eastus', apiKey: '${EASTUS_API_KEY}', models: { m: true } }]),
+    ).toEqual([{ group: 'eastus', apiKey: MASKED_SECRET, models: { m: true } }]);
+  });
+
+  it('masks a secret leaf passed on its own, but not an empty one', () => {
+    expect(maskSecretValues('sk-live', 'apiKey')).toBe(MASKED_SECRET);
+    expect(maskSecretValues('', 'apiKey')).toBe('');
+    expect(maskSecretValues('https://x', 'baseURL')).toBe('https://x');
+  });
+});
+
+describe('maskStoredSecrets', () => {
+  it('masks every key the secret rule names, at any depth, and keeps ${VAR} references readable', () => {
+    expect(
+      maskStoredSecrets({
+        endpoints: {
+          custom: [
+            { name: 'A', apiKey: '${CH_API_KEY}', apiKeyPreview: 'sk-...abcd' },
+            { name: 'B', apiKey: 'sk-live' },
+          ],
+        },
+        webSearch: { tavilyApiKey: 'tvly-live', serperApiKey: '${SERPER_API_KEY}' },
+        mcpServers: {
+          acme: {
+            apiKey: { source: 'admin', authorization_type: 'bearer', key: 'live-key' },
+            oauth: { client_secret: 'shh', client_id: 'acme' },
+          },
+        },
+        ocr: { apiKey: '${OCR_API_KEY}', baseURL: 'https://ocr' },
+      }),
+    ).toEqual({
+      endpoints: {
+        custom: [
+          { name: 'A', apiKey: '${CH_API_KEY}', apiKeyPreview: 'sk-...abcd' },
+          { name: 'B', apiKey: MASKED_SECRET },
+        ],
+      },
+      webSearch: { tavilyApiKey: MASKED_SECRET, serperApiKey: '${SERPER_API_KEY}' },
+      mcpServers: {
+        acme: {
+          apiKey: { source: 'admin', authorization_type: 'bearer', key: MASKED_SECRET },
+          oauth: { client_secret: MASKED_SECRET, client_id: 'acme' },
+        },
+      },
+      ocr: { apiKey: '${OCR_API_KEY}', baseURL: 'https://ocr' },
+    });
+  });
+
+  it('masks a reference with text around it, and leaves empty values and other keys alone', () => {
+    expect(maskStoredSecrets('prefix-${KEY}', ['apiKey'])).toBe(MASKED_SECRET);
+    expect(maskStoredSecrets('', ['cohereApiKey'])).toBe('');
+    expect(maskStoredSecrets('live', ['headers', 'key'])).toBe('live');
+  });
+
+  it('shows the references LibreChat keeps readable where it keeps them, and masks them elsewhere', () => {
+    expect(
+      maskStoredSecrets({
+        endpoints: {
+          custom: [
+            { name: 'Groq', apiKey: 'user_provided' },
+            { name: 'Mustache', apiKey: '{{GROQ_KEY}}' },
+          ],
+          azureOpenAI: { groups: [{ group: 'eastus', apiKey: 'user_provided' }] },
+        },
+        webSearch: { tavilyApiKey: 'user_provided' },
+        mcpServers: {
+          acme: {
+            apiKey: { source: 'user', key: '{{ACME_KEY}}' },
+            oauth: { client_secret: '{{ACME_SECRET}}' },
+          },
+          beta: { apiKey: { source: 'admin', key: 'user_provided' } },
+        },
+      }),
+    ).toEqual({
+      endpoints: {
+        custom: [
+          { name: 'Groq', apiKey: 'user_provided' },
+          { name: 'Mustache', apiKey: MASKED_SECRET },
+        ],
+        azureOpenAI: { groups: [{ group: 'eastus', apiKey: 'user_provided' }] },
+      },
+      webSearch: { tavilyApiKey: MASKED_SECRET },
+      mcpServers: {
+        acme: {
+          apiKey: { source: 'user', key: '{{ACME_KEY}}' },
+          oauth: { client_secret: '{{ACME_SECRET}}' },
+        },
+        beta: { apiKey: { source: 'admin', key: MASKED_SECRET } },
+      },
+    });
   });
 });

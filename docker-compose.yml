@@ -1,6 +1,6 @@
 services:
   admin-panel:
-    image: ghcr.io/clickhouse/librechat-admin-panel:latest
+    image: ghcr.io/librechat-ai/librechat-admin-panel:latest
     ports:
       - '${PORT:-3000}:${PORT:-3000}'
     restart: unless-stopped

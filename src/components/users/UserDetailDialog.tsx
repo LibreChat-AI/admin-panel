@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
 import { Button, Dialog, Icon } from '@clickhouse/click-ui';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { PrincipalType, SystemRoles } from 'librechat-data-provider';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { TUser } from 'librechat-data-provider';
@@ -17,10 +17,10 @@ import {
   roleAssignmentsQueryOptions,
   allRolesQueryOptions,
 } from '@/server';
+import { useLocalize, useReturnFocus, useRefreshScopes } from '@/hooks';
+import { cn, errorText, notifySuccess, notifyError } from '@/utils';
 import { Avatar, TrashButton } from '@/components/shared';
-import { cn, notifySuccess, notifyError } from '@/utils';
 import { ConfirmDialog } from '@/components/access';
-import { useLocalize } from '@/hooks';
 
 const CONFIRM_TITLE_KEYS: Record<t.RemoveTarget['kind'], string> = {
   role: 'com_users_remove_role_title',
@@ -45,6 +45,10 @@ export function UserDetailDialog({
 }: t.UserDetailDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const refreshScopes = useRefreshScopes();
+  const returnFocus = useReturnFocus(!!user);
+  const addRef = useRef<HTMLButtonElement>(null);
+  const addButton = useCallback(() => addRef.current, []);
 
   const [view, setView] = useState<'main' | 'add'>('main');
   const [removeTarget, setRemoveTarget] = useState<t.RemoveTarget | null>(null);
@@ -86,10 +90,10 @@ export function UserDetailDialog({
     queryClient.invalidateQueries({ queryKey: ['groups'] });
     queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
     queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
-    queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
+    void refreshScopes();
   };
 
-  const handleError = (err: Error) => notifyError(err.message);
+  const handleError = (err: Error) => notifyError(errorText(err, err.message, localize));
 
   const addRoleMutation = useMutation({
     mutationFn: (role: { id: string; name: string }) => {
@@ -212,6 +216,7 @@ export function UserDetailDialog({
           title={dialogTitle}
           showClose
           onClose={handleClose}
+          onCloseAutoFocus={returnFocus}
           className="modal-frost max-w-lg!"
         >
           {user && view === 'main' && (
@@ -240,6 +245,8 @@ export function UserDetailDialog({
 
               {(canManageRoles || canManageGroups || canAssignConfigs) && (
                 <Button
+                  ref={addRef}
+                  htmlType="button"
                   type="secondary"
                   label={localize('com_users_add_profiles')}
                   onClick={() => setView('add')}
@@ -292,6 +299,7 @@ export function UserDetailDialog({
         saving={busy}
         onConfirm={handleConfirmRemove}
         onCancel={() => setRemoveTarget(null)}
+        returnFocusTo={addButton}
       />
     </>
   );
@@ -501,7 +509,12 @@ function AddProfilesPanel({
         </div>
       )}
       <div className="flex justify-end">
-        <Button type="secondary" label={localize('com_ui_done')} onClick={onDone} />
+        <Button
+          htmlType="button"
+          type="secondary"
+          label={localize('com_ui_done')}
+          onClick={onDone}
+        />
       </div>
     </div>
   );

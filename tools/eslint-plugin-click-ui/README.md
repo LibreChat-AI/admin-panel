@@ -378,6 +378,20 @@ Validates Button type values.
 
 Valid types: `primary`, `secondary`, `empty`, `danger`, `ghost`
 
+#### `require-button-html-type` (error)
+Requires an explicit `htmlType` on `Button` and `IconButton`. click-ui renders
+`<button type={htmlType}>`, so without it the element defaults to a submit
+button and pressing Enter inside a `<form>` clicks it.
+
+```tsx
+// ❌ Bad
+<Button type="secondary" label="Add" onClick={add} />
+
+// ✅ Good
+<Button htmlType="button" type="secondary" label="Add" onClick={add} />
+<Button htmlType="submit" type="primary" label="Save" />
+```
+
 #### `valid-title-type` (warning)
 Validates Title component type values.
 

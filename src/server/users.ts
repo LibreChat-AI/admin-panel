@@ -12,6 +12,7 @@ import { createServerFn } from '@tanstack/react-start';
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type { TUser } from 'librechat-data-provider';
 import { apiFetch, extractApiError } from './utils/api';
+import { USER_DELETE_UNAVAILABLE } from '@/constants';
 
 // ── Server functions ─────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ export const usersQueryOptions = queryOptions({
 });
 
 export const createUserFn = createServerFn({ method: 'POST' })
-  .inputValidator(
+  .validator(
     z.object({
       name: z.string().min(1),
       email: z.string().email(),
@@ -44,19 +45,33 @@ export const createUserFn = createServerFn({ method: 'POST' })
     throw new Error('Not implemented: createUserFn');
   });
 
+/** The admin users API's reply when the user to delete no longer exists. */
+const USER_NOT_FOUND_ERROR = 'User not found';
+
+/**
+ * Deletes a user. LibreChat's own "user not found" 404 means the user is
+ * already gone, which is success; any other 404 is a server without the
+ * delete route (LibreChat ships it disabled), reported as
+ * `USER_DELETE_UNAVAILABLE` so the page explains it instead of claiming the
+ * user was deleted.
+ */
 export const deleteUserFn = createServerFn({ method: 'POST' })
-  .inputValidator(z.object({ id: z.string() }))
-  .handler(async ({ data }) => {
+  .validator(z.object({ id: z.string() }))
+  .handler(async ({ data }): Promise<void> => {
     const response = await apiFetch(`/api/admin/users/${encodeURIComponent(data.id)}`, {
       method: 'DELETE',
     });
-    if (!response.ok && response.status !== 404) {
-      throw new Error(`Failed to delete user: ${response.status}`);
+    if (response.ok) return;
+    if (response.status === 404) {
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      if (body.error === USER_NOT_FOUND_ERROR) return;
+      throw new Error(USER_DELETE_UNAVAILABLE);
     }
+    await extractApiError(response, 'Failed to delete user');
   });
 
 export const searchUsersFn = createServerFn({ method: 'GET' })
-  .inputValidator(z.object({ query: z.string() }))
+  .validator(z.object({ query: z.string() }))
   .handler(async ({ data }): Promise<{ users: AdminUserSearchResult[] }> => {
     const response = await apiFetch(`/api/admin/users/search?q=${encodeURIComponent(data.query)}`);
     if (!response.ok) {

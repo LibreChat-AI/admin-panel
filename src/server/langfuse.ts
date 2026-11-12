@@ -1,22 +1,8 @@
 import { z } from 'zod';
 import { createServerFn } from '@tanstack/react-start';
+import type { TLangfuseConnectionStatus } from 'librechat-data-provider';
 import { requireAllSectionCapabilities } from './capabilities';
 import { apiFetch, extractApiError } from './utils/api';
-
-export interface LangfuseDestinationOption {
-  key: string;
-  baseUrl: string;
-}
-
-export interface LangfuseConnectionStatus {
-  configured: boolean;
-  enabled: boolean;
-  destinations: LangfuseDestinationOption[];
-  destination?: string;
-  publicKey?: string;
-  displaySecretKey?: string;
-  updatedAt?: string;
-}
 
 export interface LangfuseConnectionTestResponse {
   success: boolean;
@@ -39,19 +25,19 @@ const connectionTestInputSchema = connectionInputSchema.omit({ enabled: true });
  * destination allowlist, encrypted-secret handling, and credential checks.
  */
 export const getLangfuseConnectionFn = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<LangfuseConnectionStatus> => {
+  async (): Promise<TLangfuseConnectionStatus> => {
     await requireAllSectionCapabilities(['langfuse']);
     const response = await apiFetch('/api/admin/langfuse/connection');
     if (!response.ok) {
       return extractApiError(response, 'Failed to read Langfuse connection');
     }
-    return (await response.json()) as LangfuseConnectionStatus;
+    return (await response.json()) as TLangfuseConnectionStatus;
   },
 );
 
 export const updateLangfuseConnectionFn = createServerFn({ method: 'POST' })
-  .inputValidator(connectionInputSchema)
-  .handler(async ({ data }): Promise<LangfuseConnectionStatus> => {
+  .validator(connectionInputSchema)
+  .handler(async ({ data }): Promise<TLangfuseConnectionStatus> => {
     await requireAllSectionCapabilities(['langfuse']);
     const response = await apiFetch('/api/admin/langfuse/connection', {
       method: 'PUT',
@@ -60,11 +46,11 @@ export const updateLangfuseConnectionFn = createServerFn({ method: 'POST' })
     if (!response.ok) {
       return extractApiError(response, 'Failed to update Langfuse connection');
     }
-    return (await response.json()) as LangfuseConnectionStatus;
+    return (await response.json()) as TLangfuseConnectionStatus;
   });
 
 export const testLangfuseConnectionFn = createServerFn({ method: 'POST' })
-  .inputValidator(connectionTestInputSchema)
+  .validator(connectionTestInputSchema)
   .handler(async ({ data }): Promise<LangfuseConnectionTestResponse> => {
     await requireAllSectionCapabilities(['langfuse']);
     const response = await apiFetch('/api/admin/langfuse/connection/test', {

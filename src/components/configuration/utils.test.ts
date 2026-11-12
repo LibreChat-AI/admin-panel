@@ -1,18 +1,29 @@
 import { describe, it, expect } from 'vitest';
 import type * as t from '@/types';
 import {
+  applyConfigEdit,
+  buildSavePayload,
+  normalizeForSave,
+  isConfigValueEqual,
+  mergeIndexedArrayEdits,
+} from './edits';
+import {
+  flattenObject,
+  getValueAtPath,
+  unflattenObject,
+  resolveFieldValue,
+  getUnknownConfigEntries,
+} from '@/utils';
+import {
   getControlType,
   getEnumOptions,
-  getArrayItemType,
+  findSchemaField,
   splitUnionTypes,
-  partitionScopeResetPaths,
-  mergeIndexedArrayEdits,
-  buildSavePayload,
-  applyConfigEdit,
-  withLangfuseConfiguredPath,
-} from './utils';
+  getArrayItemType,
+} from './controls';
+import { hasPathOverlap, withLangfuseConfiguredPath } from './counts';
+import { collectImportEntries } from './import';
 import { createField } from '@/test/fixtures';
-import { flattenObject } from '@/utils';
 
 describe('getControlType', () => {
   it('maps boolean to toggle', () => {
@@ -51,21 +62,18 @@ describe('getControlType', () => {
     expect(getControlType(createField({ key: 'headers', type: 'record' }))).toBe('record');
   });
 
-  it('maps union containing string and number to text (string is more general)', () => {
+  it('maps union(number | string) (coerced numbers) to number', () => {
     expect(getControlType(createField({ key: 'limit', type: 'union(number | string)' }))).toBe(
-      'text',
-    );
-  });
-
-  it('maps union containing only number (no string) to number', () => {
-    expect(getControlType(createField({ key: 'limit', type: 'union(number | boolean)' }))).toBe(
       'number',
     );
   });
 
-  it('maps union containing string (no number) to text', () => {
+  it('maps a union of different scalars to scalar-union', () => {
+    expect(getControlType(createField({ key: 'limit', type: 'union(number | boolean)' }))).toBe(
+      'scalar-union',
+    );
     expect(getControlType(createField({ key: 'val', type: 'union(string | boolean)' }))).toBe(
-      'text',
+      'scalar-union',
     );
   });
 
@@ -75,11 +83,11 @@ describe('getControlType', () => {
     ).toBe('toggle');
   });
 
-  it('falls back to record for unknown types', () => {
-    expect(getControlType(createField({ key: 'data', type: 'ZodAny' }))).toBe('record');
+  it('falls back to the YAML editor for unknown types', () => {
+    expect(getControlType(createField({ key: 'data', type: 'ZodAny' }))).toBe('code');
   });
 
-  it('maps wide union with primitives and complex types to record', () => {
+  it('maps wide union with primitives and complex types to the YAML editor', () => {
     expect(
       getControlType(
         createField({
@@ -87,7 +95,7 @@ describe('getControlType', () => {
           type: 'union(null | boolean | number | string | array<unknown> | record)',
         }),
       ),
-    ).toBe('record');
+    ).toBe('code');
   });
 
   it('maps union(boolean | object) with children to switch-object', () => {
@@ -386,6 +394,21 @@ describe('applyConfigEdit', () => {
     });
   });
 
+  it('keeps a switch turned on when one of its settings is edited', () => {
+    const on = applyConfigEdit({}, 'interface.schedules', true, {}, new Set(), new Set());
+    const result = applyConfigEdit(
+      on,
+      'interface.schedules.maxPerUser',
+      5,
+      {},
+      new Set(),
+      new Set(),
+    );
+    expect(result).toEqual({ 'interface.schedules': true, 'interface.schedules.maxPerUser': 5 });
+    const off = applyConfigEdit(result, 'interface.schedules', false, {}, new Set(), new Set());
+    expect(off).toEqual({ 'interface.schedules': false });
+  });
+
   it('drops stale indexed edits when a whole-array edit is queued', () => {
     const result = applyConfigEdit(
       { 'modelSpecs.list.0': { name: 'old' } },
@@ -397,44 +420,6 @@ describe('applyConfigEdit', () => {
     );
     expect(result).toEqual({
       'modelSpecs.list': [{ name: 'new' }],
-    });
-  });
-});
-
-describe('partitionScopeResetPaths', () => {
-  it('routes whole MCP entry resets to tombstones', () => {
-    expect(
-      partitionScopeResetPaths(
-        ['mcpServers.github', 'mcpServers.github.url', 'interface.modelSelect'],
-        new Set(['github']),
-      ),
-    ).toEqual({
-      resetPaths: ['mcpServers.github.url', 'interface.modelSelect'],
-      tombstonePaths: ['mcpServers.github'],
-    });
-  });
-
-  it('routes whole MCP entry resets to unsets when the entry is scope-local', () => {
-    expect(
-      partitionScopeResetPaths(
-        ['mcpServers.scopeOnly', 'mcpServers.inherited'],
-        new Set(['inherited']),
-      ),
-    ).toEqual({
-      resetPaths: ['mcpServers.scopeOnly'],
-      tombstonePaths: ['mcpServers.inherited'],
-    });
-  });
-
-  it('preserves input order within reset and tombstone groups', () => {
-    expect(
-      partitionScopeResetPaths(
-        ['mcpServers.alpha', 'registration.enabled', 'mcpServers.beta', 'endpoints.custom.0'],
-        new Set(['alpha', 'beta']),
-      ),
-    ).toEqual({
-      resetPaths: ['registration.enabled', 'endpoints.custom.0'],
-      tombstonePaths: ['mcpServers.alpha', 'mcpServers.beta'],
     });
   });
 });
@@ -559,5 +544,457 @@ describe('buildSavePayload — masked secrets never reach the backend', () => {
     const { saves, resets } = buildSavePayload(new Set(['ocr.apiKey']), edited, schemaPaths);
     expect(saves).toEqual([]);
     expect(resets).toEqual(['ocr.apiKey']);
+  });
+});
+
+const headersField = createField({
+  key: 'headers',
+  path: 'endpoints.custom.[].headers',
+  type: 'record',
+});
+const modelsField = createField({
+  key: 'models',
+  path: 'endpoints.custom.[].models',
+  type: 'object',
+  isObject: true,
+  children: [
+    createField({
+      key: 'default',
+      path: 'endpoints.custom.[].models.default',
+      type: 'array<string>',
+      isArray: true,
+    }),
+    createField({ key: 'fetch', path: 'endpoints.custom.[].models.fetch', type: 'boolean' }),
+  ],
+});
+const schemaTree: t.SchemaField[] = [
+  createField({
+    key: 'actions',
+    type: 'object',
+    isObject: true,
+    children: [
+      createField({
+        key: 'allowedDomains',
+        path: 'actions.allowedDomains',
+        type: 'array<string>',
+        isArray: true,
+      }),
+    ],
+  }),
+  createField({
+    key: 'endpoints',
+    type: 'object',
+    isObject: true,
+    children: [
+      createField({
+        key: 'custom',
+        path: 'endpoints.custom',
+        type: 'array<object>',
+        isArray: true,
+        children: [
+          createField({ key: 'name', path: 'endpoints.custom.[].name' }),
+          createField({ key: 'baseURL', path: 'endpoints.custom.[].baseURL' }),
+          headersField,
+          modelsField,
+        ],
+      }),
+      createField({
+        key: 'azureOpenAI',
+        path: 'endpoints.azureOpenAI',
+        type: 'object',
+        isObject: true,
+        children: [
+          createField({
+            key: 'groups',
+            path: 'endpoints.azureOpenAI.groups',
+            type: 'array<object>',
+            isArray: true,
+          }),
+        ],
+      }),
+    ],
+  }),
+  createField({
+    key: 'mcpServers',
+    type: 'record',
+    recordValueType: 'complex',
+    children: [
+      createField({ key: 'title', path: 'mcpServers.{}.title' }),
+      createField({ key: 'headers', path: 'mcpServers.{}.headers', type: 'record' }),
+    ],
+  }),
+  createField({
+    key: 'webSearch',
+    type: 'union(boolean | object)',
+    children: [createField({ key: 'provider', path: 'webSearch.provider' })],
+  }),
+];
+
+describe('findSchemaField', () => {
+  it('steps into array elements and record values', () => {
+    expect(findSchemaField(schemaTree, 'endpoints.custom.3.headers')?.type).toBe('record');
+    expect(findSchemaField(schemaTree, 'endpoints.custom.3.models.default')?.isArray).toBe(true);
+    expect(findSchemaField(schemaTree, 'mcpServers.final-server.headers')?.type).toBe('record');
+    expect(findSchemaField(schemaTree, 'endpoints.custom.3')?.children?.length).toBe(4);
+  });
+
+  it('returns null once the path leaves the schema', () => {
+    expect(findSchemaField(schemaTree, 'endpoints.unknownProvider.models')).toBeNull();
+  });
+});
+
+describe('normalizeForSave', () => {
+  const allowedDomains = findSchemaField(schemaTree, 'actions.allowedDomains');
+  const entry = findSchemaField(schemaTree, 'endpoints.custom.0');
+
+  it('drops empty list items and keeps the rest verbatim', () => {
+    expect(normalizeForSave(['example.com', '', ''], allowedDomains)).toEqual(['example.com']);
+  });
+
+  it('preserves whitespace-significant strings such as stop sequences', () => {
+    const stop = findSchemaField(schemaTree, 'modelSpecs.list.0.preset.stop');
+    expect(normalizeForSave(['\n\nHuman:', ' ###', '\n'], stop)).toEqual([
+      '\n\nHuman:',
+      ' ###',
+      '\n',
+    ]);
+    expect(
+      normalizeForSave(
+        { stop: ['\n\n'] },
+        findSchemaField(schemaTree, 'endpoints.custom.0.addParams'),
+      ),
+    ).toEqual({
+      stop: ['\n\n'],
+    });
+  });
+
+  it('turns a list with only blank items into no value', () => {
+    expect(normalizeForSave([''], allowedDomains)).toBeUndefined();
+    expect(normalizeForSave([], allowedDomains)).toBeUndefined();
+  });
+
+  it('turns an emptied key/value record into no value', () => {
+    expect(normalizeForSave([], headersField)).toBeUndefined();
+    expect(normalizeForSave({}, headersField)).toBeUndefined();
+    expect(
+      normalizeForSave([{ key: '', value: 'orphan', valueType: 'string' }], headersField),
+    ).toBeUndefined();
+  });
+
+  it('serializes key/value pairs and keeps their values as entered', () => {
+    expect(
+      normalizeForSave(
+        [
+          { key: 'X-Empty', value: '', valueType: 'string' },
+          { key: 'X-Id', value: '1', valueType: 'number' },
+        ],
+        headersField,
+      ),
+    ).toEqual({ 'X-Empty': '', 'X-Id': 1 });
+  });
+
+  it('removes emptied lists and records from inside an entry', () => {
+    const value = {
+      name: 'NVIDIA',
+      baseURL: '',
+      headers: [],
+      models: { default: ['model-a', ''], fetch: true },
+    };
+    expect(normalizeForSave(value, entry)).toEqual({
+      name: 'NVIDIA',
+      models: { default: ['model-a'], fetch: true },
+    });
+  });
+
+  it('keeps plain objects even when empty, and keeps scalars', () => {
+    expect(normalizeForSave({}, findSchemaField(schemaTree, 'webSearch'))).toEqual({});
+    expect(normalizeForSave(false, null)).toBe(false);
+    expect(normalizeForSave(0, null)).toBe(0);
+    expect(normalizeForSave(null, null)).toBeNull();
+  });
+
+  it('treats an empty string as no value but keeps whitespace-only strings', () => {
+    expect(normalizeForSave('', null)).toBeUndefined();
+    expect(normalizeForSave('\n', null)).toBe('\n');
+    expect(normalizeForSave('value', null)).toBe('value');
+  });
+});
+
+describe('buildSavePayload with a save context', () => {
+  const schemaPaths = new Set<string>();
+  function contextFor(
+    config: Record<string, t.ConfigValue>,
+    overrides: string[] = [],
+  ): t.SaveContext {
+    const overridePaths = new Set(overrides);
+    return {
+      fields: schemaTree,
+      baselineAt: (path) => getValueAtPath(config, path),
+      hasOverride: (path) => hasPathOverlap(path, overridePaths),
+    };
+  }
+
+  it('writes nothing for a blank item added to an unset list', () => {
+    const payload = buildSavePayload(
+      new Set(['actions.allowedDomains']),
+      { 'actions.allowedDomains': [''] },
+      schemaPaths,
+      contextFor({}),
+    );
+    expect(payload.saves).toEqual([]);
+    expect(payload.resets).toEqual([]);
+  });
+
+  it('resets the override when its last item is removed', () => {
+    const payload = buildSavePayload(
+      new Set(['actions.allowedDomains']),
+      { 'actions.allowedDomains': [] },
+      schemaPaths,
+      contextFor({ actions: { allowedDomains: ['a.com'] } }, ['actions.allowedDomains']),
+    );
+    expect(payload.saves).toEqual([]);
+    expect(payload.resets).toEqual(['actions.allowedDomains']);
+  });
+
+  it('never writes an empty value over a librechat.yaml value it does not own, and says why', () => {
+    const payload = buildSavePayload(
+      new Set(['actions.allowedDomains']),
+      { 'actions.allowedDomains': [] },
+      schemaPaths,
+      contextFor({ actions: { allowedDomains: ['yaml.com'] } }),
+    );
+    expect(payload.saves).toEqual([]);
+    expect(payload.resets).toEqual([]);
+    expect(payload.skipped).toEqual([{ fieldPath: 'actions.allowedDomains', reason: 'yamlValue' }]);
+  });
+
+  it('skips the dedicated Langfuse section on the generic config API', () => {
+    const payload = buildSavePayload(
+      new Set(['langfuse.baseUrl']),
+      { 'langfuse.baseUrl': 'https://lf.example.com' },
+      schemaPaths,
+      contextFor({}),
+    );
+    expect(payload.saves).toEqual([]);
+    expect(payload.skipped).toEqual([{ fieldPath: 'langfuse.baseUrl', reason: 'dedicated' }]);
+  });
+
+  it('resets a record whose last key/value pair was deleted', () => {
+    const payload = buildSavePayload(
+      new Set(['mcpServers.srv.headers']),
+      { 'mcpServers.srv.headers': [] },
+      schemaPaths,
+      contextFor({ mcpServers: { srv: { headers: { 'X-Key': 'v' } } } }, [
+        'mcpServers.srv.headers.X-Key',
+      ]),
+    );
+    expect(payload.resets).toEqual(['mcpServers.srv.headers']);
+  });
+
+  it('drops an edit that only reorders keys of the saved value', () => {
+    const payload = buildSavePayload(
+      new Set(['endpoints.custom.0']),
+      { 'endpoints.custom.0': { baseURL: 'https://x', name: 'A' } },
+      schemaPaths,
+      contextFor({ endpoints: { custom: [{ name: 'A', baseURL: 'https://x' }] } }),
+    );
+    expect(payload.saves).toEqual([]);
+  });
+
+  it('skips read-only sections and permission fields instead of sending them', () => {
+    const payload = buildSavePayload(
+      new Set(['filters.messages.pii.action', 'interface.prompts', 'cloudfront.urlExpiry']),
+      {
+        'filters.messages.pii.action': 'block',
+        'interface.prompts': false,
+        'cloudfront.urlExpiry': 3601,
+      },
+      schemaPaths,
+      contextFor({}),
+    );
+    expect(payload.saves).toEqual([]);
+    expect(payload.skipped).toEqual([
+      { fieldPath: 'filters.messages.pii.action', reason: 'baseOnly' },
+      { fieldPath: 'interface.prompts', reason: 'permission' },
+      { fieldPath: 'cloudfront.urlExpiry', reason: 'yamlOnly' },
+    ]);
+  });
+
+  it('never sends edits to YAML-managed fields but lets their stale override be removed', () => {
+    const edit = buildSavePayload(
+      new Set(['endpoints.azureOpenAI.groups.0']),
+      { 'endpoints.azureOpenAI.groups.0': { group: 'eastus', version: 'x' } },
+      schemaPaths,
+      contextFor({}),
+    );
+    expect(edit.saves).toEqual([]);
+    expect(edit.skipped).toEqual([
+      { fieldPath: 'endpoints.azureOpenAI.groups.0', reason: 'yamlOnly' },
+    ]);
+    const reset = buildSavePayload(
+      new Set(['endpoints.azureOpenAI.groups']),
+      { 'endpoints.azureOpenAI.groups': undefined },
+      schemaPaths,
+      contextFor({}),
+    );
+    expect(reset.resets).toEqual(['endpoints.azureOpenAI.groups']);
+  });
+});
+
+describe('resolveFieldValue — scope mode collection edits (HF-11)', () => {
+  const noIntermediates = new Set<string>();
+  const noContainers = new Set<string>();
+  const resolved: t.FlatConfigMap = {
+    'endpoints.custom': [
+      {
+        name: 'Eng Proxy',
+        baseURL: 'https://proxy.example.com/v1',
+        models: { default: ['gpt-4o'] },
+      },
+    ],
+  };
+  const tree = unflattenObject(resolved);
+
+  function shownEntries(edited: t.FlatConfigMap): Array<Record<string, t.ConfigValue>> {
+    const indexed = Object.entries(edited).filter(([k]) => /\.\d+$/.test(k));
+    const merged = mergeIndexedArrayEdits(tree, indexed);
+    const fallback = getValueAtPath(merged, 'endpoints.custom');
+    return resolveFieldValue('endpoints.custom', fallback, edited, resolved, {}) as Array<
+      Record<string, t.ConfigValue>
+    >;
+  }
+
+  it('keeps both of two sequential edits to the same entry', () => {
+    let edited: t.FlatConfigMap = {};
+    const first = shownEntries(edited)[0];
+    edited = applyConfigEdit(
+      edited,
+      'endpoints.custom.0',
+      { ...first, modelDisplayLabel: 'VLabel' },
+      resolved,
+      noIntermediates,
+      noContainers,
+    );
+    const second = shownEntries(edited)[0];
+    expect(second.modelDisplayLabel).toBe('VLabel');
+    edited = applyConfigEdit(
+      edited,
+      'endpoints.custom.0',
+      { ...second, baseURL: 'https://proxy.example.com/v1/v' },
+      resolved,
+      noIntermediates,
+      noContainers,
+    );
+    expect(edited['endpoints.custom.0']).toMatchObject({
+      modelDisplayLabel: 'VLabel',
+      baseURL: 'https://proxy.example.com/v1/v',
+    });
+  });
+
+  it('shows a row added to a nested list of an entry', () => {
+    const entry = shownEntries({})[0];
+    const edited = applyConfigEdit(
+      {},
+      'endpoints.custom.0',
+      { ...entry, models: { default: ['gpt-4o', ''] } },
+      resolved,
+      noIntermediates,
+      noContainers,
+    );
+    expect(shownEntries(edited)[0].models).toEqual({ default: ['gpt-4o', ''] });
+  });
+
+  it('still reads the saved leaf when nothing under the path is pending', () => {
+    expect(
+      resolveFieldValue('balance.startBalance', 5, {}, { 'balance.startBalance': 7 }, {}),
+    ).toBe(7);
+  });
+});
+
+describe('isConfigValueEqual', () => {
+  it('ignores object key order but not array order', () => {
+    expect(isConfigValueEqual({ a: 1, b: [1, 2] }, { b: [1, 2], a: 1 })).toBe(true);
+    expect(isConfigValueEqual([1, 2], [2, 1])).toBe(false);
+    expect(isConfigValueEqual({ a: 1 }, { a: 1, b: undefined })).toBe(false);
+  });
+});
+
+describe('collectImportEntries', () => {
+  it('writes one entry per leaf of the pasted YAML, without the version key', () => {
+    const { entries, skipped } = collectImportEntries(
+      {
+        version: '1.3.3',
+        balance: { startBalance: 777 },
+        interface: { webSearch: false },
+        registration: { allowedDomains: ['a.com'] },
+      },
+      schemaTree,
+      new Set(),
+    );
+    expect(entries).toEqual([
+      { fieldPath: 'balance.startBalance', value: 777 },
+      { fieldPath: 'interface.webSearch', value: false },
+      { fieldPath: 'registration.allowedDomains', value: ['a.com'] },
+    ]);
+    expect(skipped).toEqual([]);
+  });
+
+  it('maps AppService aliases and drops empty objects', () => {
+    expect(
+      collectImportEntries(
+        { interfaceConfig: { customWelcome: 'hi' }, speech: {} },
+        schemaTree,
+        new Set(),
+      ).entries,
+    ).toEqual([{ fieldPath: 'interface.customWelcome', value: 'hi' }]);
+  });
+
+  it('merges an alias section with its canonical one leaf by leaf, the canonical key winning', () => {
+    const { entries } = collectImportEntries(
+      {
+        interfaceConfig: { customWelcome: 'alias', webSearch: false },
+        interface: { customWelcome: 'canonical', fileSearch: true },
+      },
+      schemaTree,
+      new Set(),
+    );
+    expect(entries).toEqual([
+      { fieldPath: 'interface.customWelcome', value: 'canonical' },
+      { fieldPath: 'interface.webSearch', value: false },
+      { fieldPath: 'interface.fileSearch', value: true },
+    ]);
+  });
+
+  it('normalizes values like an edit: blank items are dropped and emptied leaves are skipped', () => {
+    const { entries, skipped } = collectImportEntries(
+      {
+        actions: { allowedDomains: [''] },
+        registration: { allowedDomains: ['a.com', ''] },
+        endpoints: { openAI: { titleModel: '' } },
+        balance: { startBalance: null },
+      },
+      schemaTree,
+      new Set(),
+    );
+    expect(entries).toEqual([{ fieldPath: 'registration.allowedDomains', value: ['a.com'] }]);
+    expect(skipped).toEqual([
+      { fieldPath: 'actions.allowedDomains', reason: 'empty' },
+      { fieldPath: 'endpoints.openAI.titleModel', reason: 'empty' },
+      { fieldPath: 'balance.startBalance', reason: 'empty' },
+    ]);
+  });
+});
+
+describe('getUnknownConfigEntries', () => {
+  it('lists keys the schema does not describe, except secret preview companions', () => {
+    const fields = [createField({ key: 'apiKey' }), createField({ key: 'title' })];
+    expect(
+      getUnknownConfigEntries(fields, {
+        apiKey: 'x',
+        apiKeyPreview: 'sk-...1',
+        title: 't',
+        replyNotifications: { sound: true },
+      }),
+    ).toEqual([['replyNotifications', { sound: true }]]);
   });
 });

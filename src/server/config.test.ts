@@ -1,18 +1,17 @@
-import { createRequire } from 'module';
+import { z } from 'zod';
 import { describe, it, expect } from 'vitest';
+import { configSchema, endpointSchema } from 'librechat-data-provider';
 import type * as t from '@/types';
 import {
   extractSchemaTree,
   getZodTypeName,
   flattenTree,
-  resolveSubSchema,
-  validateFieldValue,
   parseIndexedArrayPath,
-  toConfigArraySource,
   normalizeAppServiceKeys,
-  mergeConfigArraySources,
-  mergeIndexedArrayEntriesIntoBase,
   applyLangfuseSchemaVisibility,
+  parseConfigYaml,
+  findDroppedEntries,
+  findUnknownConfigPaths,
 } from './config';
 import {
   coerceEnumValue,
@@ -20,52 +19,8 @@ import {
   getEnumOptions,
   getArrayItemType,
   splitUnionTypes,
-} from '@/components/configuration/utils';
-
-interface ZodV3Schema extends t.ZodSchemaLike {
-  object: (shape: Record<string, ZodV3Schema>) => ZodV3Schema;
-  string: () => ZodV3Schema;
-  number: () => ZodV3Schema;
-  boolean: () => ZodV3Schema;
-  null: () => ZodV3Schema;
-  enum: (values: string[]) => ZodV3Schema;
-  array: (element: ZodV3Schema) => ZodV3Schema;
-  record: (key: ZodV3Schema, value: ZodV3Schema) => ZodV3Schema;
-  union: (options: ZodV3Schema[]) => ZodV3Schema;
-  intersection: (left: ZodV3Schema, right: ZodV3Schema) => ZodV3Schema;
-  lazy: (getter: () => ZodV3Schema) => ZodV3Schema;
-  pipe: (target: ZodV3Schema) => ZodV3Schema;
-  transform: (fn: (val: unknown) => unknown) => ZodV3Schema;
-  url: () => ZodV3Schema;
-  refine: (fn: (val: unknown) => boolean, opts?: unknown) => ZodV3Schema;
-  optional: () => ZodV3Schema;
-  nullable: () => ZodV3Schema;
-  default: (val: unknown) => ZodV3Schema;
-  and: (other: ZodV3Schema) => ZodV3Schema;
-}
-
-interface ZodV3Module {
-  object: (shape: Record<string, ZodV3Schema>) => ZodV3Schema;
-  string: () => ZodV3Schema;
-  number: () => ZodV3Schema;
-  boolean: () => ZodV3Schema;
-  null: () => ZodV3Schema;
-  enum: (values: string[]) => ZodV3Schema;
-  array: (element: ZodV3Schema) => ZodV3Schema;
-  record: (key: ZodV3Schema, value: ZodV3Schema) => ZodV3Schema;
-  union: (options: ZodV3Schema[]) => ZodV3Schema;
-  intersection: (left: ZodV3Schema, right: ZodV3Schema) => ZodV3Schema;
-  lazy: (getter: () => ZodV3Schema) => ZodV3Schema;
-}
-
-/**
- * extractSchemaTree was written against the Zod v3 internal API (_def.typeName).
- * librechat-data-provider bundles zod@3.x, so we resolve that same version here
- * to build test schemas that are structurally compatible.
- */
-const require3 = createRequire(import.meta.url);
-const ldpPath = require3.resolve('librechat-data-provider');
-const z3 = require3(require3.resolve('zod', { paths: [ldpPath] })) as ZodV3Module;
+} from '@/components/configuration/controls';
+import { schemaType, resolveSubSchema, planConfigChanges, validateFieldValue } from '@/utils';
 
 function findField(fields: t.SchemaField[], key: string): t.SchemaField | undefined {
   for (const f of fields) {
@@ -79,62 +34,72 @@ function findField(fields: t.SchemaField[], key: string): t.SchemaField | undefi
 }
 
 describe('applyLangfuseSchemaVisibility', () => {
-  it('injects the Langfuse section when fanout is enabled and the pinned schema lacks it', () => {
-    const tree = extractSchemaTree(z3.object({ interface: z3.object({ theme: z3.string() }) }));
-
-    applyLangfuseSchemaVisibility(tree, true);
-
-    expect(findField(tree, 'langfuse')).toMatchObject({
-      key: 'langfuse',
-      isObject: true,
-    });
-    expect(findField(tree, 'destination')?.path).toBe('langfuse.destination');
-  });
+  const langfuseTree = () =>
+    extractSchemaTree(z.object({ langfuse: z.object({ schemaOnlyField: z.string() }) }));
 
   it('removes a Langfuse section supplied by the schema when fanout is disabled', () => {
-    const tree = extractSchemaTree(z3.object({ langfuse: z3.object({ enabled: z3.boolean() }) }));
+    const tree = extractSchemaTree(z.object({ langfuse: z.object({ enabled: z.boolean() }) }));
 
-    applyLangfuseSchemaVisibility(tree, false);
+    applyLangfuseSchemaVisibility(tree, { langfuseFanoutEnabled: false });
 
     expect(findField(tree, 'langfuse')).toBeUndefined();
   });
 
   it('preserves the schema-provided Langfuse section when fanout is enabled', () => {
-    const tree = extractSchemaTree(
-      z3.object({ langfuse: z3.object({ schemaOnlyField: z3.string() }) }),
-    );
+    const tree = langfuseTree();
 
-    applyLangfuseSchemaVisibility(tree, true);
+    applyLangfuseSchemaVisibility(tree, { langfuseFanoutEnabled: true });
 
     expect(findField(tree, 'schemaOnlyField')).toBeDefined();
     expect(tree.filter((field) => field.key === 'langfuse')).toHaveLength(1);
   });
 
   it('preserves a schema-provided Langfuse section when fanout state is unknown', () => {
-    const tree = extractSchemaTree(
-      z3.object({ langfuse: z3.object({ schemaOnlyField: z3.string() }) }),
-    );
+    const tree = langfuseTree();
 
     applyLangfuseSchemaVisibility(tree, undefined);
 
     expect(findField(tree, 'schemaOnlyField')).toBeDefined();
   });
 
-  it('does not inject the compatibility shim when fanout state is unknown', () => {
-    const tree = extractSchemaTree(z3.object({ interface: z3.object({ theme: z3.string() }) }));
+  it('hides the section when LibreChat denies the admin connection access, fanout on or not', () => {
+    const tree = langfuseTree();
 
-    applyLangfuseSchemaVisibility(tree, undefined);
+    applyLangfuseSchemaVisibility(tree, {
+      langfuseFanoutEnabled: true,
+      langfuseConnectionAccess: false,
+    });
 
     expect(findField(tree, 'langfuse')).toBeUndefined();
+  });
+
+  it('keeps the section when LibreChat grants connection access', () => {
+    const tree = langfuseTree();
+
+    applyLangfuseSchemaVisibility(tree, {
+      langfuseFanoutEnabled: true,
+      langfuseConnectionAccess: true,
+    });
+
+    expect(findField(tree, 'schemaOnlyField')).toBeDefined();
+  });
+
+  it('keeps the Langfuse section shipped in the pinned configSchema', () => {
+    const tree = extractSchemaTree(realConfigSchema);
+
+    applyLangfuseSchemaVisibility(tree, { langfuseFanoutEnabled: true });
+
+    expect(findField(tree, 'langfuse')?.isObject).toBe(true);
+    expect(findField(tree, 'destination')?.path).toBe('langfuse.destination');
   });
 });
 
 describe('extractSchemaTree', () => {
   it('extracts basic scalar types', () => {
-    const schema = z3.object({
-      title: z3.string(),
-      port: z3.number(),
-      enabled: z3.boolean(),
+    const schema = z.object({
+      title: z.string(),
+      port: z.number(),
+      enabled: z.boolean(),
     });
 
     const tree = extractSchemaTree(schema);
@@ -146,8 +111,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('extracts enum types with values', () => {
-    const schema = z3.object({
-      theme: z3.enum(['dark', 'light', 'system']),
+    const schema = z.object({
+      theme: z.enum(['dark', 'light', 'system']),
     });
 
     const tree = extractSchemaTree(schema);
@@ -160,8 +125,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('unwraps optional and sets isOptional', () => {
-    const schema = z3.object({
-      nickname: z3.string().optional(),
+    const schema = z.object({
+      nickname: z.string().optional(),
     });
 
     const tree = extractSchemaTree(schema);
@@ -172,8 +137,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('unwraps nullable and sets isNullable', () => {
-    const schema = z3.object({
-      bio: z3.string().nullable(),
+    const schema = z.object({
+      bio: z.string().nullable(),
     });
 
     const tree = extractSchemaTree(schema);
@@ -184,8 +149,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('unwraps default and sets isOptional', () => {
-    const schema = z3.object({
-      retries: z3.number().default(3),
+    const schema = z.object({
+      retries: z.number().default(3),
     });
 
     const tree = extractSchemaTree(schema);
@@ -196,11 +161,11 @@ describe('extractSchemaTree', () => {
   });
 
   it('extracts nested objects with children', () => {
-    const schema = z3.object({
-      interface: z3.object({
-        title: z3.string(),
-        privacyPolicy: z3.object({
-          externalUrl: z3.string(),
+    const schema = z.object({
+      interface: z.object({
+        title: z.string(),
+        privacyPolicy: z.object({
+          externalUrl: z.string(),
         }),
       }),
     });
@@ -223,8 +188,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('extracts arrays with object element children', () => {
-    const schema = z3.object({
-      endpoints: z3.array(z3.object({ name: z3.string(), url: z3.string() })),
+    const schema = z.object({
+      endpoints: z.array(z.object({ name: z.string(), url: z.string() })),
     });
 
     const tree = extractSchemaTree(schema);
@@ -238,8 +203,8 @@ describe('extractSchemaTree', () => {
   });
 
   it('extracts arrays of primitives without children', () => {
-    const schema = z3.object({
-      tags: z3.array(z3.string()),
+    const schema = z.object({
+      tags: z.array(z.string()),
     });
 
     const tree = extractSchemaTree(schema);
@@ -253,25 +218,25 @@ describe('extractSchemaTree', () => {
 
 describe('getZodTypeName', () => {
   it('returns string for ZodString', () => {
-    expect(getZodTypeName(z3.string())).toBe('string');
+    expect(getZodTypeName(z.string())).toBe('string');
   });
 
   it('returns number for ZodNumber', () => {
-    expect(getZodTypeName(z3.number())).toBe('number');
+    expect(getZodTypeName(z.number())).toBe('number');
   });
 
   it('returns boolean for ZodBoolean', () => {
-    expect(getZodTypeName(z3.boolean())).toBe('boolean');
+    expect(getZodTypeName(z.boolean())).toBe('boolean');
   });
 
   it('returns enum(...) for ZodEnum', () => {
-    const result = getZodTypeName(z3.enum(['a', 'b']));
+    const result = getZodTypeName(z.enum(['a', 'b']));
     expect(result).toMatch(/^enum\(a/);
     expect(result).toContain('b');
   });
 
   it('unwraps optional wrappers', () => {
-    expect(getZodTypeName(z3.string().optional())).toBe('string');
+    expect(getZodTypeName(z.string().optional())).toBe('string');
   });
 
   it('returns unknown for null/undefined input', () => {
@@ -325,8 +290,8 @@ describe('flattenTree', () => {
 
 describe('schema evolution', () => {
   it('detects a newly added field', () => {
-    const v1 = z3.object({ name: z3.string() });
-    const v2 = z3.object({ name: z3.string(), email: z3.string() });
+    const v1 = z.object({ name: z.string() });
+    const v2 = z.object({ name: z.string(), email: z.string() });
 
     const treeV1 = extractSchemaTree(v1);
     const treeV2 = extractSchemaTree(v2);
@@ -337,8 +302,8 @@ describe('schema evolution', () => {
   });
 
   it('detects a field type change (string to enum)', () => {
-    const v1 = z3.object({ theme: z3.string() });
-    const v2 = z3.object({ theme: z3.enum(['dark', 'light']) });
+    const v1 = z.object({ theme: z.string() });
+    const v2 = z.object({ theme: z.enum(['dark', 'light']) });
 
     const fieldV1 = findField(extractSchemaTree(v1), 'theme')!;
     const fieldV2 = findField(extractSchemaTree(v2), 'theme')!;
@@ -348,8 +313,8 @@ describe('schema evolution', () => {
   });
 
   it('detects a removed field', () => {
-    const v1 = z3.object({ name: z3.string(), deprecated: z3.string() });
-    const v2 = z3.object({ name: z3.string() });
+    const v1 = z.object({ name: z.string(), deprecated: z.string() });
+    const v2 = z.object({ name: z.string() });
 
     const treeV1 = extractSchemaTree(v1);
     const treeV2 = extractSchemaTree(v2);
@@ -359,9 +324,9 @@ describe('schema evolution', () => {
   });
 
   it('detects a new nested section', () => {
-    const v2 = z3.object({
-      existing: z3.object({ a: z3.string() }),
-      newSection: z3.object({ b: z3.number(), c: z3.boolean() }),
+    const v2 = z.object({
+      existing: z.object({ a: z.string() }),
+      newSection: z.object({ b: z.number(), c: z.boolean() }),
     });
 
     const treeV2 = extractSchemaTree(v2);
@@ -375,9 +340,9 @@ describe('schema evolution', () => {
 
 describe('ZodIntersection decomposition', () => {
   it('merges left and right object shapes into flat children', () => {
-    const left = z3.object({ group: z3.string(), apiKey: z3.string() });
-    const right = z3.object({ streamRate: z3.number(), titleModel: z3.string() });
-    const schema = z3.object({ azureOpenAI: z3.intersection(left, right) });
+    const left = z.object({ group: z.string(), apiKey: z.string() });
+    const right = z.object({ streamRate: z.number(), titleModel: z.string() });
+    const schema = z.object({ azureOpenAI: z.intersection(left, right) });
     const tree = extractSchemaTree(schema);
     const azure = findField(tree, 'azureOpenAI');
     expect(azure).toBeDefined();
@@ -388,9 +353,9 @@ describe('ZodIntersection decomposition', () => {
   });
 
   it('resolves intersections inside array element schemas', () => {
-    const groupBase = z3.object({ group: z3.string() });
-    const groupConfig = z3.object({ apiKey: z3.string(), serverless: z3.boolean() });
-    const schema = z3.object({ groups: z3.array(z3.intersection(groupBase, groupConfig)) });
+    const groupBase = z.object({ group: z.string() });
+    const groupConfig = z.object({ apiKey: z.string(), serverless: z.boolean() });
+    const schema = z.object({ groups: z.array(z.intersection(groupBase, groupConfig)) });
     const tree = extractSchemaTree(schema);
     const groups = findField(tree, 'groups');
     expect(groups).toBeDefined();
@@ -403,9 +368,9 @@ describe('ZodIntersection decomposition', () => {
 
 describe('ZodRecord with union value type', () => {
   it('extracts children and sets recordValueAllowsPrimitive for boolean|object union', () => {
-    const modelConfig = z3.object({ deploymentName: z3.string(), version: z3.string().optional() });
-    const schema = z3.object({
-      models: z3.record(z3.string(), z3.union([z3.boolean(), modelConfig])),
+    const modelConfig = z.object({ deploymentName: z.string(), version: z.string().optional() });
+    const schema = z.object({
+      models: z.record(z.string(), z.union([z.boolean(), modelConfig])),
     });
     const tree = extractSchemaTree(schema);
     const models = findField(tree, 'models');
@@ -419,8 +384,8 @@ describe('ZodRecord with union value type', () => {
   });
 
   it('sets recordValueType primitive for simple string records', () => {
-    const schema = z3.object({
-      headers: z3.record(z3.string(), z3.string()),
+    const schema = z.object({
+      headers: z.record(z.string(), z.string()),
     });
     const tree = extractSchemaTree(schema);
     const headers = findField(tree, 'headers');
@@ -433,19 +398,19 @@ describe('ZodRecord with union value type', () => {
 
 describe('ZodLazy handling', () => {
   it('resolves z.lazy() wrapping a simple string to string', () => {
-    const lazyString = z3.lazy(() => z3.string());
+    const lazyString = z.lazy(() => z.string());
     expect(getZodTypeName(lazyString)).toBe('string');
   });
 
   it('resolves a recursive DocumentType-style lazy schema without infinite recursion', () => {
-    const DocumentType: ZodV3Schema = z3.lazy(() =>
-      z3.union([
-        z3.null(),
-        z3.boolean(),
-        z3.number(),
-        z3.string(),
-        z3.array(DocumentType),
-        z3.record(z3.string(), DocumentType),
+    const DocumentType: z.ZodType = z.lazy(() =>
+      z.union([
+        z.null(),
+        z.boolean(),
+        z.number(),
+        z.string(),
+        z.array(DocumentType),
+        z.record(z.string(), DocumentType),
       ]),
     );
     const result = getZodTypeName(DocumentType);
@@ -457,43 +422,42 @@ describe('ZodLazy handling', () => {
   });
 
   it('unwraps z.lazy() in extractSchemaTree fields', () => {
-    const DocumentType: ZodV3Schema = z3.lazy(() =>
-      z3.union([
-        z3.null(),
-        z3.boolean(),
-        z3.number(),
-        z3.string(),
-        z3.array(DocumentType),
-        z3.record(z3.string(), DocumentType),
+    const DocumentType: z.ZodType = z.lazy(() =>
+      z.union([
+        z.null(),
+        z.boolean(),
+        z.number(),
+        z.string(),
+        z.array(DocumentType),
+        z.record(z.string(), DocumentType),
       ]),
     );
-    const schema = z3.object({
+    const schema = z.object({
       additionalModelRequestFields: DocumentType.optional(),
     });
     const tree = extractSchemaTree(schema);
     const field = findField(tree, 'additionalModelRequestFields');
     expect(field).toBeDefined();
     expect(field!.type).toMatch(/^union\(/);
-    expect(field!.type).not.toBe('ZodLazy');
     expect(field!.isOptional).toBe(true);
   });
 });
 
 describe('ZodPipeline handling', () => {
   it('unwraps z.string().transform().pipe(z.string().url()) to string', () => {
-    const pipelined = z3
+    const pipelined = z
       .string()
       .transform((v: unknown) => v)
-      .pipe(z3.string().url());
+      .pipe(z.string().url());
     expect(getZodTypeName(pipelined)).toBe('string');
   });
 
   it('unwraps pipeline inside extractSchemaTree fields', () => {
-    const schema = z3.object({
-      url: z3
+    const schema = z.object({
+      url: z
         .string()
         .transform((v: unknown) => v)
-        .pipe(z3.string().url())
+        .pipe(z.string().url())
         .optional(),
     });
     const tree = extractSchemaTree(schema);
@@ -504,10 +468,10 @@ describe('ZodPipeline handling', () => {
   });
 
   it('unwraps effects-pipeline-effects chain to final type', () => {
-    const chain = z3
+    const chain = z
       .string()
       .transform((v: unknown) => v)
-      .pipe(z3.string().url())
+      .pipe(z.string().url())
       .refine((v: unknown) => !!v);
     expect(getZodTypeName(chain)).toBe('string');
   });
@@ -517,8 +481,7 @@ describe('ZodPipeline handling', () => {
  * Real configSchema integration tests
  * -----------------------------------------------------------------------*/
 
-const ldpModule = require3('librechat-data-provider') as { configSchema: ZodV3Schema };
-const realConfigSchema = ldpModule.configSchema;
+const realConfigSchema = configSchema;
 const realSchemaTree = extractSchemaTree(realConfigSchema);
 
 describe('real configSchema integration', () => {
@@ -594,40 +557,40 @@ describe('real configSchema integration', () => {
 
 describe('resolveSubSchema', () => {
   it('finds top-level fields', () => {
-    const schema = z3.object({ name: z3.string(), port: z3.number() });
+    const schema = z.object({ name: z.string(), port: z.number() });
     const sub = resolveSubSchema(schema, ['name']);
     expect(sub).not.toBeNull();
-    expect(sub!._def?.typeName).toBe('ZodString');
+    expect(schemaType(sub)).toBe('string');
   });
 
   it('navigates nested objects', () => {
-    const schema = z3.object({
-      interface: z3.object({ title: z3.string() }),
+    const schema = z.object({
+      interface: z.object({ title: z.string() }),
     });
     const sub = resolveSubSchema(schema, ['interface', 'title']);
     expect(sub).not.toBeNull();
-    expect(sub!._def?.typeName).toBe('ZodString');
+    expect(schemaType(sub)).toBe('string');
   });
 
   it('navigates ZodRecord dynamic keys', () => {
-    const schema = z3.object({
-      headers: z3.record(z3.string(), z3.string()),
+    const schema = z.object({
+      headers: z.record(z.string(), z.string()),
     });
     const sub = resolveSubSchema(schema, ['headers', 'anyKey']);
     expect(sub).not.toBeNull();
-    expect(sub!._def?.typeName).toBe('ZodString');
+    expect(schemaType(sub)).toBe('string');
   });
 
   it('navigates through optional wrappers', () => {
-    const schema = z3.object({
-      settings: z3.object({ debug: z3.boolean() }).optional(),
+    const schema = z.object({
+      settings: z.object({ debug: z.boolean() }).optional(),
     });
     const sub = resolveSubSchema(schema, ['settings', 'debug']);
     expect(sub).not.toBeNull();
   });
 
   it('returns null for non-existent paths', () => {
-    const schema = z3.object({ name: z3.string() });
+    const schema = z.object({ name: z.string() });
     expect(resolveSubSchema(schema, ['nonexistent'])).toBeNull();
     expect(resolveSubSchema(schema, ['name', 'child'])).toBeNull();
   });
@@ -744,17 +707,17 @@ describe('validateFieldValue', () => {
 
 /* ---------------------------------------------------------------------------
  * Regression — resolveSubSchema must keep walking through synthetic unions.
- * The anyOfSchema wrapper used to drop _def.options, so the second segment
+ * The anyOfSchema wrapper used to drop its union options, so the second segment
  * after a multi-candidate union could not be resolved and validateFieldValue
  * silently passed everything under unioned objects.
  * -----------------------------------------------------------------------*/
 
 describe('resolveSubSchema — traversal through synthesized union', () => {
   it('walks into a nested field after a union with multiple candidates', () => {
-    const schema = z3.object({
-      payload: z3.union([
-        z3.object({ headers: z3.record(z3.string(), z3.string()) }),
-        z3.object({ headers: z3.record(z3.string(), z3.string()) }),
+    const schema = z.object({
+      payload: z.union([
+        z.object({ headers: z.record(z.string(), z.string()) }),
+        z.object({ headers: z.record(z.string(), z.string()) }),
       ]),
     });
     const sub = resolveSubSchema(schema, ['payload', 'headers', 'Authorization']);
@@ -785,14 +748,42 @@ const SAMPLE_OVERRIDES: Record<string, unknown> = {
   'mcpSettings.allowedAddresses': ['localhost:11434'],
   'actions.allowedAddresses': ['localhost:11434'],
   'endpoints.allowedAddresses': ['localhost:11434'],
+  'ocr.allowedAddresses': ['localhost:11434'],
+  'webSearch.allowedAddresses': ['localhost:11434'],
+  'speech.tts.allowedAddresses': ['localhost:11434'],
+  'speech.stt.allowedAddresses': ['localhost:11434'],
   'endpoints.agents.remoteApi.auth.oidc.issuer': 'https://example.com',
   'endpoints.agents.remoteApi.auth.oidc.jwksUri': 'https://example.com/.well-known/jwks.json',
+  'endpoints.agents.managementApi.auth.oidc.issuer': 'https://example.com',
+  'endpoints.agents.managementApi.auth.oidc.jwksUri': 'https://example.com/.well-known/jwks.json',
+  'endpoints.agents.managementApi.auth.oidc.tokenUse': 'access',
+  'endpoints.agents.eventDriven.selfUrl': 'https://example.com',
+  'endpoints.agents.repositoryInstructions.timeoutMs': 1000,
+  'endpoints.agents.maxToolCallArgBytesByTool': { sample_tool: 1024 },
+  'fileConfig.defaultLLMDeliveryPath.overrides': { 'application/pdf': 'text' },
+  'interface.traceViewer.requestTimeoutMs': 1000,
+  'registration.oauthStateTtlMs': 60000,
+  'registration.openidDiscovery.retryDelayMs': 100,
+  'balance.reservationTtlMs': 10000,
   'summarization.trigger': { type: 'token_ratio', value: 0.5 },
   'skillSync.github.intervalMinutes': 5,
   'skillSync.github.sources': [
     { id: 'sample', owner: 'foo', repo: 'bar', paths: ['skills/'], credentialKey: 'sample-key' },
   ],
+  'fileConfig.vectorOwnershipTrackingStart': '2026-01-01T00:00:00Z',
+  'endpoints.agents.streamKeepaliveIntervalMs': 1000,
+  'endpoints.agents.pullRequests.token': '${GITHUB_PULL_REQUEST_TOKEN}',
+  'endpoints.agents.pullRequests.oauth.clientId': '${GITHUB_CLIENT_ID}',
+  'endpoints.agents.pullRequests.oauth.clientSecret': '${GITHUB_CLIENT_SECRET}',
+  'endpoints.agents.pullRequests.allowedRepositories': ['owner/name'],
 };
+
+/** A number the field's bounds allow: 1, or its minimum when that is higher. */
+function sampleNumber(constraints: t.FieldConstraints | undefined): number {
+  const min = constraints?.min;
+  if (min === undefined || min < 1) return 1;
+  return constraints?.minExclusive ? min + 1 : min;
+}
 
 /** Generates a representative value that a given UI control would produce. */
 function sampleValueForControl(field: t.SchemaField, path?: string): unknown {
@@ -802,14 +793,29 @@ function sampleValueForControl(field: t.SchemaField, path?: string): unknown {
     case 'toggle':
       return true;
     case 'number':
-      return 1;
+      return sampleNumber(field.constraints);
     case 'text':
-      return 'sample';
+    case 'textarea':
+    case 'secret':
+    case 'ref-select':
+      return field.constraints?.url ? 'https://example.com' : 'sample';
     case 'select': {
       const opts = getEnumOptions(field.type);
       return opts.length > 0 ? coerceEnumValue(opts[0].value) : 'default';
     }
-    case 'array': {
+    case 'literal':
+      return coerceEnumValue(getEnumOptions(field.type)[0]?.value ?? 'default');
+    case 'bool-or-list':
+    case 'scalar-union':
+      return true;
+    case 'model-list':
+      return getArrayItemType(field.type) === 'string' ? ['item'] : ['item', { name: 'item-2' }];
+    case 'domain-list':
+      return ['example.com', '*.example.org'];
+    case 'mime-list':
+      return ['^image\\/(png|jpeg)$', 'application/pdf'];
+    case 'array':
+    case 'multi-enum': {
       const itemType = getArrayItemType(field.type);
       if (itemType.startsWith('enum(')) {
         const enumOpts = getEnumOptions(itemType);
@@ -982,7 +988,16 @@ describe('YAML-editor fallback audit', () => {
 
   /** No field should fall back to the YAML editor. Every field must have a
    *  purpose-built control. This record must stay empty. */
-  const expectedCodeFields: Record<string, string> = {};
+  const expectedCodeFields: Record<string, string> = {
+    'modelSpecs.list.preset.additionalModelRequestFields':
+      'admin-panel — arbitrary JSON (record/array/scalars); YAML is the faithful editor',
+    'interface.theme':
+      'admin-panel — new in data-provider 0.8.530: a bundled theme name or a theme definition object',
+    'mcpServers.oauthToolCatalog.inputSchema.properties.type':
+      'admin-panel — new in data-provider 0.8.530: a JSON Schema type name or a list of them',
+    'mcpServers.oauthToolCatalog.inputSchema.properties.items.type':
+      'admin-panel — new in data-provider 0.8.530: a JSON Schema type name or a list of them',
+  };
 
   it('every code-fallback field is accounted for in the audit', () => {
     const unaccounted = codeFields
@@ -1018,8 +1033,7 @@ describe('YAML-editor fallback audit', () => {
  * Custom endpoint validation and schema extraction
  * -----------------------------------------------------------------------*/
 
-const ldpEndpoint = (require3('librechat-data-provider') as { endpointSchema: ZodV3Schema })
-  .endpointSchema;
+const ldpEndpoint = endpointSchema;
 
 describe('custom endpoint schema', () => {
   const endpointTree = extractSchemaTree(ldpEndpoint);
@@ -1104,55 +1118,6 @@ describe('parseIndexedArrayPath', () => {
   });
 });
 
-describe('toConfigArraySource', () => {
-  it('converts legacy numeric-key array objects to arrays', () => {
-    expect(
-      toConfigArraySource({
-        0: { name: 'first' },
-        2: { name: 'third' },
-      }),
-    ).toEqual([{ name: 'first' }, undefined, { name: 'third' }]);
-  });
-
-  it('rejects non-index object keys', () => {
-    expect(toConfigArraySource({ 0: 'zero', current: 'not-array' })).toBeUndefined();
-  });
-});
-
-describe('mergeConfigArraySources', () => {
-  it('overlays legacy numeric-key overrides onto inherited arrays', () => {
-    expect(
-      mergeConfigArraySources(
-        [
-          { name: 'base-a', baseURL: 'https://a.example.com' },
-          { name: 'base-b', baseURL: 'https://b.example.com' },
-          { name: 'base-c', baseURL: 'https://c.example.com' },
-        ],
-        {
-          1: { name: 'scope-b', baseURL: 'https://scope.example.com' },
-        },
-        undefined,
-      ),
-    ).toEqual([
-      { name: 'base-a', baseURL: 'https://a.example.com' },
-      { name: 'scope-b', baseURL: 'https://scope.example.com' },
-      { name: 'base-c', baseURL: 'https://c.example.com' },
-    ]);
-  });
-
-  it('treats real arrays as complete overrides', () => {
-    expect(mergeConfigArraySources(['base-a', 'base-b'], ['scope-only'], undefined)).toEqual([
-      'scope-only',
-    ]);
-  });
-
-  it('applies pending numeric-key entries after scoped overlays', () => {
-    expect(
-      mergeConfigArraySources(['base-a', 'base-b', 'base-c'], { 1: 'scope-b' }, { 2: 'pending-c' }),
-    ).toEqual(['base-a', 'scope-b', 'pending-c']);
-  });
-});
-
 describe('normalizeAppServiceKeys', () => {
   it('maps MCP AppService output to canonical mcpServers records', () => {
     const normalized = normalizeAppServiceKeys({
@@ -1194,92 +1159,6 @@ describe('normalizeAppServiceKeys', () => {
         ],
       },
     });
-  });
-});
-
-describe('mergeIndexedArrayEntriesIntoBase', () => {
-  it('merges indexed MCP array edits from AppService fallback aliases', () => {
-    const mergedPaths = new Set<string>();
-    const result = mergeIndexedArrayEntriesIntoBase(
-      [{ fieldPath: 'mcpServers.filesystem.args.1', value: '--workspace' }],
-      {
-        mcpConfig: {
-          filesystem: {
-            type: 'stdio',
-            args: ['server.js', '--root', '/tmp'],
-          },
-        },
-      },
-      mergedPaths,
-    );
-
-    expect(result).toEqual([
-      {
-        fieldPath: 'mcpServers.filesystem.args',
-        value: ['server.js', '--workspace', '/tmp'],
-      },
-    ]);
-    expect(mergedPaths.has('mcpServers.filesystem.args')).toBe(true);
-  });
-
-  it('preserves legacy numeric-key array objects while merging', () => {
-    const result = mergeIndexedArrayEntriesIntoBase(
-      [
-        {
-          fieldPath: 'endpoints.custom.1',
-          value: { name: 'edited', baseURL: 'https://edited.example.com' },
-        },
-      ],
-      {
-        endpoints: {
-          custom: {
-            0: { name: 'first', baseURL: 'https://first.example.com' },
-            1: { name: 'second', baseURL: 'https://second.example.com' },
-            2: { name: 'third', baseURL: 'https://third.example.com' },
-          },
-        },
-      },
-    );
-
-    expect(result).toEqual([
-      {
-        fieldPath: 'endpoints.custom',
-        value: [
-          { name: 'first', baseURL: 'https://first.example.com' },
-          { name: 'edited', baseURL: 'https://edited.example.com' },
-          { name: 'third', baseURL: 'https://third.example.com' },
-        ],
-      },
-    ]);
-  });
-
-  it('strips secret preview companions from untouched array entries after merging', () => {
-    const result = mergeIndexedArrayEntriesIntoBase(
-      [
-        {
-          fieldPath: 'endpoints.custom.1',
-          value: { name: 'edited', baseURL: 'https://edited.example.com', apiKey: '' },
-        },
-      ],
-      {
-        endpoints: {
-          custom: [
-            { name: 'first', baseURL: 'https://first.example.com', apiKeyPreview: 'sk-...aaaa' },
-            { name: 'second', baseURL: 'https://second.example.com', apiKeyPreview: 'sk-...bbbb' },
-          ],
-        },
-      },
-    );
-
-    expect(result).toEqual([
-      {
-        fieldPath: 'endpoints.custom',
-        value: [
-          { name: 'first', baseURL: 'https://first.example.com' },
-          { name: 'edited', baseURL: 'https://edited.example.com', apiKey: '' },
-        ],
-      },
-    ]);
   });
 });
 
@@ -1338,12 +1217,391 @@ describe('validateFieldValue for endpoints', () => {
 
     expect(result).toEqual({
       success: false,
-      error: 'endpoints.custom[1].models.default: Required',
+      error:
+        'endpoints.custom[1].models.default: Invalid input: expected array, received undefined',
     });
   });
 
   it('gracefully handles unknown deep paths', () => {
     const result = validateFieldValue('endpoints.custom.0.nonexistent.deep', 'value');
     expect(result).toEqual({ success: true });
+  });
+});
+
+describe('parseConfigYaml (import)', () => {
+  it('returns the raw YAML without injected schema defaults (3 keys in, 3 leaves out)', () => {
+    const result = parseConfigYaml(
+      'balance:\n  startBalance: 777\ninterface:\n  customWelcome: hi\nregistration:\n  allowedDomains:\n    - a.com\n',
+    );
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({
+      balance: { startBalance: 777 },
+      interface: { customWelcome: 'hi' },
+      registration: { allowedDomains: ['a.com'] },
+    });
+  });
+
+  it('accepts a sparse MCP server override as written, leaving completeness to the chosen target', () => {
+    const result = parseConfigYaml('mcpServers:\n  github:\n    timeout: 120000\n');
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({ mcpServers: { github: { timeout: 120000 } } });
+  });
+
+  it('rejects an MCP block that is not servers by name', () => {
+    expect(parseConfigYaml('mcpServers:\n  - github\n').validationErrors).toEqual([
+      { path: 'mcpServers', message: 'Expected object, received array' },
+    ]);
+    expect(parseConfigYaml('mcpServers:\n  github: true\n').validationErrors).toEqual([
+      { path: 'mcpServers.github', message: 'Expected object, received boolean' },
+    ]);
+  });
+
+  it('does not require a version key', () => {
+    expect(parseConfigYaml('balance:\n  enabled: true\n').success).toBe(true);
+  });
+
+  it('accepts a numeric version, which import ignores', () => {
+    const result = parseConfigYaml('version: 1.2\nbalance:\n  enabled: true\n');
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({ version: 1.2, balance: { enabled: true } });
+  });
+
+  it('keeps keys the bundled schema does not know and reports them', () => {
+    const result = parseConfigYaml(
+      'version: 1.3.3\ninterface:\n  replyNotifications:\n    vibrate: false\n',
+    );
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({
+      version: '1.3.3',
+      interface: { replyNotifications: { vibrate: false } },
+    });
+    expect(result.unknownPaths).toEqual(['interface.replyNotifications.vibrate']);
+  });
+
+  it('keeps keys the admin API would drop; the import plan leaves out only the leaves carrying them', () => {
+    const result = parseConfigYaml(
+      'endpoints:\n  bedrock:\n    inferenceProfiles:\n      us.anthropic.claude: arn:aws:x\n',
+    );
+    expect(result.success).toBe(true);
+    expect(result.appConfig).toEqual({
+      endpoints: { bedrock: { inferenceProfiles: { 'us.anthropic.claude': 'arn:aws:x' } } },
+    });
+    expect(result.unknownPaths).toEqual([]);
+  });
+
+  it('reports the line and column of a YAML syntax error', () => {
+    const result = parseConfigYaml('balance:\n  startBalance: [1\n');
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/line \d+, column \d+/);
+    expect(result.mark).toEqual({ line: expect.any(Number), column: expect.any(Number) });
+    expect(result.unknownEnumValues).toEqual([]);
+  });
+
+  it('reports schema validation errors', () => {
+    const result = parseConfigYaml('balance:\n  startBalance: lots\n');
+    expect(result.success).toBe(false);
+    expect(result.validationErrors?.[0].path).toBe('balance.startBalance');
+  });
+
+  describe('enum values the bundled schema does not list (#72)', () => {
+    /** Issue #72's librechat.yaml, with a capability and a retention mode this panel's schema doesn't list. */
+    const issue72 = [
+      'version: 1.3.12',
+      'endpoints:',
+      '  bedrock:',
+      '    disabled: false',
+      '  agents:',
+      '    disableBuilder: false',
+      '    allowedProviders:',
+      '      - "bedrock"',
+      '    capabilities:',
+      "      - 'execute_code'",
+      "      - 'file_search'",
+      "      - 'web_search'",
+      "      - 'artifacts'",
+      "      - 'subagents'",
+      "      - 'actions'",
+      "      - 'context'",
+      "      - 'skills'",
+      "      - 'teleport'",
+      "      - 'tools'",
+      "      - 'chain'",
+      "      - 'ocr'",
+      'interface:',
+      '  retentionMode: someday',
+      '',
+    ].join('\n');
+
+    it('imports them as written and names each with its path and the values the panel lists', () => {
+      const result = parseConfigYaml(issue72);
+      expect(result.success).toBe(true);
+      expect(result.validationErrors).toBeUndefined();
+      const agents = (result.appConfig?.endpoints as t.ConfigRecord).agents as t.ConfigRecord;
+      expect(agents.capabilities).toEqual([
+        'execute_code',
+        'file_search',
+        'web_search',
+        'artifacts',
+        'subagents',
+        'actions',
+        'context',
+        'skills',
+        'teleport',
+        'tools',
+        'chain',
+        'ocr',
+      ]);
+      expect(result.appConfig?.interface).toEqual({ retentionMode: 'someday' });
+      expect(result.unknownEnumValues).toEqual(
+        expect.arrayContaining([
+          {
+            path: 'endpoints.agents.capabilities.8',
+            value: 'teleport',
+            options: expect.arrayContaining(['subagents', 'skills', 'tools']),
+          },
+          {
+            path: 'interface.retentionMode',
+            value: 'someday',
+            options: ['all', 'temporary', 'ephemeral'],
+          },
+        ]),
+      );
+      expect(result.unknownEnumValues).toHaveLength(2);
+    });
+
+    it('still fails on a wrong type where an enum list belongs', () => {
+      const result = parseConfigYaml('endpoints:\n  agents:\n    capabilities: tools\n');
+      expect(result.success).toBe(false);
+      expect(result.validationErrors).toEqual([
+        {
+          path: 'endpoints.agents.capabilities',
+          message: expect.stringMatching(/expected array/i),
+        },
+      ]);
+    });
+
+    it('imports one in a one-member enum list, which zod 4 reports like a literal', () => {
+      const result = parseConfigYaml(
+        'filters:\n  conversationStarters:\n    pii:\n      fields: [subject]\n',
+      );
+      expect(result.success).toBe(true);
+      expect(result.unknownEnumValues).toEqual([
+        { path: 'filters.conversationStarters.pii.fields.0', value: 'subject', options: ['text'] },
+      ]);
+    });
+
+    it('still fails on a literal the schema fixes', () => {
+      const result = parseConfigYaml(
+        'endpoints:\n  agents:\n    managementApi:\n      auth:\n        oidc:\n          tokenUse: id\n',
+      );
+      expect(result.success).toBe(false);
+      expect(result.validationErrors?.map((error) => error.path)).toEqual([
+        'endpoints.agents.managementApi.auth.oidc.tokenUse',
+      ]);
+      expect(result.unknownEnumValues).toEqual([]);
+    });
+
+    it('still fails on a value that is not text', () => {
+      const result = parseConfigYaml(
+        'endpoints:\n  agents:\n    capabilities:\n      - tools\n      - 5\n',
+      );
+      expect(result.success).toBe(false);
+      expect(result.validationErrors?.map((error) => error.path)).toEqual([
+        'endpoints.agents.capabilities.1',
+      ]);
+      expect(result.unknownEnumValues).toEqual([]);
+    });
+
+    it('still fails on a union none of whose branches fits, an enum branch included', () => {
+      const result = parseConfigYaml(
+        'speech:\n  speechTab:\n    speechToText:\n      engineSTT: whisper2\n',
+      );
+      expect(result.success).toBe(false);
+      expect(result.validationErrors?.map((error) => error.path)).toEqual([
+        'speech.speechTab.speechToText',
+      ]);
+    });
+
+    it('still fails when another error comes with them, naming only the other error', () => {
+      const result = parseConfigYaml(
+        'interface:\n  retentionMode: someday\nbalance:\n  startBalance: lots\n',
+      );
+      expect(result.success).toBe(false);
+      expect(result.appConfig).toBeNull();
+      expect(result.validationErrors?.map((error) => error.path)).toEqual(['balance.startBalance']);
+    });
+
+    it('still fails on an MCP block of the wrong shape beside them', () => {
+      const result = parseConfigYaml('interface:\n  retentionMode: someday\nmcpServers:\n  - a\n');
+      expect(result.success).toBe(false);
+      expect(result.validationErrors).toEqual([
+        { path: 'mcpServers', message: 'Expected object, received array' },
+      ]);
+    });
+  });
+});
+
+describe('findUnknownConfigPaths', () => {
+  it('lists leaf paths the schema cannot resolve', () => {
+    expect(
+      findUnknownConfigPaths({ balance: { startBalance: 1 }, brandNew: { flag: true } }),
+    ).toEqual(['brandNew.flag']);
+  });
+
+  it('resolves AppService alias sections before looking keys up', () => {
+    expect(
+      findUnknownConfigPaths({
+        interfaceConfig: { customWelcome: 'hi', privacyPolicy: { externalUrl: 'https://x' } },
+      }),
+    ).toEqual([]);
+  });
+});
+
+/** The save pre-flight every write path runs: the plan's issues and skipped changes for sets and resets. */
+function preflight(saves: t.SaveEntry[], resets: string[] = []) {
+  const ops: t.ConfigChange[] = [
+    ...saves.map(({ fieldPath, value }): t.ConfigChange => ({ op: 'set', path: fieldPath, value })),
+    ...resets.map((path): t.ConfigChange => ({ op: 'reset', path })),
+  ];
+  const plan = planConfigChanges(ops, { stored: {}, tombstones: [], lower: {}, lowerKind: 'yaml' });
+  return { issues: plan.issues, skipped: plan.skipped };
+}
+
+describe('save pre-flight (planConfigChanges write rules)', () => {
+  it('passes valid entries, including an indexed array entry', () => {
+    const check = preflight([
+      { fieldPath: 'balance.startBalance', value: 100 },
+      {
+        fieldPath: 'endpoints.custom.2',
+        value: { name: 'Proxy', apiKey: 'k', baseURL: 'https://p', models: { default: ['m'] } },
+      },
+    ]);
+    expect(check).toEqual({ issues: [], skipped: [] });
+  });
+
+  it('validates an indexed array entry against the element schema', () => {
+    const check = preflight([
+      {
+        fieldPath: 'endpoints.custom.0',
+        value: {
+          name: 'Proxy',
+          apiKey: 'k',
+          baseURL: 'https://p',
+          models: { fetch: true },
+          iconURL: 42,
+        },
+      },
+    ]);
+    expect(check.issues.map((issue) => issue.entryPath)).toContain('iconURL');
+  });
+
+  it('rejects an invalid MCP title before anything is written', () => {
+    const check = preflight([{ fieldPath: 'mcpServers.final-server.title', value: 'Bad_Title!' }]);
+    expect(check.issues.map((issue) => issue.path)).toContain('mcpServers.final-server.title');
+  });
+
+  it('rejects process-backed MCP fields with the field named', () => {
+    const check = preflight([{ fieldPath: 'mcpServers.local.command', value: 'npx' }]);
+    expect(check.issues[0].path).toBe('mcpServers.local.command');
+    expect(check.issues[0].code).toBe('PROCESS_MCP_FIELD');
+  });
+
+  it('rejects keys the admin API would silently drop', () => {
+    const check = preflight([
+      {
+        fieldPath: 'endpoints.bedrock.inferenceProfiles',
+        value: { 'us.anthropic.claude': 'arn:aws:x' },
+      },
+    ]);
+    expect(check.issues[0].message).toMatch(/us\.anthropic\.claude/);
+  });
+
+  it('skips YAML-managed fields on every write path', () => {
+    const check = preflight([
+      {
+        fieldPath: 'endpoints.azureOpenAI.groups',
+        value: [{ group: 'evil', apiKey: 'sk-evil', instanceName: 'evil', models: {} }],
+      },
+      { fieldPath: 'endpoints.anthropic.vertex.region', value: 'us-east5' },
+      { fieldPath: 'endpoints.azureOpenAI.groups.0', value: { group: 'evil' } },
+    ]);
+    expect(check.issues).toEqual([]);
+    expect(check.skipped).toEqual([
+      { fieldPath: 'endpoints.azureOpenAI.groups', reason: 'yamlOnly' },
+      { fieldPath: 'endpoints.anthropic.vertex.region', reason: 'yamlOnly' },
+      { fieldPath: 'endpoints.azureOpenAI.groups.0', reason: 'yamlOnly' },
+    ]);
+  });
+
+  it('rejects a save at an ancestor path that carries a YAML-managed field', () => {
+    const check = preflight([
+      { fieldPath: 'endpoints.azureOpenAI', value: { titleModel: 'x', groups: [] } },
+    ]);
+    expect(check.issues).toHaveLength(1);
+    expect(check.issues[0]).toMatchObject({
+      path: 'endpoints.azureOpenAI.groups',
+      code: 'YAML_MANAGED',
+    });
+  });
+
+  it('skips dedicated (Langfuse) and newer base-only (mcpAppSandbox) sections', () => {
+    const check = preflight(
+      [
+        { fieldPath: 'balance.startBalance', value: 999 },
+        { fieldPath: 'mcpAppSandbox.enabled', value: true },
+        { fieldPath: 'langfuse.baseUrl', value: 'https://lf.example.com' },
+      ],
+      ['langfuse.baseUrl'],
+    );
+    expect(check.issues).toEqual([]);
+    expect(check.skipped).toEqual([
+      { fieldPath: 'mcpAppSandbox.enabled', reason: 'baseOnly' },
+      { fieldPath: 'langfuse.baseUrl', reason: 'dedicated' },
+      { fieldPath: 'langfuse.baseUrl', reason: 'dedicated' },
+    ]);
+  });
+
+  it('skips base-only, YAML-only and permission writes, but lets stale YAML-only overrides be removed', () => {
+    const check = preflight(
+      [
+        { fieldPath: 'filters.messages.pii.action', value: 'block' },
+        { fieldPath: 'cloudfront.urlExpiry', value: 3601 },
+        { fieldPath: 'interface.prompts', value: false },
+      ],
+      ['filters.messages', 'cloudfront.urlExpiry'],
+    );
+    expect(check.issues).toEqual([]);
+    expect(check.skipped).toEqual([
+      { fieldPath: 'filters.messages.pii.action', reason: 'baseOnly' },
+      { fieldPath: 'cloudfront.urlExpiry', reason: 'yamlOnly' },
+      { fieldPath: 'interface.prompts', reason: 'permission' },
+      { fieldPath: 'filters.messages', reason: 'baseOnly' },
+    ]);
+  });
+});
+
+describe('findDroppedEntries (PATCH reply)', () => {
+  const batch: t.SaveEntry[] = [
+    { fieldPath: 'balance.startBalance', value: 999 },
+    { fieldPath: 'futureSection.enabled', value: true },
+  ];
+
+  it('treats a "No actionable" reply as the whole batch dropped', () => {
+    expect(findDroppedEntries(batch, { message: 'No actionable field entries provided' })).toEqual([
+      'balance.startBalance',
+      'futureSection.enabled',
+    ]);
+  });
+
+  it('reports entries whose section is missing from the stored overrides', () => {
+    const body = { config: { overrides: { balance: { startBalance: 999 } } } };
+    expect(findDroppedEntries(batch, body)).toEqual(['futureSection.enabled']);
+  });
+
+  it('reports nothing when every section was stored or the reply has no config', () => {
+    const body = { config: { overrides: { balance: {}, futureSection: { enabled: true } } } };
+    expect(findDroppedEntries(batch, body)).toEqual([]);
+    expect(findDroppedEntries(batch, { config: null })).toEqual([]);
+    expect(findDroppedEntries(batch, {})).toEqual([]);
   });
 });

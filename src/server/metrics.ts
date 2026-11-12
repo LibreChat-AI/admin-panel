@@ -1,7 +1,29 @@
 import { timingSafeEqual } from 'crypto';
 import client, { register } from 'prom-client';
+import type { Registry } from 'prom-client';
 
-client.collectDefaultMetrics();
+/** prom-client's own 10 ms default wakes an idle server about 100 times a second. */
+const DEFAULT_EVENT_LOOP_PRECISION_MS = 1000;
+/** The largest resolution Bun's `monitorEventLoopDelay` accepts; anything above it throws at startup. */
+const MAX_EVENT_LOOP_PRECISION_MS = 2_147_483_647;
+
+function eventLoopPrecision(raw: string | undefined): number {
+  const value = Number(raw);
+  const valid = Number.isInteger(value) && value >= 1 && value <= MAX_EVENT_LOOP_PRECISION_MS;
+  return valid ? value : DEFAULT_EVENT_LOOP_PRECISION_MS;
+}
+
+/** Registers prom-client's process metrics, sampling event-loop delay every 1 s unless the env says otherwise. */
+export function collectDefaultMetrics(registry: Registry = register): void {
+  client.collectDefaultMetrics({
+    register: registry,
+    eventLoopMonitoringPrecision: eventLoopPrecision(
+      process.env.ADMIN_PANEL_METRICS_EVENT_LOOP_PRECISION_MS,
+    ),
+  });
+}
+
+collectDefaultMetrics();
 
 const KNOWN_APP_ROUTES = new Map<string, string>([
   ['/', '/'],
@@ -12,6 +34,8 @@ const KNOWN_APP_ROUTES = new Map<string, string>([
   ['/help', '/help'],
   ['/users', '/users'],
   ['/auth/openid/callback', '/auth/openid/callback'],
+  ['/auth/google/callback', '/auth/google/callback'],
+  ['/auth/saml/callback', '/auth/saml/callback'],
 ]);
 
 const STATIC_ASSET_RE =

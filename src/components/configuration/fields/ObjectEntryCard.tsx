@@ -1,40 +1,102 @@
-import { Icon } from '@clickhouse/click-ui';
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useId } from 'react';
 import type * as t from '@/types';
-import { TrashButton } from '@/components/shared';
+import { useLocalize, useValuesScope, useConfigKeyProblem, useExpandableState } from '@/hooks';
+import { DecorativeIcon, StateChip } from '@/components/shared';
+import { getEntrySummary } from './entries';
+import { sourceLabel } from '../values';
 import { CodeField } from './CodeField';
-import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
+const ACTION_CLASSES =
+  'inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md border-none bg-transparent p-1.5 text-xs text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default) disabled:cursor-not-allowed disabled:opacity-50';
+
+function toDomId(value: string): string {
+  return value.replace(/[^\w-]+/g, '-');
+}
+
+function asRecord(value: t.ConfigValue): t.ConfigRecord {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+/**
+ * One collection entry (endpoint, MCP server, spec, list item). The header is
+ * a single `<button aria-expanded>`; rename, add-field, reorder and delete are
+ * always-visible sibling buttons. Deleting puts the entry into a pending
+ * deletion state (rendered by the list) with Undo until Save. Field edits
+ * merge into the latest entry value, so two changes in one tick both land.
+ * Listens for `config:expand` / `config:collapse` on its root element.
+ */
 export function ObjectEntryCard({
   id,
+  dataPath,
   entryKey,
   fields,
   value,
   onValueChange,
   onRemove,
   onRename,
+  validateKey,
+  keyListId,
+  lockedNote,
+  onUndoRemove,
+  onMoveUp,
+  onMoveDown,
+  pendingRemoval,
+  focusUndo,
+  isNew,
+  markers,
+  summary,
+  leading,
+  stackedSummary,
   disabled,
   defaultExpanded = false,
   renderFields,
   editSessionId,
 }: t.ObjectEntryCardProps) {
   const localize = useLocalize();
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
-  const [hasEverExpanded, setHasEverExpanded] = useState(defaultExpanded);
+  const unsafeKeyProblem = useConfigKeyProblem();
+  const generatedId = useId();
+  const [isExpanded, setIsExpanded] = useExpandableState(
+    defaultExpanded,
+    dataPath ? [dataPath] : undefined,
+  );
+  const [hasEverExpanded, setHasEverExpanded] = useState(isExpanded);
   const [isEditing, setIsEditing] = useState(false);
   const [editKey, setEditKey] = useState(entryKey);
+  const [renameError, setRenameError] = useState<string | null>(null);
   const [hasAddField, setHasAddField] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const undoRef = useRef<HTMLButtonElement>(null);
+  const userToggledRef = useRef(false);
+  const valueRef = useRef(value);
+  valueRef.current = value;
   const addFieldTriggerRef = useRef<(() => void) | null>(null);
+  const baseId = toDomId(id ?? dataPath ?? generatedId);
+  const panelId = `${baseId}-panel`;
+  const fieldsPath = dataPath ?? entryKey;
 
   useEffect(() => {
     if (isExpanded && !hasEverExpanded) setHasEverExpanded(true);
   }, [isExpanded, hasEverExpanded]);
 
-  // Track whether renderFields registered an addFieldTrigger.
-  // Runs every render because the ref is populated by children after mount.
+  useEffect(() => {
+    if (defaultExpanded && !userToggledRef.current) setIsExpanded(true);
+  }, [defaultExpanded]);
+
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const expand = () => setIsExpanded(true);
+    const collapse = () => setIsExpanded(false);
+    el.addEventListener('config:expand', expand);
+    el.addEventListener('config:collapse', collapse);
+    return () => {
+      el.removeEventListener('config:expand', expand);
+      el.removeEventListener('config:collapse', collapse);
+    };
+  }, []);
+
   useEffect(() => {
     const has = addFieldTriggerRef.current != null;
     setHasAddField((prev) => (prev === has ? prev : has));
@@ -47,163 +109,301 @@ export function ObjectEntryCard({
     }
   }, [isEditing]);
 
-  // Auto-focus first input when a new entry opens expanded
   useEffect(() => {
-    if (defaultExpanded && isExpanded && cardRef.current) {
-      requestAnimationFrame(() => {
-        const firstInput = cardRef.current?.querySelector<HTMLElement>(
-          'input:not([type="hidden"]), select, textarea, [role="switch"]',
-        );
-        firstInput?.focus();
-      });
-    }
-  }, []); // Only on mount
+    if (pendingRemoval && focusUndo) undoRef.current?.focus();
+  }, [pendingRemoval, focusUndo]);
 
-  const toggle = useCallback(() => setIsExpanded((prev) => !prev), []);
+  /** A new entry takes focus once, when it appears; moving it later (its id changes) must not. */
+  const announcedNewRef = useRef(false);
+  useEffect(() => {
+    if (!isNew || !cardRef.current || announcedNewRef.current) return;
+    announcedNewRef.current = true;
+    const card = cardRef.current;
+    requestAnimationFrame(() => {
+      card.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+      card
+        .querySelector<HTMLElement>(
+          `#${CSS.escape(panelId)} :is(input:not([type="hidden"]), select, textarea, [role="switch"])`,
+        )
+        ?.focus({ preventScroll: true });
+    });
+  }, [isNew, panelId]);
+
+  const toggle = useCallback(() => {
+    userToggledRef.current = true;
+    setIsExpanded((prev) => !prev);
+  }, []);
 
   const handleFieldChange = useCallback(
     (fieldPath: string, fieldValue: t.ConfigValue) => {
-      const current =
-        typeof value === 'object' && value !== null && !Array.isArray(value)
-          ? (value as Record<string, t.ConfigValue>)
-          : {};
-      const segments = fieldPath.split('.');
-      const leafKey = segments[segments.length - 1];
-      onValueChange({ ...current, [leafKey]: fieldValue });
+      const leafKey = fieldPath.split('.').pop() ?? fieldPath;
+      const next = { ...asRecord(valueRef.current), [leafKey]: fieldValue };
+      if (fieldValue === undefined) delete next[leafKey];
+      valueRef.current = next;
+      onValueChange(next);
     },
-    [value, onValueChange],
+    [onValueChange],
   );
 
   const commitRename = useCallback(() => {
-    setIsEditing(false);
     const trimmed = editKey.trim();
+    const unsafe = trimmed !== entryKey ? unsafeKeyProblem(trimmed) : null;
+    if (unsafe) {
+      setRenameError(unsafe);
+      return;
+    }
+    const problem = trimmed && trimmed !== entryKey ? (validateKey?.(trimmed) ?? null) : null;
+    if (problem) {
+      setRenameError(problem);
+      return;
+    }
+    setRenameError(null);
+    setIsEditing(false);
     if (trimmed && trimmed !== entryKey && onRename) {
       onRename(trimmed);
     } else {
       setEditKey(entryKey);
     }
-  }, [editKey, entryKey, onRename]);
+  }, [editKey, entryKey, onRename, validateKey, unsafeKeyProblem]);
 
-  const summary = getSummary(value, {
-    enabled: localize('com_ui_enabled'),
-    disabled: localize('com_ui_disabled'),
-  });
+  const cancelRename = useCallback(() => {
+    setEditKey(entryKey);
+    setRenameError(null);
+    setIsEditing(false);
+  }, [entryKey]);
+
+  const renameErrorId = `${baseId}-rename-error`;
+  const summaryNode =
+    summary !== undefined
+      ? summary
+      : getEntrySummary(value, entryKey, {
+          enabled: localize('com_ui_enabled'),
+          disabled: localize('com_ui_disabled'),
+          type: (type) => {
+            const key = `com_config_enum_${type}`;
+            const label = localize(key);
+            return label === key ? type : label;
+          },
+        });
+
+  const newChip = isNew ? (
+    <span className="shrink-0 rounded-full bg-(--cui-color-background-muted) px-1.5 py-0.5 text-xs font-semibold text-(--cui-color-text-default) uppercase">
+      {localize('com_config_ctl_entry_new')}
+    </span>
+  ) : null;
+
+  if (pendingRemoval) {
+    return (
+      <div
+        ref={cardRef}
+        id={id}
+        className="flex items-center gap-3 rounded-lg border border-dashed border-(--cui-color-stroke-default) px-3 py-2.5"
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+          <span className="truncate text-(--cui-color-text-muted) line-through" title={entryKey}>
+            {entryKey}
+          </span>
+          <span className="shrink-0 text-xs text-(--cui-color-text-muted)">
+            {localize('com_config_ctl_entry_pending_delete')}
+          </span>
+        </span>
+        {onUndoRemove && (
+          <button
+            ref={undoRef}
+            type="button"
+            onClick={onUndoRemove}
+            aria-label={localize('com_config_ctl_entry_undo_a11y', { name: entryKey })}
+            className={cn(
+              ACTION_CLASSES,
+              'border border-solid border-(--cui-color-stroke-default)',
+            )}
+          >
+            <DecorativeIcon name="history" size="sm" />
+            <span>{localize('com_config_ctl_entry_undo')}</span>
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div
       ref={cardRef}
-      id={id}
+      id={id ?? (dataPath ? `section-${baseId}` : undefined)}
+      data-entry-card
       className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default)"
     >
       <div
-        data-section-id={id}
         className={cn(
-          'group flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 select-none hover:bg-(--cui-color-background-hover) focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)',
-          isExpanded && 'sticky top-0 z-5 bg-(--cui-color-background-default)',
+          '@container flex w-full items-center gap-1 rounded-lg pr-2 transition-colors hover:bg-(--cui-color-background-hover)',
+          isExpanded && 'sticky top-0 z-5 rounded-t-lg bg-(--cui-color-background-default)',
         )}
-        onClick={isEditing ? undefined : toggle}
-        role="button"
-        tabIndex={isEditing ? -1 : 0}
-        onKeyDown={
-          isEditing
-            ? undefined
-            : (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  toggle();
-                }
-              }
-        }
-        aria-expanded={isExpanded}
       >
-        <span
-          className={cn(
-            'flex shrink-0 items-center justify-center transition-transform duration-200',
-            isExpanded && 'rotate-90',
-          )}
-        >
-          <Icon name="chevron-right" size="sm" />
-        </span>
-        <span className="flex min-w-0 flex-1 items-center gap-2">
-          {isEditing && onRename ? (
+        {isEditing && onRename ? (
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 px-3 py-2">
             <input
               ref={inputRef}
               type="text"
+              list={keyListId}
               value={editKey}
-              onChange={(e) => setEditKey(e.target.value)}
+              onChange={(e) => {
+                setEditKey(e.target.value);
+                setRenameError(null);
+              }}
               onBlur={commitRename}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') commitRename();
-                if (e.key === 'Escape') {
-                  setEditKey(entryKey);
-                  setIsEditing(false);
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitRename();
                 }
+                if (e.key === 'Escape') cancelRename();
               }}
-              onClick={(e) => e.stopPropagation()}
-              className="config-input-ghost w-auto max-w-50 min-w-20 text-sm font-medium"
+              aria-label={localize('com_a11y_rename_entry', { name: entryKey })}
+              aria-invalid={renameError ? true : undefined}
+              aria-describedby={renameError ? renameErrorId : undefined}
+              className="config-input-ghost w-auto max-w-80 min-w-20 text-sm font-medium"
             />
-          ) : (
-            <>
+            {renameError && (
               <span
-                className="truncate text-sm font-medium text-(--cui-color-text-default)"
-                title={entryKey}
+                id={renameErrorId}
+                role="alert"
+                className="text-xs font-normal text-(--cui-color-text-danger)"
               >
-                {entryKey}
+                {renameError}
               </span>
-              {isExpanded && onRename && !disabled && (
-                <button
-                  type="button"
-                  tabIndex={0}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setIsEditing(true);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setIsEditing(true);
-                    }
-                  }}
-                  className="inline-flex shrink-0 cursor-pointer items-center rounded border-none bg-transparent p-1 text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover) hover:text-(--cui-color-text-default) focus-visible:outline focus-visible:outline-2 focus-visible:outline-(--cui-color-outline)"
-                  aria-label={localize('com_a11y_rename_entry', { name: entryKey })}
-                >
-                  <Icon name="pencil" size="sm" />
-                </button>
+            )}
+          </span>
+        ) : (
+          <button
+            type="button"
+            data-section-id={id}
+            aria-expanded={isExpanded}
+            aria-controls={panelId}
+            onClick={toggle}
+            className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg border-none bg-transparent px-3 py-2.5 text-left select-none focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)"
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'flex shrink-0 items-center justify-center transition-transform duration-200',
+                isExpanded && 'rotate-90',
               )}
-            </>
-          )}
-          {summary && !isExpanded && (
-            <span className="truncate text-xs text-(--cui-color-text-muted)">{summary}</span>
-          )}
-        </span>
+            >
+              <DecorativeIcon name="chevron-right" size="sm" />
+            </span>
+            {leading}
+            {stackedSummary ? (
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="min-w-0 truncate text-sm font-medium text-(--cui-color-text-default)"
+                    title={entryKey}
+                  >
+                    {entryKey}
+                  </span>
+                  {newChip}
+                  {markers && <EntryMarkerChips markers={markers} />}
+                </span>
+                {summaryNode && !isExpanded && (
+                  <span className="min-w-0 truncate text-xs text-(--cui-color-text-muted)">
+                    {summaryNode}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <>
+                <span
+                  className="max-w-[60%] min-w-16 shrink truncate text-sm font-medium text-(--cui-color-text-default)"
+                  title={entryKey}
+                >
+                  {entryKey}
+                </span>
+                {newChip}
+                {markers && <EntryMarkerChips markers={markers} />}
+                {summaryNode && !isExpanded && (
+                  <span
+                    className="min-w-0 flex-1 truncate text-xs text-(--cui-color-text-muted)"
+                    title={typeof summaryNode === 'string' ? summaryNode : undefined}
+                  >
+                    {summaryNode}
+                  </span>
+                )}
+              </>
+            )}
+          </button>
+        )}
+        {!disabled && onRename && !isEditing && (
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            className={ACTION_CLASSES}
+            aria-label={localize('com_a11y_rename_entry', { name: entryKey })}
+            title={localize('com_a11y_rename_entry', { name: entryKey })}
+          >
+            <DecorativeIcon name="pencil" size="sm" />
+          </button>
+        )}
         {!disabled && hasAddField && (
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
+            onClick={() => {
+              userToggledRef.current = true;
               if (!isExpanded) setIsExpanded(true);
               requestAnimationFrame(() => addFieldTriggerRef.current?.());
             }}
-            className="config-add-btn"
+            className={ACTION_CLASSES}
           >
-            <Icon name="plus" size="sm" />
+            <DecorativeIcon name="plus" size="sm" />
             <span>{localize('com_config_add_field')}</span>
           </button>
         )}
-        {!disabled && onRemove && (
-          <span
-            className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
-            onClick={(e) => e.stopPropagation()}
+        {!disabled && onMoveUp && (
+          <button
+            type="button"
+            onClick={onMoveUp}
+            data-move="up"
+            className={ACTION_CLASSES}
+            aria-label={localize('com_config_ctl_entry_move_up', { name: entryKey })}
+            title={localize('com_config_ctl_entry_move_up', { name: entryKey })}
           >
-            <TrashButton
-              onClick={onRemove}
-              ariaLabel={`${localize('com_ui_delete')} ${entryKey}`}
-            />
+            <DecorativeIcon name="arrow-up" size="sm" />
+          </button>
+        )}
+        {!disabled && onMoveDown && (
+          <button
+            type="button"
+            onClick={onMoveDown}
+            data-move="down"
+            className={ACTION_CLASSES}
+            aria-label={localize('com_config_ctl_entry_move_down', { name: entryKey })}
+            title={localize('com_config_ctl_entry_move_down', { name: entryKey })}
+          >
+            <DecorativeIcon name="arrow-down" size="sm" />
+          </button>
+        )}
+        {!disabled && lockedNote && (
+          <span
+            className={cn(ACTION_CLASSES, 'cursor-default hover:bg-transparent')}
+            title={lockedNote}
+          >
+            <DecorativeIcon name="lock" size="sm" />
+            <span className="sr-only">{lockedNote}</span>
           </span>
+        )}
+        {!disabled && onRemove && (
+          <button
+            type="button"
+            onClick={onRemove}
+            className={cn(ACTION_CLASSES, 'hover:text-(--cui-color-text-danger)')}
+            aria-label={`${localize('com_ui_delete')} ${entryKey}`}
+            title={`${localize('com_ui_delete')} ${entryKey}`}
+          >
+            <DecorativeIcon name="trash" size="sm" />
+          </button>
         )}
       </div>
       <div
+        id={panelId}
         className={cn(
           'config-section-grid',
           isExpanded ? 'config-section-grid-open' : 'config-section-grid-closed',
@@ -211,7 +411,7 @@ export function ObjectEntryCard({
         inert={!isExpanded ? true : undefined}
       >
         <div className="config-section-inner">
-          <div className="flex flex-col gap-4 border-t border-(--cui-color-stroke-default) px-4 py-3">
+          <div className="flex flex-col gap-2 border-t border-(--cui-color-stroke-default) px-2 py-3">
             {hasEverExpanded && (
               <>
                 {isPrimitive(value) && (
@@ -227,17 +427,19 @@ export function ObjectEntryCard({
                   renderFields(
                     fields,
                     value,
-                    entryKey,
+                    fieldsPath,
                     handleFieldChange,
                     addFieldTriggerRef,
                     editSessionId,
+                    disabled,
                   )}
                 {!isPrimitive(value) && fields.length === 0 && (
                   <CodeField
-                    id={`entry-${entryKey}`}
+                    id={`${baseId}-code`}
                     value={value}
                     onChange={onValueChange}
                     disabled={disabled}
+                    aria-label={entryKey}
                   />
                 )}
               </>
@@ -246,6 +448,81 @@ export function ObjectEntryCard({
         </div>
       </div>
     </div>
+  );
+}
+
+/** The chip an entry header shows for the edit target's override: added here, or changing an entry from below. */
+function useOverrideMarker(
+  markers: t.EntryMarkers,
+): { kind: t.StateChipKind; label: string; description: string } | null {
+  const localize = useLocalize();
+  const scope = useValuesScope();
+  if (!markers.overridden) return null;
+  if (scope) {
+    return {
+      kind: 'scope',
+      label: sourceLabel('scope', localize, scope),
+      description: localize(
+        markers.added ? 'com_config_ui_state_added_scope_desc' : 'com_config_ui_state_scope_desc',
+      ),
+    };
+  }
+  return markers.added
+    ? {
+        kind: 'override',
+        label: localize('com_config_ui_state_added'),
+        description: localize('com_config_ui_state_added_desc'),
+      }
+    : {
+        kind: 'override',
+        label: sourceLabel('admin', localize),
+        description: localize('com_config_ui_state_override_desc'),
+      };
+}
+
+/**
+ * "Admin override" / "Added in admin panel" (or the profile's name) and
+ * "Edited" in an entry header, like a settings row's chips. In a narrow card
+ * (under 28rem) they collapse to dots, named by their tooltip and for screen
+ * readers, so the title and the header actions keep their room.
+ */
+function EntryMarkerChips({ markers }: { markers: t.EntryMarkers }) {
+  const localize = useLocalize();
+  const override = useOverrideMarker(markers);
+  if (!override && !markers.edited) return null;
+  const edited = localize('com_config_ui_state_edited');
+  const editedDesc = localize('com_config_ui_state_edited_desc');
+  return (
+    <>
+      <span className="hidden shrink-0 items-center gap-1 @md:flex">
+        {override && (
+          <StateChip
+            kind={override.kind}
+            label={override.label}
+            description={override.description}
+          />
+        )}
+        {markers.edited && <StateChip kind="edited" description={editedDesc} />}
+      </span>
+      <span className="flex shrink-0 items-center gap-1 @md:hidden">
+        {override && (
+          <span
+            className="entry-marker-dot entry-marker-dot-override"
+            title={`${override.label}: ${override.description}`}
+          >
+            <span className="sr-only">{`${override.label}, ${override.description}`}</span>
+          </span>
+        )}
+        {markers.edited && (
+          <span
+            className="entry-marker-dot entry-marker-dot-edited"
+            title={`${edited}: ${editedDesc}`}
+          >
+            <span className="sr-only">{`${edited}, ${editedDesc}`}</span>
+          </span>
+        )}
+      </span>
+    </>
   );
 }
 
@@ -266,7 +543,7 @@ function PrimitiveEntry({
 }) {
   const localize = useLocalize();
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-3 px-2.5">
       <span className="text-sm text-(--cui-color-text-muted)">
         {typeof value === 'boolean'
           ? localize(value ? 'com_ui_enabled' : 'com_ui_disabled')
@@ -276,27 +553,11 @@ function PrimitiveEntry({
         <button
           type="button"
           onClick={() => onChange({})}
-          className="text-xs text-(--cui-color-text-link) hover:underline"
+          className="cursor-pointer border-none bg-transparent p-0 text-xs text-(--cui-color-text-link) hover:underline"
         >
           {localize('com_config_customize')}
         </button>
       )}
     </div>
   );
-}
-
-function getSummary(
-  value: t.ConfigValue,
-  labels: { enabled: string; disabled: string },
-): string | null {
-  if (typeof value === 'boolean') return value ? labels.enabled : labels.disabled;
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const obj = value as Record<string, t.ConfigValue>;
-  const parts: string[] = [];
-  if (typeof obj.type === 'string') parts.push(obj.type);
-  if (typeof obj.url === 'string') parts.push(obj.url);
-  if (typeof obj.command === 'string') parts.push(obj.command);
-  if (typeof obj.baseURL === 'string') parts.push(obj.baseURL);
-  if (typeof obj.name === 'string' && parts.length === 0) parts.push(obj.name);
-  return parts.length > 0 ? parts.join(' · ') : null;
 }

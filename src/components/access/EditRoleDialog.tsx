@@ -1,3 +1,4 @@
+import { PrincipalType } from 'librechat-data-provider';
 import { useState, useEffect, useCallback } from 'react';
 import { Button, Dialog, Tabs } from '@clickhouse/click-ui';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -8,27 +9,29 @@ import {
   removeRoleMemberFn,
   roleQueryOptions,
   roleMembersQueryOptions,
+  availableScopesOptions,
   updateRoleFn,
   updateRolePermissionsFn,
   MEMBERS_PAGE_SIZE,
 } from '@/server';
 import {
-  Avatar,
   LoadingState,
-  Pagination,
+  DecorativeIcon,
   SelectedMemberList,
-  TrashButton,
   UserSearchInline,
 } from '@/components/shared';
+import { useLocalize, useReturnFocus, useRefreshScopes, useConfigFeatures } from '@/hooks';
 import { RolePermissionsPanel } from './RolePermissionsPanel';
 import { cn, notifySuccess, notifyError } from '@/utils';
-import { useLocalize } from '@/hooks';
+import { MemberList } from './MemberList';
 
 type EditRoleTab = 'details' | 'permissions' | 'members';
 
 export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const refreshScopes = useRefreshScopes();
+  const returnFocus = useReturnFocus(!!role);
   const [activeTab, setActiveTab] = useState<EditRoleTab>('details');
   const [name, setName] = useState(role?.name ?? '');
   const [description, setDescription] = useState(role?.description ?? '');
@@ -43,6 +46,15 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
     ...roleQueryOptions(role?.id ?? ''),
     enabled: !!role,
   });
+
+  const { roleRenameMovesProfile } = useConfigFeatures();
+  const { data: scopes } = useQuery({ ...availableScopesOptions, enabled: !!role });
+  const hasProfile =
+    role != null &&
+    (scopes ?? []).some(
+      (scope) => scope.principalType === PrincipalType.ROLE && scope.principalId === role.name,
+    );
+  const isRenaming = role != null && name.trim() !== '' && name.trim() !== role.name;
 
   useEffect(() => {
     if (roleDetail.data && permissions === null) {
@@ -136,17 +148,14 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
       }
       return { roleId, name: submittedName };
     },
-    onSuccess: (data) => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['roles'] });
-      queryClient.invalidateQueries({ queryKey: ['role', role?.id] });
-      if (data.roleId !== role?.id) {
-        queryClient.invalidateQueries({ queryKey: ['role', data.roleId] });
-      }
+      queryClient.invalidateQueries({ queryKey: ['role'] });
       queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
-      queryClient.invalidateQueries({ queryKey: ['roleMembers', role?.id] });
-      if (data.roleId !== role?.id) {
-        queryClient.invalidateQueries({ queryKey: ['roleMembers', data.roleId] });
-      }
+      queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
+      void refreshScopes();
+    },
+    onSuccess: (data) => {
       notifySuccess(localize('com_toast_role_updated', { name: data.name }));
       onClose();
     },
@@ -180,6 +189,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
         title={localize('com_access_edit_role')}
         showClose
         onClose={onClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -223,8 +233,18 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                     disabled={role?.isSystemRole || !canManage}
                     readOnly={!canManage}
                     autoFocus
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
+                    aria-describedby={
+                      isRenaming && hasProfile ? 'edit-role-rename-note' : undefined
+                    }
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted) disabled:cursor-not-allowed disabled:opacity-50"
                   />
+                  {isRenaming && hasProfile && (
+                    <RenameProfileNote
+                      id="edit-role-rename-note"
+                      name={role.name}
+                      moves={roleRenameMovesProfile}
+                    />
+                  )}
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label
@@ -241,7 +261,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                     placeholder={localize('com_access_role_desc_placeholder')}
                     disabled={!canManage}
                     readOnly={!canManage}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted) disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -263,6 +283,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                         <p>{localize('com_access_permissions_load_error')}</p>
                         {roleDetail.isError && (
                           <Button
+                            htmlType="button"
                             type="secondary"
                             label={localize('com_ui_retry')}
                             onClick={() => roleDetail.refetch()}
@@ -332,6 +353,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                   fetching={membersQuery.isFetching}
                   removalIds={removalIds}
                   onRemove={stageRemoval}
+                  onUndoRemove={unstageRemoval}
                   canManage={canManage}
                   total={total}
                   currentPage={page}
@@ -349,12 +371,14 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={onClose}
               disabled={updateMutation.isPending}
             />
             <Button
+              htmlType="submit"
               type="primary"
               label={localize('com_ui_save')}
               disabled={
@@ -372,104 +396,29 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
   );
 }
 
-interface MemberListProps {
-  members: AdminMember[];
-  loading: boolean;
-  error: boolean;
-  fetching: boolean;
-  removalIds: Set<string>;
-  onRemove: (member: AdminMember) => void;
-  canManage: boolean;
-  total: number;
-  currentPage: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
-}
-
-function MemberList({
-  members,
-  loading,
-  error,
-  fetching,
-  removalIds,
-  onRemove,
-  canManage,
-  total,
-  currentPage,
-  totalPages,
-  onPageChange,
-}: MemberListProps) {
+/**
+ * What renaming a role does to its configuration profile: LibreChat keeps a
+ * role's profile under the role's name, so before it moved profiles on rename
+ * (`roleRenameMovesProfile`) the profile stays behind and stops applying.
+ */
+function RenameProfileNote({ id, name, moves }: t.RenameProfileNoteProps) {
   const localize = useLocalize();
-
-  if (loading) {
-    return (
-      <LoadingState className="flex items-center justify-center gap-2 py-6 text-sm text-(--cui-color-text-muted)" />
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center py-6 text-sm text-(--cui-color-foreground-danger)">
-        {localize('com_error_load_members')}
-      </div>
-    );
-  }
-
-  if (members.length === 0 && total === 0) {
-    return (
-      <div className="flex items-center justify-center py-6 text-sm text-(--cui-color-text-muted)">
-        {localize('com_access_no_members')}
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col">
-      <span className="mb-2 text-xs font-medium text-(--cui-color-text-muted)">
-        {localize('com_access_member_count', { count: total })}
+    <p
+      id={id}
+      className={cn(
+        'm-0 flex items-start gap-1.5 text-xs',
+        moves ? 'text-(--cui-color-text-muted)' : 'text-(--settings-warn-fg)',
+      )}
+    >
+      <span className="mt-px flex shrink-0">
+        <DecorativeIcon name={moves ? 'info-in-circle' : 'warning'} size="xs" />
       </span>
-      <div
-        className={cn(
-          'max-h-64 overflow-auto rounded-lg border border-(--cui-color-stroke-default)',
-          fetching && 'opacity-60 transition-opacity',
-        )}
-      >
-        {members.map((member, i) => {
-          const staged = removalIds.has(member.userId);
-          return (
-            <div
-              key={member.userId}
-              className={cn(
-                'flex items-center justify-between px-3 py-2',
-                i < members.length - 1 && 'border-b border-(--cui-color-stroke-default)',
-                staged && 'opacity-40',
-              )}
-            >
-              <div className="flex items-center gap-3">
-                <Avatar name={member.name} />
-                <div className="flex flex-col">
-                  <span
-                    className={cn(
-                      'text-sm font-medium text-(--cui-color-text-default)',
-                      staged && 'line-through',
-                    )}
-                  >
-                    {member.name}
-                  </span>
-                  <span className="text-xs text-(--cui-color-text-muted)">{member.email}</span>
-                </div>
-              </div>
-              {canManage && !staged && (
-                <TrashButton
-                  onClick={() => onRemove(member)}
-                  ariaLabel={`${localize('com_access_remove_member')} ${member.name}`}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={onPageChange} />
-    </div>
+      <span>
+        {moves
+          ? localize('com_access_rename_profile_moves')
+          : localize('com_access_rename_profile_warning', { name })}
+      </span>
+    </p>
   );
 }

@@ -9,12 +9,14 @@ import {
   Outlet,
   ScriptOnce,
   Scripts,
-  createRootRoute,
+  createRootRouteWithContext,
 } from '@tanstack/react-router';
 import type { ErrorComponentProps } from '@tanstack/react-router';
+import type * as t from '@/types';
+import { useLocalize, useDocumentTitle, useToastCloseLabels, useDialogCloseLabels } from '@/hooks';
 import { ThemeProvider, useTheme } from '../contexts/ThemeContext';
 import appCss from '../styles.css?url';
-import { useLocalize } from '@/hooks';
+import { withBasePath } from '@/utils';
 
 const themeScript = `(function(){
   try {
@@ -24,7 +26,7 @@ const themeScript = `(function(){
   } catch(e) {}
 })();`;
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<t.RouterContext>()({
   ssr: false,
   head: () => ({
     meta: [
@@ -46,7 +48,7 @@ export const Route = createRootRoute({
       },
       {
         rel: 'icon',
-        href: `${(import.meta.env.VITE_BASE_PATH || '').replace(/\/$/, '')}/favicon.ico`,
+        href: withBasePath('/favicon.ico', import.meta.env.VITE_BASE_PATH),
       },
     ],
   }),
@@ -67,6 +69,10 @@ function RootComponent() {
 
 function ThemedApp() {
   const { resolvedTheme } = useTheme();
+  const localize = useLocalize();
+  const close = localize('com_ui_close');
+  useDialogCloseLabels(close);
+  useToastCloseLabels(close);
   return (
     <ClickUIProvider theme={resolvedTheme}>
       <div className="isolate">
@@ -120,6 +126,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 function RootError({ error }: ErrorComponentProps) {
   if (import.meta.env.DEV) console.error(error);
   const localize = useLocalize();
+  useDocumentTitle(localize('com_error_page_title'));
   return (
     <div
       role="alert"
@@ -160,6 +167,7 @@ function RootError({ error }: ErrorComponentProps) {
 
 function RootNotFound() {
   const localize = useLocalize();
+  useDocumentTitle(localize('com_error_not_found_title'));
   return (
     <div
       role="alert"

@@ -4,13 +4,15 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { SelectedMemberList, UserSearchInline } from '@/components/shared';
+import { useLocalize, useReturnFocus, useRefreshScopes } from '@/hooks';
 import { addGroupMemberFn, createGroupFn } from '@/server';
 import { cn, notifySuccess, notifyError } from '@/utils';
-import { useLocalize } from '@/hooks';
 
 export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const refreshScopes = useRefreshScopes();
+  const returnFocus = useReturnFocus(open);
   const [activeTab, setActiveTab] = useState<t.CreateGroupTab>('details');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -36,11 +38,13 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
       }
       return { name: submittedName };
     },
-    onSuccess: (data) => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
       queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
+      void refreshScopes();
+    },
+    onSuccess: (data) => {
       notifySuccess(localize('com_toast_group_created', { name: data.name }));
       resetAndClose();
     },
@@ -84,6 +88,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
         title={localize('com_access_create_group')}
         showClose
         onClose={resetAndClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -117,7 +122,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
                     onChange={(e) => setName(e.target.value)}
                     placeholder={localize('com_access_group_name_placeholder')}
                     autoFocus
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted)"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -133,7 +138,7 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder={localize('com_access_group_desc_placeholder')}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted)"
                   />
                 </div>
               </div>
@@ -167,12 +172,14 @@ export function CreateGroupDialog({ open, onClose }: t.CreateGroupDialogProps) {
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={resetAndClose}
               disabled={mutation.isPending}
             />
             <Button
+              htmlType="submit"
               type="primary"
               label={localize('com_access_create_group')}
               disabled={!name.trim() || mutation.isPending}

@@ -1,21 +1,22 @@
-import { useCallback, useState, useRef, useEffect } from 'react';
+import { useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type * as t from '@/types';
-import { ObjectEntryCard } from './ObjectEntryCard';
+import { useListKeys, useLocalize, useEntryMarkers } from '@/hooks';
+import { RowFilterContext } from '@/contexts/RowFilterContext';
+import { getEntryIdentity, getEntryTitle } from './entries';
 import { AddItemButton } from '@/components/shared';
-import { useLocalize } from '@/hooks';
+import { ObjectEntryCard } from './ObjectEntryCard';
+import { isRowVisible } from '@/utils';
 
-function getEntryLabel(item: t.ConfigValue): string | null {
-  if (item && typeof item === 'object' && !Array.isArray(item)) {
-    const obj = item as Record<string, t.ConfigValue>;
-    if (typeof obj.name === 'string' && obj.name) return obj.name;
-    if (typeof obj.label === 'string' && obj.label) return obj.label;
-    if (typeof obj.group === 'string' && obj.group) return obj.group;
-  }
-  return null;
-}
-
+/**
+ * List of object entries as cards. Add appends an entry and expands, scrolls
+ * to and marks it "New" (as does an entry appended from outside, e.g. a
+ * create dialog). Delete marks the entry pending deletion with Undo until
+ * Save (the pending edit is the list without it). Cards keep their React
+ * identity across edits, renames, removals and reloads.
+ */
 export function ArrayObjectField({
   id,
+  path,
   value,
   fields,
   onChange,
@@ -26,103 +27,254 @@ export function ArrayObjectField({
   renderFields,
   entryIdPrefix,
   editSessionId,
+  getEntryTitle: getTitle,
+  renderSummary,
+  renderLeading,
+  stackedSummary,
+  reorderable,
+  emptyLabel,
+  isEntryLocked,
 }: t.ArrayObjectFieldProps) {
   const localize = useLocalize();
-  const items = Array.isArray(value) ? (value as t.ConfigValue[]) : [];
+  const rowFilter = useContext(RowFilterContext);
+  const markersOf = useEntryMarkers(path);
+  const items = Array.isArray(value) ? value : [];
+  /** Card ids the table of contents and deep links target (`section-endpoints-custom-3`). */
+  const entryCardId = (index: number): string | undefined => {
+    if (entryIdPrefix) return `${entryIdPrefix}-${index}`;
+    return path ? `section-${path.replace(/[^\w-]+/g, '-')}-${index}` : undefined;
+  };
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+  const keys = useListKeys({ items, identity: getEntryIdentity, prefix: `${id}-entry` });
+  const [newKeys, setNewKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const [removed, setRemoved] = useState<Array<t.PendingRemoval<string> & { focus: boolean }>>([]);
+  const prevRef = useRef({ length: items.length, session: editSessionId, keys });
+  const undoingRef = useRef(false);
+  const undoFocusRef = useRef<{ item: t.ConfigValue } | null>(null);
+  const moveFocusRef = useRef<{
+    index: number;
+    item: t.ConfigValue;
+    direction: 'up' | 'down';
+  } | null>(null);
 
-  // Stable keys: assign a unique id to each item position so React can
-  // correctly track new vs existing entries when items are prepended.
-  const counterRef = useRef(items.length);
-  const [keys, setKeys] = useState<number[]>(() => items.map((_, i) => i));
-  // Track which key was just added so it auto-expands.
-  // Using a ref avoids re-render timing issues: the parent's onChange
-  // round-trip may take multiple renders, and a state-based expandedKey
-  // would be cleared by effects before the card mounts.
-  const expandedKeyRef = useRef<number | null>(null);
-  // Guard: when true, skip the sync effect for one cycle (handleAdd
-  // already prepended the key; we wait for the parent's items to catch up).
-  const addingRef = useRef(false);
+  /** Entries back in the list (Undo, a removal reverted from the review) are no longer pending deletion. */
+  const liveIdentities = new Set(items.map(getEntryIdentity));
+  const restored = removed.filter((ghost) => {
+    const identity = getEntryIdentity(ghost.value);
+    return identity != null && liveIdentities.has(identity);
+  });
+  if (restored.length > 0) {
+    setRemoved((list) => list.filter((ghost) => !restored.includes(ghost)));
+  }
 
-  // Sync keys array length with items (handles external changes like
-  // save/re-fetch). Skipped right after handleAdd since keys were already
-  // prepended locally and items will arrive next render.
-  useEffect(() => {
-    if (addingRef.current) {
-      addingRef.current = false;
-      return;
+  const prev = prevRef.current;
+  if (prev.keys !== keys) {
+    const lastIdentity = getEntryIdentity(items[items.length - 1]);
+    const isRestored = restored.some((ghost) => getEntryIdentity(ghost.value) === lastIdentity);
+    const appended =
+      !undoingRef.current &&
+      !isRestored &&
+      prev.session === editSessionId &&
+      items.length === prev.length + 1 &&
+      keys.length > 0
+        ? keys[keys.length - 1]
+        : null;
+    undoingRef.current = false;
+    prevRef.current = { length: items.length, session: editSessionId, keys };
+    if (appended && !prev.keys.includes(appended) && !newKeys.has(appended)) {
+      setNewKeys((current) => new Set(current).add(appended));
     }
-    setKeys((prev) => {
-      if (prev.length === items.length) return prev;
-      return items.map((_, i) => (i < prev.length ? prev[i] : counterRef.current++));
-    });
-  }, [items.length]);
+  }
+
+  useEffect(() => {
+    setRemoved([]);
+    setNewKeys(new Set());
+  }, [editSessionId]);
 
   const handleAdd = useCallback(() => {
-    const newKey = counterRef.current++;
-    addingRef.current = true;
-    setKeys((prev) => [newKey, ...prev]);
-    expandedKeyRef.current = newKey;
-    onChange([{}, ...items]);
-  }, [items, onChange]);
+    onChange([...itemsRef.current, {}]);
+  }, [onChange]);
 
-  // Expose add trigger to parent (e.g. NestedGroup / section header button)
   useEffect(() => {
-    if (addTriggerRef) {
-      addTriggerRef.current = handleAdd;
-      return () => {
-        addTriggerRef.current = null;
-      };
-    }
+    if (!addTriggerRef) return;
+    addTriggerRef.current = handleAdd;
+    return () => {
+      addTriggerRef.current = null;
+    };
   }, [addTriggerRef, handleAdd]);
 
-  const handleRemove = useCallback(
-    (index: number) => {
-      setKeys((prev) => prev.filter((_, i) => i !== index));
-      onChange(items.filter((_, i) => i !== index));
-    },
-    [items, onChange],
-  );
+  const titleOf = (item: t.ConfigValue, index: number) =>
+    getTitle?.(item, index) ?? getEntryTitle(item, index, localize);
 
-  const handleEntryChange = useCallback(
-    (index: number, newValue: t.ConfigValue) => {
-      if (onEntryChange) {
-        onEntryChange(index, newValue);
-        return;
-      }
-      const next = [...items];
-      next[index] = newValue;
-      onChange(next);
-    },
-    [items, onChange, onEntryChange],
+  const handleRemove = (index: number, focus: boolean) => {
+    const current = itemsRef.current;
+    setRemoved((list) => [
+      ...list,
+      {
+        key: keys[index],
+        index,
+        value: current[index],
+        label: titleOf(current[index], index),
+        focus,
+      },
+    ]);
+    onChange(current.filter((_, i) => i !== index));
+  };
+
+  const handleUndo = (ghost: t.PendingRemoval<string>) => {
+    const current = itemsRef.current;
+    const at = Math.min(ghost.index, current.length);
+    setRemoved((list) => list.filter((entry) => entry.key !== ghost.key));
+    undoingRef.current = true;
+    undoFocusRef.current = { item: ghost.value };
+    onChange([...current.slice(0, at), ghost.value, ...current.slice(at)]);
+  };
+
+  const handleMove = (index: number, offset: number) => {
+    const target = index + offset;
+    const current = [...itemsRef.current];
+    if (target < 0 || target >= current.length) return;
+    [current[index], current[target]] = [current[target], current[index]];
+    moveFocusRef.current = {
+      index: target,
+      item: current[target],
+      direction: offset < 0 ? 'up' : 'down',
+    };
+    onChange(current);
+  };
+
+  /** After Undo, focus goes to the restored entry's header (its Undo button is gone), once it is back. */
+  useEffect(() => {
+    const undone = undoFocusRef.current;
+    if (!undone) return;
+    const restoredItem = undone.item;
+    const index = items.findIndex(
+      (item) =>
+        item === restoredItem ||
+        (getEntryIdentity(item) != null &&
+          getEntryIdentity(item) === getEntryIdentity(restoredItem)),
+    );
+    if (index < 0) return;
+    undoFocusRef.current = null;
+    const cardId = entryCardId(index);
+    requestAnimationFrame(() => {
+      const card = cardId ? document.getElementById(cardId) : null;
+      card?.querySelector<HTMLElement>('button[aria-expanded]')?.focus();
+    });
+  });
+
+  /**
+   * Keyboard focus follows the moved entry, once the list shows it at its new
+   * place: its same move button, or the other one at either end of the list.
+   */
+  useEffect(() => {
+    const move = moveFocusRef.current;
+    if (!move) return;
+    const landed = items[move.index];
+    const sameEntry =
+      landed === move.item ||
+      (getEntryIdentity(landed) != null &&
+        getEntryIdentity(landed) === getEntryIdentity(move.item));
+    if (!sameEntry) return;
+    moveFocusRef.current = null;
+    const cardId = entryCardId(move.index);
+    /** Not cancelled by the next render: the page re-renders as the move is staged. */
+    requestAnimationFrame(() => {
+      const card = cardId ? document.getElementById(cardId) : null;
+      const other = move.direction === 'up' ? 'down' : 'up';
+      const button =
+        card?.querySelector(`[data-move="${move.direction}"]`) ??
+        card?.querySelector(`[data-move="${other}"]`);
+      if (button instanceof HTMLElement) button.focus();
+    });
+  });
+
+  const handleEntryChange = (index: number, newValue: t.ConfigValue) => {
+    if (onEntryChange) {
+      onEntryChange(index, newValue);
+      return;
+    }
+    const next = [...itemsRef.current];
+    next[index] = newValue;
+    itemsRef.current = next;
+    onChange(next);
+  };
+
+  /** While the tab filter is active, only entries that match or hold a match are listed. */
+  const isShown = (index: number) => !path || isRowVisible(rowFilter, `${path}.${index}`);
+  const rows: Array<
+    | { kind: 'entry'; item: t.ConfigValue; index: number; key: string }
+    | { kind: 'removed'; ghost: t.PendingRemoval<string> & { focus: boolean } }
+  > = items.flatMap((item, index) =>
+    isShown(index) ? [{ kind: 'entry' as const, item, index, key: keys[index] }] : [],
   );
+  /** Pending deletions stay listed under the filter (last, as positions no longer line up), with Undo. */
+  for (const ghost of [...removed].sort((a, b) => a.index - b.index)) {
+    const at = rowFilter ? rows.length : Math.min(ghost.index, rows.length);
+    rows.splice(at, 0, { kind: 'removed', ghost });
+  }
 
   return (
     <div id={id} className="flex w-full flex-col gap-2">
-      {!disabled && !hideAddButton && (
-        <AddItemButton
-          label={localize('com_ui_add_item', { item: localize('com_ui_entry') })}
-          onClick={handleAdd}
-        />
-      )}
-      {items.map((item, index) => (
-        <ObjectEntryCard
-          key={keys[index] ?? index}
-          id={entryIdPrefix ? `${entryIdPrefix}-${index}` : undefined}
-          entryKey={getEntryLabel(item) ?? localize('com_config_entry_n', { n: String(index + 1) })}
-          fields={fields}
-          value={item}
-          onValueChange={(v) => handleEntryChange(index, v)}
-          onRemove={disabled ? undefined : () => handleRemove(index)}
-          disabled={disabled}
-          defaultExpanded={keys[index] === expandedKeyRef.current}
-          renderFields={renderFields}
-          editSessionId={editSessionId}
-        />
-      ))}
-      {items.length === 0 && !hideAddButton && (
-        <p className="py-2 text-sm text-(--cui-color-text-muted)">
-          {localize('com_config_no_entries')}
+      {rows.map((row) => {
+        if (row.kind === 'removed') {
+          return (
+            <ObjectEntryCard
+              key={`removed-${row.ghost.key}`}
+              entryKey={row.ghost.label}
+              fields={fields}
+              value={row.ghost.value}
+              onValueChange={() => undefined}
+              renderFields={renderFields}
+              pendingRemoval
+              focusUndo={row.ghost.focus}
+              onUndoRemove={() => handleUndo(row.ghost)}
+            />
+          );
+        }
+        const { item, index, key } = row;
+        const title = titleOf(item, index);
+        return (
+          <ObjectEntryCard
+            key={key}
+            id={entryCardId(index)}
+            dataPath={`${path ?? id}.${index}`}
+            entryKey={title}
+            fields={fields}
+            value={item}
+            onValueChange={(v) => handleEntryChange(index, v)}
+            onRemove={
+              disabled || isEntryLocked?.(item, index) ? undefined : () => handleRemove(index, true)
+            }
+            onMoveUp={reorderable && index > 0 ? () => handleMove(index, -1) : undefined}
+            onMoveDown={
+              reorderable && index < items.length - 1 ? () => handleMove(index, 1) : undefined
+            }
+            summary={renderSummary?.(item, index)}
+            leading={renderLeading?.(item, index)}
+            stackedSummary={stackedSummary}
+            disabled={disabled}
+            isNew={newKeys.has(key)}
+            markers={newKeys.has(key) ? undefined : markersOf?.(item)}
+            defaultExpanded={newKeys.has(key)}
+            renderFields={renderFields}
+            editSessionId={editSessionId}
+          />
+        );
+      })}
+      {items.length === 0 && removed.length === 0 && (
+        <p className="m-0 py-2 text-sm text-(--cui-color-text-muted)">
+          {emptyLabel ?? localize('com_config_no_entries')}
         </p>
+      )}
+      {!disabled && !hideAddButton && (
+        <div className="self-start">
+          <AddItemButton
+            label={localize('com_ui_add_item', { item: localize('com_ui_entry') })}
+            onClick={handleAdd}
+          />
+        </div>
       )}
     </div>
   );

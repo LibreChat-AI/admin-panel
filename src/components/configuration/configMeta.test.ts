@@ -1,5 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { CONFIG_TABS, OTHER_TAB, SECTION_META, splitCamelCase } from './configMeta';
+import { configSchema } from 'librechat-data-provider';
+import type * as t from '@/types';
+import {
+  CONFIG_TABS,
+  OTHER_TAB,
+  SECTION_META,
+  HIDDEN_SECTIONS,
+  splitCamelCase,
+  compareSections,
+  isPathInSection,
+  fallbackSectionTitle,
+} from './configMeta';
 
 describe('splitCamelCase', () => {
   it('splits camelCase into words', () => {
@@ -77,5 +88,57 @@ describe('Other tab routing', () => {
     const mappedTab = SECTION_META[mappedKey].tab;
     expect(filterForTab(mappedTab).map((s) => s.key)).toEqual([mappedKey]);
     expect(filterForTab(OTHER_TAB.id).map((s) => s.key)).toEqual(['unknownFeature']);
+  });
+});
+
+describe('schema coverage', () => {
+  it('every top-level configSchema key has SECTION_META or is hidden', () => {
+    const shape = (configSchema as t.ZodSchemaLike).shape ?? {};
+    const unmapped = Object.keys(shape).filter(
+      (key) => !HIDDEN_SECTIONS.has(key) && !Object.hasOwn(SECTION_META, key),
+    );
+    expect(unmapped, `Sections without SECTION_META: ${unmapped.join(', ')}`).toEqual([]);
+  });
+});
+
+describe('section order and ownership', () => {
+  it('orders a tab by SECTION_META order, unordered sections last by key', () => {
+    const ids = ['skillSync', 'zzNew', 'balance', 'registration', 'aaNew'];
+    const sorted = ids.map((id) => ({ id })).sort(compareSections);
+    expect(sorted.map((s) => s.id)).toEqual([
+      'registration',
+      'balance',
+      'skillSync',
+      'aaNew',
+      'zzNew',
+    ]);
+  });
+
+  it('keeps the storage sections together at the top of Files & storage', () => {
+    const files = Object.entries(SECTION_META)
+      .filter(([, meta]) => meta.tab === 'files')
+      .map(([id]) => ({ id }))
+      .sort(compareSections)
+      .map((s) => s.id);
+    expect(files.slice(0, 3)).toEqual(['fileStrategy', 'fileStrategies', 'cloudfront']);
+    expect(files.slice(0, 3).every((id) => SECTION_META[id].group === 'storage')).toBe(true);
+  });
+
+  it('splits endpoints between the custom endpoints and providers sections', () => {
+    expect(isPathInSection('endpoints', 'endpoints', 'endpoints.custom.0.name')).toBe(true);
+    expect(isPathInSection('endpoints', 'endpoints', 'endpoints.openAI.titleModel')).toBe(false);
+    expect(isPathInSection('endpointsProviders', 'endpoints', 'endpoints.openAI.titleModel')).toBe(
+      true,
+    );
+    expect(isPathInSection('endpointsProviders', 'endpoints', 'endpoints.custom.0.name')).toBe(
+      false,
+    );
+    expect(isPathInSection('balance', 'balance', 'balance.startBalance')).toBe(true);
+    expect(isPathInSection('balance', 'balance', 'balanceX.startBalance')).toBe(false);
+  });
+
+  it('titles unmapped sections from their key', () => {
+    expect(fallbackSectionTitle('mcpAppSandbox')).toBe('Mcp App Sandbox');
+    expect(fallbackSectionTitle('projects')).toBe('Projects');
   });
 });

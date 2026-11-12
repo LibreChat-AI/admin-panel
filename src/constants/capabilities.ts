@@ -5,6 +5,7 @@ export {
   expandImplications,
   hasImpliedCapability,
   CapabilityImplications,
+  BASE_CONFIG_PRINCIPAL_ID,
 } from '@librechat/data-schemas/capabilities';
 
 /**

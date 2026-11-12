@@ -17,6 +17,7 @@ export function AddItemButton({
 
   return (
     <Button
+      htmlType="button"
       type="secondary"
       iconLeft="plus"
       label={label}

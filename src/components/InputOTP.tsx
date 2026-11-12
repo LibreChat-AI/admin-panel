@@ -8,10 +8,7 @@ const InputOTP = React.forwardRef<
 >(({ className, containerClassName, ...props }, ref) => (
   <OTPInput
     ref={ref}
-    containerClassName={clsx(
-      'flex items-center gap-2 has-[:disabled]:opacity-50',
-      containerClassName,
-    )}
+    containerClassName={clsx('flex items-center gap-2 has-disabled:opacity-50', containerClassName)}
     className={clsx('disabled:cursor-not-allowed', className)}
     {...props}
   />

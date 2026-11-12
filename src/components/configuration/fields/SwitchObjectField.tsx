@@ -17,7 +17,7 @@ export function SwitchObjectField({
   const handleToggle = useCallback(
     (checked: boolean) => {
       if (checked) {
-        onChange(prevObjectRef.current ?? {});
+        onChange(prevObjectRef.current ?? true);
       } else {
         if (isObject) prevObjectRef.current = value as Record<string, t.ConfigValue>;
         onChange(false);
@@ -35,7 +35,7 @@ export function SwitchObjectField({
         aria-label={ariaLabel}
       />
       {isEnabled && (
-        <div className="mt-3 border-l-2 border-[--click-control-border-color] pl-4">{children}</div>
+        <div className="mt-3 border-l-2 border-(--cui-color-stroke-default) pl-4">{children}</div>
       )}
     </div>
   );

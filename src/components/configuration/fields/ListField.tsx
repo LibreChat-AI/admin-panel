@@ -1,123 +1,287 @@
-import { useRef, useLayoutEffect } from 'react';
+import { useRef, useState, useLayoutEffect } from 'react';
+import { TextField as CUITextField } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { AddItemButton, TrashButton } from '@/components/shared';
-import { useLocalize } from '@/hooks';
+import { useListKeys, useLocalize } from '@/hooks';
+import { TextareaField } from './TextareaField';
+import { SelectField } from './SelectField';
+import { TextField } from './TextField';
+import { FieldNotice } from './Notice';
+import { widthClass } from './display';
+import { cn, isFilledText } from '@/utils';
 
+const identity = (value: string) => value;
+
+/**
+ * List of strings. Item text is kept exactly as typed (whitespace matters for
+ * stop sequences; items with newlines get a textarea). A new row stays a
+ * local draft until it has text, blank items are dropped, duplicates are
+ * rejected inline, and removing the last item calls `onClear` (when given)
+ * instead of saving an empty list. With `options`, Add opens a picker of the
+ * values not yet in the list.
+ */
 export function ListField({
   id,
   values,
   onChange,
+  onClear,
   disabled,
   placeholder,
   itemLabel,
   variant = 'inline-edit',
   options,
+  multiline,
+  keepsWhitespace,
+  width,
+  validateItem,
   'aria-label': ariaLabel,
 }: t.ListFieldProps) {
   const localize = useLocalize();
+  const isBlank = (value: string) => !isFilledText(value, keepsWhitespace);
+  const keys = useListKeys({ items: values, identity, prefix: `${id}-item` });
+  const [adding, setAdding] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const focusLastRef = useRef(false);
+  const focusDraftRef = useRef(false);
+  const resolvedItemLabel = itemLabel ?? localize('com_ui_item');
+  const resolvedPlaceholder = placeholder ?? localize('com_ui_enter_value');
+  const optionLabels = new Map(options?.map((option) => [option.value, option.label]));
+  const unusedOptions = options?.filter((option) => !values.includes(option.value)) ?? [];
 
-  // useLayoutEffect runs synchronously after DOM mutation but before paint,
-  // so focus happens instantly with no visible flash to another element.
   useLayoutEffect(() => {
-    if (focusLastRef.current) {
-      focusLastRef.current = false;
-      const items = listRef.current?.querySelectorAll<HTMLElement>('input, select');
-      items?.[items.length - 1]?.focus();
-    }
+    if (!focusDraftRef.current) return;
+    focusDraftRef.current = false;
+    listRef.current
+      ?.querySelector<HTMLElement>('[data-list-draft] input, [data-list-draft] select')
+      ?.focus();
   });
 
-  const resolvedPlaceholder = placeholder ?? localize('com_ui_enter_value');
-  const resolvedItemLabel = itemLabel ?? localize('com_ui_item');
-
-  const handleAdd = () => {
-    if (options) {
-      const used = new Set(values);
-      const next = options.find((o) => !used.has(o.value))?.value ?? options[0]?.value ?? '';
-      onChange([...values, next]);
-    } else {
-      onChange([...values, '']);
+  const emit = (next: string[]) => {
+    setNotice(null);
+    if (next.length > 0 || !onClear) {
+      onChange(next);
+      return;
     }
-    focusLastRef.current = true;
+    if (onClear() === false) setNotice(localize('com_config_ctl_clear_unavailable'));
   };
-  const handleRemove = (index: number) => onChange(values.filter((_, i) => i !== index));
-  const handleChange = (index: number, val: string) => {
+  const duplicateError = (value: string, index: number) =>
+    values.some((existing, i) => i !== index && existing === value)
+      ? localize('com_config_ctl_list_duplicate')
+      : (validateItem?.(value) ?? null);
+  const removeAt = (index: number) => emit(values.filter((_, i) => i !== index));
+  const replaceAt = (index: number, value: string) => {
+    if (isBlank(value)) {
+      removeAt(index);
+      return;
+    }
     const next = [...values];
-    next[index] = val;
+    next[index] = value;
     onChange(next);
   };
+  const openDraft = () => {
+    setAdding(true);
+    focusDraftRef.current = true;
+  };
+  const appendDraft = (value: string) => {
+    setAdding(false);
+    if (isBlank(value)) return;
+    onChange([...values, value]);
+  };
+
+  const renderItemControl = (value: string, index: number) => {
+    const label = `${resolvedItemLabel} ${index + 1}`;
+    if (options) {
+      if (disabled) {
+        return (
+          <span className="config-input flex-1" aria-label={label}>
+            {optionLabels.get(value) ?? value}
+          </span>
+        );
+      }
+      return (
+        <SelectField
+          id={`${keys[index]}-input`}
+          value={value}
+          options={[...unusedOptions, { value, label: optionLabels.get(value) ?? value }]}
+          onChange={(next) => replaceAt(index, next)}
+          aria-label={label}
+        />
+      );
+    }
+    if (variant === 'display') return <span className="config-input flex-1">{value}</span>;
+    const Control = multiline || value.includes('\n') ? TextareaField : TextField;
+    return (
+      <Control
+        id={`${keys[index]}-input`}
+        value={value}
+        onChange={(next) => replaceAt(index, next)}
+        onClear={() => removeAt(index)}
+        validate={(next) => duplicateError(next, index)}
+        keepsWhitespace={keepsWhitespace}
+        placeholder={resolvedPlaceholder}
+        disabled={disabled}
+        width="L"
+        aria-label={label}
+      />
+    );
+  };
+
+  const renderDraft = () => {
+    const label = `${resolvedItemLabel} ${values.length + 1}`;
+    if (options) {
+      return (
+        <SelectField
+          id={`${id}-draft`}
+          value={undefined}
+          options={unusedOptions}
+          placeholder={localize('com_config_ctl_list_pick')}
+          onChange={appendDraft}
+          aria-label={label}
+        />
+      );
+    }
+    return (
+      <DraftInput
+        id={`${id}-draft`}
+        placeholder={resolvedPlaceholder}
+        label={label}
+        isBlank={isBlank}
+        isDuplicate={(value) => values.includes(value)}
+        validate={validateItem}
+        onCommit={appendDraft}
+        onCancel={() => setAdding(false)}
+        onContinue={(value) => {
+          onChange([...values, value]);
+          focusDraftRef.current = true;
+        }}
+      />
+    );
+  };
+
+  const canAdd = !disabled && (!options || unusedOptions.length > 0);
 
   return (
     <div
       ref={listRef}
       id={id}
-      className="flex w-full max-w-100 flex-col gap-2"
+      className={cn('flex w-full flex-col gap-2', widthClass(width ?? 'M'))}
       role="list"
       aria-label={ariaLabel}
     >
-      {values.map((value, index) => {
-        const itemLabel = `${resolvedItemLabel} ${index + 1}`;
-
-        let control: React.ReactNode;
-        if (options) {
-          if (disabled) {
-            const matchedLabel = options.find((o) => o.value === value)?.label ?? value;
-            control = (
-              <span className="config-input flex-1" aria-label={itemLabel}>
-                {matchedLabel}
-              </span>
-            );
-          } else {
-            control = (
-              <select
-                value={value}
-                onChange={(e) => handleChange(index, e.target.value)}
-                aria-label={itemLabel}
-                className="config-input flex-1"
-              >
-                {options.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            );
-          }
-        } else if (variant === 'inline-edit') {
-          control = (
-            <input
-              type="text"
-              value={value}
-              onChange={(e) => handleChange(index, e.target.value)}
-              placeholder={resolvedPlaceholder}
-              disabled={disabled}
-              aria-label={itemLabel}
-              className="config-input flex-1"
+      {values.map((value, index) => (
+        <div key={keys[index]} className="flex items-start gap-2" role="listitem">
+          <div className="flex min-w-0 flex-1">{renderItemControl(value, index)}</div>
+          {!disabled && (
+            <TrashButton
+              onClick={() => removeAt(index)}
+              ariaLabel={`${localize('com_ui_delete')} ${value.trim() || `${resolvedItemLabel} ${index + 1}`}`}
             />
-          );
-        } else {
-          control = <span className="config-input flex-1">{value}</span>;
-        }
+          )}
+        </div>
+      ))}
+      {adding && !disabled && (
+        <div className="flex items-start gap-2" role="listitem" data-list-draft>
+          <div className="flex min-w-0 flex-1">{renderDraft()}</div>
+        </div>
+      )}
+      {values.length === 0 && !adding && disabled && (
+        <span role="listitem" className="text-sm text-(--cui-color-text-muted)">
+          {localize('com_config_ctl_list_empty')}
+        </span>
+      )}
+      {notice && (
+        <div role="listitem">
+          <FieldNotice>{notice}</FieldNotice>
+        </div>
+      )}
+      {canAdd && !adding && (
+        <div className="self-start" role="listitem" data-add-item>
+          <AddItemButton
+            label={localize('com_ui_add_item', { item: resolvedItemLabel })}
+            onClick={openDraft}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
-        return (
-          <div key={index} className="flex items-center gap-2" role="listitem">
-            {control}
-            {!disabled && (
-              <TrashButton
-                onClick={() => handleRemove(index)}
-                ariaLabel={`${localize('com_ui_delete')} ${resolvedItemLabel} ${index + 1}`}
-              />
-            )}
-          </div>
-        );
-      })}
+/** The new-item row: stays local until it has text; Enter adds it and opens the next draft. */
+function DraftInput({
+  id,
+  placeholder,
+  label,
+  isBlank,
+  isDuplicate,
+  validate,
+  onCommit,
+  onCancel,
+  onContinue,
+}: {
+  id: string;
+  placeholder: string;
+  label: string;
+  isBlank: (value: string) => boolean;
+  isDuplicate: (value: string) => boolean;
+  validate?: (value: string) => string | null;
+  onCommit: (value: string) => void;
+  onCancel: () => void;
+  onContinue: (value: string) => void;
+}) {
+  const localize = useLocalize();
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const errorId = `${id}-error`;
 
-      {!disabled && (!options || values.length < options.length) && (
-        <AddItemButton
-          label={localize('com_ui_add_item', { item: resolvedItemLabel })}
-          onClick={handleAdd}
-        />
+  const accept = (next: string): boolean => {
+    if (isBlank(next)) return true;
+    if (isDuplicate(next)) {
+      setError(localize('com_config_ctl_list_duplicate'));
+      return false;
+    }
+    const problem = validate?.(next) ?? null;
+    setError(problem);
+    return problem == null;
+  };
+
+  return (
+    <div className="cui-field flex w-full flex-col gap-1">
+      <CUITextField
+        id={id}
+        value={value}
+        placeholder={placeholder}
+        aria-label={label}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? errorId : undefined}
+        onChange={(next) => {
+          setValue(next);
+          setError(null);
+        }}
+        onBlur={() => {
+          if (!accept(value)) return;
+          onCommit(value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onCancel();
+            return;
+          }
+          if (e.key !== 'Enter') return;
+          if (isBlank(value)) {
+            onCancel();
+            return;
+          }
+          e.preventDefault();
+          if (!accept(value)) return;
+          setValue('');
+          onContinue(value);
+        }}
+      />
+      {error && (
+        <span id={errorId} role="alert" className="text-xs text-(--cui-color-text-danger)">
+          {error}
+        </span>
       )}
     </div>
   );

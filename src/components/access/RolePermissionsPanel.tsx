@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Icon, Switch } from '@clickhouse/click-ui';
+import { Switch } from '@clickhouse/click-ui';
 import { PermissionTypes } from 'librechat-data-provider';
 import type * as t from '@/types';
+import { SelectAllHeader } from '@/components/shared';
 import { PERMISSION_TYPE_SCHEMA } from '@/constants';
 import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
@@ -14,6 +15,7 @@ const PERMISSION_TYPE_ORDER: PermissionTypes[] = [
   PermissionTypes.REMOTE_AGENTS,
   PermissionTypes.SKILLS,
   PermissionTypes.SHARED_LINKS,
+  PermissionTypes.SCHEDULES,
   PermissionTypes.BOOKMARKS,
   PermissionTypes.MULTI_CONVO,
   PermissionTypes.TEMPORARY_CHAT,
@@ -75,60 +77,33 @@ export function RolePermissionsPanel({
           const isOpen = !collapsed.has(type);
           const description = localize(descKey(type));
           const hasDescription = description !== descKey(type);
+          const label = localize(`com_perm_type_${type}`);
+          const panelId = `perm-group-${type}`;
 
           return (
             <div key={type} className="rounded-lg border border-(--cui-color-stroke-default)">
-              <div
-                role="button"
-                tabIndex={0}
-                aria-expanded={isOpen}
-                onClick={() => toggleCollapsed(type)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    toggleCollapsed(type);
-                  }
-                }}
-                className={cn(
-                  'flex w-full cursor-pointer items-center justify-between px-4 py-3 transition-colors hover:bg-(--cui-color-background-hover) focus-visible:bg-(--cui-color-background-hover) focus-visible:outline-1 focus-visible:outline-(--cui-color-outline)',
-                  isOpen ? 'rounded-t-lg' : 'rounded-lg',
-                )}
-              >
-                <div className="flex flex-1 items-center gap-2">
-                  <Icon
-                    name="chevron-right"
-                    size="sm"
-                    className={cn(
-                      'text-(--cui-color-text-muted) transition-transform',
-                      isOpen && 'rotate-90',
-                    )}
-                  />
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-(--cui-color-text-default)">
-                      {localize(`com_perm_type_${type}`)}
-                    </span>
-                    {hasDescription && (
-                      <span className="text-xs text-(--cui-color-text-muted)">{description}</span>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
-                  <span className="text-xs text-(--cui-color-text-muted)">
-                    {allEnabled
-                      ? localize('com_ui_all')
-                      : `${perms.filter((p) => section[p]).length}/${perms.length}`}
-                  </span>
-                  <Switch
-                    id={`perm-all-${type}`}
-                    checked={allEnabled}
-                    onCheckedChange={(v) => handleToggleAll(type, v)}
-                    disabled={disabled}
-                    aria-label={`${localize(`com_perm_type_${type}`)}: ${localize('com_ui_select_all')}`}
-                  />
-                </div>
-              </div>
+              <SelectAllHeader
+                open={isOpen}
+                onToggle={() => toggleCollapsed(type)}
+                controls={panelId}
+                label={label}
+                description={hasDescription ? description : undefined}
+                summary={
+                  allEnabled
+                    ? localize('com_ui_all')
+                    : `${perms.filter((p) => section[p]).length}/${perms.length}`
+                }
+                switchId={`perm-all-${type}`}
+                switchLabel={`${label}: ${localize('com_ui_select_all')}`}
+                checked={allEnabled}
+                onCheckedChange={(v) => handleToggleAll(type, v)}
+                disabled={disabled}
+              />
               {isOpen && (
-                <div className="border-t border-(--cui-color-stroke-default) px-4 py-2">
+                <div
+                  id={panelId}
+                  className="border-t border-(--cui-color-stroke-default) px-4 py-2"
+                >
                   <div className="flex flex-col gap-1 pl-6">
                     {perms.map((perm) => (
                       <label
@@ -147,7 +122,7 @@ export function RolePermissionsPanel({
                           checked={section[perm] ?? false}
                           onCheckedChange={(v) => handleToggle(type, perm, v)}
                           disabled={disabled}
-                          aria-label={`${localize(`com_perm_type_${type}`)}: ${localize(`com_perm_${perm}`)}`}
+                          aria-label={`${label}: ${localize(`com_perm_${perm}`)}`}
                         />
                       </label>
                     ))}
@@ -168,7 +143,7 @@ export function RolePermissionsPanel({
           <div
             className={
               singlePermTypes.length > 6
-                ? 'grid w-fit grid-cols-[auto_auto_auto] gap-x-4 gap-y-1.5'
+                ? 'grid min-w-0 grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2 md:grid-cols-3'
                 : 'flex flex-wrap gap-x-6 gap-y-1.5'
             }
           >

@@ -22,7 +22,7 @@ export function GrantManagementTab() {
   const [page, setPage] = useState(1);
   const [editTarget, setEditTarget] = useState<t.PrincipalRow | null>(null);
   const { message: announcement, announce } = useAnnouncement();
-  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const rowButtons = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const { data: grants = [], isLoading: grantsLoading } = useQuery(allGrantsQueryOptions);
   const { data: roles = [] } = useQuery(allRolesQueryOptions);
@@ -50,7 +50,7 @@ export function GrantManagementTab() {
     const key = editTarget ? `${editTarget.principalType}:${editTarget.principalId}` : null;
     setEditTarget(null);
     if (key) {
-      requestAnimationFrame(() => rowRefs.current.get(key)?.focus());
+      requestAnimationFrame(() => rowButtons.current.get(key)?.focus());
     }
   };
 
@@ -69,9 +69,9 @@ export function GrantManagementTab() {
         />
       </div>
 
-      {/* Raw <table> kept (not click-ui Table): rows act as buttons with tabIndex,
-          role, aria-label, onKeyDown, and a ref for focus restoration — semantics
-          the click-ui Table API does not expose. Matches AuditLogTab's choice. */}
+      {/* Raw <table> kept (not click-ui Table): each row's name is a button
+          stretched over the row, with a ref for focus restoration — markup the
+          click-ui Table API does not expose. Matches AuditLogTab's choice. */}
       <div className="overflow-x-auto rounded-lg border border-(--cui-color-stroke-default)">
         <table className="w-full text-left text-sm">
           <caption className="sr-only">{localize('com_grants_title')}</caption>
@@ -96,15 +96,9 @@ export function GrantManagementTab() {
                   key={key}
                   row={row}
                   isLast={i === paged.length - 1}
-                  onClick={() => setEditTarget(row)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      setEditTarget(row);
-                    }
-                  }}
-                  rowRef={(el) => {
-                    if (el) rowRefs.current.set(key, el);
+                  onOpen={() => setEditTarget(row)}
+                  buttonRef={(el) => {
+                    if (el) rowButtons.current.set(key, el);
                   }}
                 />
               );

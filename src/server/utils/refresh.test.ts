@@ -81,15 +81,108 @@ describe('refreshAdminToken — tenant header forwarding', () => {
 
   it('omits X-Tenant-Id when the header is whitespace only', async () => {
     tenantHeader.value = '   ';
-    fetchMock.mockResolvedValueOnce(
-      jsonResponse(200, { token: 'new-jwt' }),
-    );
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'new-jwt' }));
 
     await refreshAdminToken('rt1', 'openid', 'user-1');
 
     const [, init] = fetchMock.mock.calls[0];
     const headers = (init as RequestInit).headers as Record<string, string>;
     expect(headers['X-Tenant-Id']).toBeUndefined();
+  });
+
+  it('forwards X-Tenant-Id on the cookie-based refresh of a password session', async () => {
+    tenantHeader.value = 'tenant-a';
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'new-jwt' }));
+
+    await refreshAdminToken('rt1', 'librechat', 'user-1');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/auth/refresh', {
+      method: 'POST',
+      headers: { Cookie: 'refreshToken=rt1', 'X-Tenant-Id': 'tenant-a' },
+    });
+  });
+
+  it('sends only the refresh cookie when the BFF request had no tenant header', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'new-jwt' }));
+
+    await refreshAdminToken('rt1', 'librechat', 'user-1');
+
+    expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/auth/refresh', {
+      method: 'POST',
+      headers: { Cookie: 'refreshToken=rt1' },
+    });
+  });
+});
+
+describe('refreshAdminToken — SSO providers', () => {
+  it('renews an OpenID session through the admin OAuth refresh, naming the provider', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { token: 'new-jwt', expiresAt: 999 }));
+
+    const result = await refreshAdminToken('rt1', 'openid', 'user-1');
+
+    expect(result).toEqual({ token: 'new-jwt', expiresAt: 999 });
+    expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/admin/oauth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: 'rt1', user_id: 'user-1', provider: 'openid' }),
+    });
+  });
+
+  it('renews a Google session through the admin OAuth refresh, never the password cookie route', async () => {
+    tenantHeader.value = 'tenant-a';
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { token: 'google-jwt', refreshToken: 'google-rt2', expiresAt: 999 }),
+    );
+
+    const result = await refreshAdminToken('google-rt1', 'google', 'user-1');
+
+    expect(result).toEqual({ token: 'google-jwt', refreshToken: 'google-rt2', expiresAt: 999 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/admin/oauth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Tenant-Id': 'tenant-a' },
+      body: JSON.stringify({
+        refresh_token: 'google-rt1',
+        user_id: 'user-1',
+        provider: 'google',
+      }),
+    });
+  });
+
+  it('does not refresh a Google session without its user id', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(await refreshAdminToken('google-rt1', 'google', undefined)).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('sends a SAML session to no refresh route: LibreChat has none for it', async () => {
+    expect(await refreshAdminToken('saml-rt', 'saml', 'user-1')).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the refresh token Google rotated in the session', async () => {
+    sessionState.data = {
+      token: 'cur',
+      refreshToken: 'google-rt1',
+      tokenProvider: 'google',
+      user: { id: 'u' },
+      expiresAt: Date.now() + 1_000,
+    };
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { token: 'google-jwt', refreshToken: 'google-rt2', expiresAt: 4242 }),
+    );
+
+    const result = await ensureFreshBearer(30_000);
+
+    expect(result).toBe('google-jwt');
+    expect(fetchMock.mock.calls[0][0]).toBe('http://lc.test/api/admin/oauth/refresh');
+    expect(updateSpy.mock.calls[0][0]).toMatchObject({
+      token: 'google-jwt',
+      refreshToken: 'google-rt2',
+      expiresAt: 4242,
+    });
   });
 });
 

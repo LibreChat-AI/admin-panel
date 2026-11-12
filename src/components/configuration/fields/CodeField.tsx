@@ -1,8 +1,8 @@
 import yaml from 'js-yaml';
 import { useState, useEffect, useRef } from 'react';
 import type * as t from '@/types';
+import { cn, isConfigValueEqual } from '@/utils';
 import { useLocalize } from '@/hooks';
-import { cn } from '@/utils';
 
 function toYaml(value: t.ConfigValue): string {
   if (value === undefined || value === null) return '';
@@ -29,8 +29,13 @@ export function CodeField({
     }
   }, [value]);
 
+  /** Leaving the field writes only a change: focusing a default or saved value and tabbing on pins nothing. */
   const handleBlur = () => {
     const trimmed = text.trim();
+    if (trimmed === toYaml(value)) {
+      setError(undefined);
+      return;
+    }
     if (trimmed === '') {
       setError(undefined);
       onChange(undefined);
@@ -39,6 +44,7 @@ export function CodeField({
     try {
       const parsed = yaml.load(trimmed, { schema: yaml.JSON_SCHEMA }) as t.ConfigValue;
       setError(undefined);
+      if (isConfigValueEqual(parsed, value)) return;
       externalValue.current = parsed;
       onChange(parsed);
     } catch {

@@ -1,5 +1,5 @@
 import { Button } from '@clickhouse/click-ui';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import type { AdminGroup } from '@librechat/data-schemas';
 import type * as t from '@/types';
@@ -8,11 +8,12 @@ import {
   SearchInput,
   EmptyState,
   Pagination,
+  ScreenReaderAnnouncer,
   TrashButton,
 } from '@/components/shared';
-import { deleteGroupFn, groupsQueryOptions, GROUPS_PAGE_SIZE } from '@/server';
+import { deleteGroupFn, groupsQueryOptions, GROUPS_PAGE_SIZE, MAX_SEARCH_LENGTH } from '@/server';
+import { useLocalize, useAnnouncement, useCapabilities, useRefreshScopes } from '@/hooks';
 import { cn, notifySuccess, notifyError } from '@/utils';
-import { useCapabilities, useLocalize } from '@/hooks';
 import { EditGroupDialog } from './EditGroupDialog';
 import { SystemCapabilities } from '@/constants';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -20,6 +21,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const refreshScopes = useRefreshScopes();
   const { hasCapability } = useCapabilities();
   const canManage = hasCapability(SystemCapabilities.MANAGE_GROUPS);
   const [editTarget, setEditTarget] = useState<AdminGroup | null>(null);
@@ -28,16 +30,21 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const { message: announcement, announce } = useAnnouncement();
+  const announcedSearch = useRef(debouncedSearch);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searchField = useCallback(() => searchRef.current, []);
 
   useEffect(() => {
     return () => clearTimeout(debounceRef.current);
   }, []);
 
   const handleSearchChange = (value: string) => {
-    setSearch(value);
+    const clamped = value.slice(0, MAX_SEARCH_LENGTH);
+    setSearch(clamped);
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      setDebouncedSearch(value);
+      setDebouncedSearch(clamped);
       setPage(1);
     }, 300);
   };
@@ -51,11 +58,18 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / GROUPS_PAGE_SIZE);
 
+  /** Announces the match count once each new search has loaded; the first load stays quiet. */
+  useEffect(() => {
+    if (isFetching || isError || announcedSearch.current === debouncedSearch) return;
+    announcedSearch.current = debouncedSearch;
+    announce(localize('com_a11y_groups_found', { count: total }));
+  }, [debouncedSearch, isFetching, isError, total, announce, localize]);
+
   const deleteMutation = useMutation({
     mutationFn: (group: AdminGroup) => deleteGroupFn({ data: { id: group.id } }),
     onSuccess: (_data, group) => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
+      void refreshScopes();
       queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
       notifySuccess(localize('com_toast_group_deleted', { name: group.name }));
@@ -73,7 +87,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
 
   if (isError && !data) {
     return (
-      <div className="px-4 py-8 text-center text-sm text-(--cui-color-foreground-danger)">
+      <div role="alert" className="px-4 py-8 text-center text-sm text-(--cui-color-text-danger)">
         {localize('com_error_load_groups')}
       </div>
     );
@@ -83,11 +97,13 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto py-2 pr-1">
       <div className="flex items-center justify-between gap-3">
         <SearchInput
+          inputRef={searchRef}
           value={search}
           onChange={handleSearchChange}
           placeholder={localize('com_access_search_groups')}
         />
         <Button
+          htmlType="button"
           type="secondary"
           iconLeft="plus"
           label={localize('com_access_create_group')}
@@ -114,7 +130,7 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
               <button
                 type="button"
                 onClick={() => setEditTarget(group)}
-                className="-my-2 -ml-2 min-w-0 flex-1 cursor-pointer rounded py-3 pl-3 text-left outline-none focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline)"
+                className="-my-2 -ml-2 min-w-0 flex-1 cursor-pointer rounded py-3 pl-3 text-left outline-none focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-(--cui-color-outline) focus-visible:outline-solid"
               >
                 <div className="text-sm font-medium text-(--cui-color-text-default) hover:underline">
                   {group.name}
@@ -156,7 +172,10 @@ export function GroupsTab({ onCreateGroup }: t.GroupsTabProps) {
           if (deleteTarget) deleteMutation.mutate(deleteTarget);
         }}
         onCancel={() => setDeleteTarget(null)}
+        returnFocusTo={searchField}
       />
+
+      <ScreenReaderAnnouncer message={announcement} />
     </div>
   );
 }

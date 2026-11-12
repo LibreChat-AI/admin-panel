@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useRef } from 'react';
 
+/** Keeps the active TOC item visible inside the TOC's own scroll area (SH-4). */
+function keepInView(item: Element) {
+  const scroller = item.closest<HTMLElement>('[data-toc-scroller]');
+  if (!scroller || !(item instanceof HTMLElement)) return;
+  requestAnimationFrame(() => {
+    const itemRect = item.getBoundingClientRect();
+    const box = scroller.getBoundingClientRect();
+    if (itemRect.top < box.top) scroller.scrollTop -= box.top - itemRect.top + 8;
+    else if (itemRect.bottom > box.bottom) scroller.scrollTop += itemRect.bottom - box.bottom + 8;
+  });
+}
+
 /**
  * Tracks the active TOC section using a simple scroll-position approach:
  * on each scroll frame, find the last `[data-section-id]` header whose top
@@ -26,8 +38,11 @@ export function useActiveSection(
       if (!tocContainer) return;
       const prev = tocContainer.querySelector('[data-toc-active]');
       if (prev) prev.removeAttribute('data-toc-active');
-      const next = tocContainer.querySelector(`[data-toc-id="${id}"]`);
-      if (next) next.setAttribute('data-toc-active', '');
+      const next = tocContainer.querySelector(`[data-toc-id="${CSS.escape(id)}"]`);
+      if (next) {
+        next.setAttribute('data-toc-active', '');
+        keepInView(next);
+      }
     },
     [tocContainer],
   );
@@ -40,8 +55,11 @@ export function useActiveSection(
       if (!tocContainer) return;
       const prev = tocContainer.querySelector('[data-toc-active]');
       if (prev) prev.removeAttribute('data-toc-active');
-      const next = tocContainer.querySelector(`[data-toc-id="${id}"]`);
-      if (next) next.setAttribute('data-toc-active', '');
+      const next = tocContainer.querySelector(`[data-toc-id="${CSS.escape(id)}"]`);
+      if (next) {
+        next.setAttribute('data-toc-active', '');
+        keepInView(next);
+      }
     },
     [tocContainer],
   );
@@ -83,6 +101,15 @@ export function useActiveSection(
         if (!tocIds.has(id)) continue;
         const top = header.getBoundingClientRect().top;
         if (top <= probeY) bestId = id;
+      }
+
+      /** At the top (or when nothing scrolls), the first entry is the one being read. */
+      if (scrollContainer.scrollTop <= 0) {
+        const first = [...headers].find((header) =>
+          tocIds.has(header.getAttribute('data-section-id') ?? ''),
+        );
+        applyActive(first?.getAttribute('data-section-id') ?? bestId);
+        return;
       }
 
       // Near-bottom override: when scrolled to the bottom, pick the last visible

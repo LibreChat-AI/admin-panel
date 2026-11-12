@@ -1,5 +1,5 @@
-import { Icon } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { DecorativeIcon } from './DecorativeIcon';
 import { useLocalize } from '@/hooks';
 
 export function LoadingState({ className }: t.LoadingStateProps) {
@@ -7,12 +7,13 @@ export function LoadingState({ className }: t.LoadingStateProps) {
 
   return (
     <div
+      role="status"
       className={
         className ??
         'flex items-center justify-center gap-2 py-12 text-sm text-(--cui-color-text-muted)'
       }
     >
-      <Icon name="loading-animated" size="sm" />
+      <DecorativeIcon name="loading-animated" size="sm" />
       {localize('com_ui_loading')}
     </div>
   );

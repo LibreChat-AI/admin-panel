@@ -10,22 +10,18 @@ import {
   updateGroupFn,
   MEMBERS_PAGE_SIZE,
 } from '@/server';
-import {
-  Avatar,
-  LoadingState,
-  Pagination,
-  SelectedMemberList,
-  TrashButton,
-  UserSearchInline,
-} from '@/components/shared';
+import { SelectedMemberList, UserSearchInline } from '@/components/shared';
+import { useLocalize, useReturnFocus, useRefreshScopes } from '@/hooks';
 import { cn, notifySuccess, notifyError } from '@/utils';
-import { useLocalize } from '@/hooks';
+import { MemberList } from './MemberList';
 
 type EditGroupTab = 'details' | 'members';
 
 export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const refreshScopes = useRefreshScopes();
+  const returnFocus = useReturnFocus(!!group);
   const [activeTab, setActiveTab] = useState<EditGroupTab>('details');
   const [name, setName] = useState(group?.name ?? '');
   const [description, setDescription] = useState(group?.description ?? '');
@@ -97,10 +93,13 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
       }
       return { name: submittedName };
     },
-    onSuccess: (data) => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['groups'] });
       queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['groupMembers', group?.id] });
+      void refreshScopes();
+    },
+    onSuccess: (data) => {
       notifySuccess(localize('com_toast_group_updated', { name: data.name }));
       onClose();
     },
@@ -134,6 +133,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
         title={localize('com_access_edit_group')}
         showClose
         onClose={onClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -169,7 +169,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                     disabled={!canManage}
                     readOnly={!canManage}
                     autoFocus
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted) disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -187,7 +187,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                     placeholder={localize('com_access_group_desc_placeholder')}
                     disabled={!canManage}
                     readOnly={!canManage}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled) disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted) disabled:cursor-not-allowed disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -243,6 +243,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                   fetching={membersQuery.isFetching}
                   removalIds={removalIds}
                   onRemove={stageRemoval}
+                  onUndoRemove={unstageRemoval}
                   canManage={canManage}
                   total={total}
                   currentPage={page}
@@ -260,12 +261,14 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={onClose}
               disabled={mutation.isPending}
             />
             <Button
+              htmlType="submit"
               type="primary"
               label={localize('com_ui_save')}
               disabled={
@@ -276,107 +279,5 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
         </form>
       </Dialog.Content>
     </Dialog>
-  );
-}
-
-interface MemberListProps {
-  members: AdminMember[];
-  loading: boolean;
-  error: boolean;
-  fetching: boolean;
-  removalIds: Set<string>;
-  onRemove: (member: AdminMember) => void;
-  canManage: boolean;
-  total: number;
-  currentPage: number;
-  totalPages: number;
-  onPageChange: (page: number) => void;
-}
-
-function MemberList({
-  members,
-  loading,
-  error,
-  fetching,
-  removalIds,
-  onRemove,
-  canManage,
-  total,
-  currentPage,
-  totalPages,
-  onPageChange,
-}: MemberListProps) {
-  const localize = useLocalize();
-
-  if (loading) {
-    return (
-      <LoadingState className="flex items-center justify-center gap-2 py-6 text-sm text-(--cui-color-text-muted)" />
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center py-6 text-sm text-(--cui-color-foreground-danger)">
-        {localize('com_error_load_members')}
-      </div>
-    );
-  }
-
-  if (members.length === 0 && total === 0) {
-    return (
-      <div className="flex items-center justify-center py-6 text-sm text-(--cui-color-text-muted)">
-        {localize('com_access_no_members')}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col">
-      <span className="mb-2 text-xs font-medium text-(--cui-color-text-muted)">
-        {localize('com_access_member_count', { count: total })}
-      </span>
-      <div
-        className={cn(
-          'max-h-64 overflow-auto rounded-lg border border-(--cui-color-stroke-default)',
-          fetching && 'opacity-60 transition-opacity',
-        )}
-      >
-        {members.map((member, i) => {
-          const staged = removalIds.has(member.userId);
-          return (
-            <div
-              key={member.userId}
-              className={cn(
-                'flex items-center justify-between px-3 py-2',
-                i < members.length - 1 && 'border-b border-(--cui-color-stroke-default)',
-                staged && 'opacity-40',
-              )}
-            >
-              <div className="flex items-center gap-3">
-                <Avatar name={member.name} />
-                <div className="flex flex-col">
-                  <span
-                    className={cn(
-                      'text-sm font-medium text-(--cui-color-text-default)',
-                      staged && 'line-through',
-                    )}
-                  >
-                    {member.name}
-                  </span>
-                  <span className="text-xs text-(--cui-color-text-muted)">{member.email}</span>
-                </div>
-              </div>
-              {canManage && !staged && (
-                <TrashButton
-                  onClick={() => onRemove(member)}
-                  ariaLabel={`${localize('com_access_remove_member')} ${member.name}`}
-                />
-              )}
-            </div>
-          );
-        })}
-      </div>
-      <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={onPageChange} />
-    </div>
   );
 }

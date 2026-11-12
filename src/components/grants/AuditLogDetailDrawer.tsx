@@ -1,57 +1,29 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { PrincipalType } from 'librechat-data-provider';
+import { Badge, Button } from '@clickhouse/click-ui';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Badge, Button, Icon, IconButton } from '@clickhouse/click-ui';
 import type { ReactElement } from 'react';
 import type * as t from '@/types';
 import {
-  ACTION_BADGE_STATE,
-  ACTION_LABEL_KEY,
-  auditCapability,
+  auditGrantee,
+  auditSubject,
   capabilityLabel,
   formatTimestamp,
+  auditActionLabel,
+  auditTargetBadge,
+  auditActionBadgeState,
+  auditActionSummaryKey,
 } from './auditLogUtils';
-import { LoadingState } from '@/components/shared';
-import { getScopeTypeConfig } from '@/constants';
-import { useLocalize } from '@/hooks';
+import { CloseButton, DecorativeIcon, LoadingState } from '@/components/shared';
+import { useLocalize, useReturnFocus } from '@/hooks';
 import { cn } from '@/utils';
 
-interface AuditLogDetailDrawerProps {
-  entry: t.AuditLogEntryWithDiff | null;
-  open: boolean;
-  onClose: () => void;
-  /** Resolves to `true` when the clipboard write succeeded so the drawer only
-   * flips to its "Copied!" affordance after a real success. */
-  onCopyPermalink: (entryId: string) => Promise<boolean>;
-  /** Invoked when any inline `CopyableMono` (timestamp, actor/target/entry IDs,
-   * capability) fails to write to the clipboard. The caller is responsible for
-   * surfacing the failure — typically via the same screen-reader announcement
-   * used for the permalink-copy failure path so the drawer's copy controls are
-   * not silent on clipboard error. */
-  onCopyFailed?: () => void;
-  /** Render a "no entry found" message instead of the detail body when the
-   * deep-linked id couldn't be located (e.g. the entry was purged). */
-  notFound?: boolean;
-  /** Render a loading shell while the single-entry deep-link query is in flight
-   * for an entry that is not on the current page. Without this, the drawer
-   * would either flicker shut during the fetch or never appear on cold load. */
-  loading?: boolean;
-  /** Render a load-error message + close affordance when the single-entry
-   * fetch failed for reasons other than not-found (network failure, 5xx). The
-   * caller is responsible for distinguishing this from `notFound` (which is
-   * the 404 case where the request itself succeeded but the entry is gone). */
-  loadError?: boolean;
-}
-
-function CopyableMono({
-  value,
-  ariaLabel,
-  onCopyFailed,
-}: {
-  value: string;
-  ariaLabel: string;
-  onCopyFailed?: () => void;
-}): ReactElement {
+/**
+ * A value that copies itself. Its name starts with the value it shows and then
+ * says what pressing it does ("…, copy actor ID"); a copy is announced through
+ * `onCopied`, since only the button's hidden icon changes.
+ */
+function CopyableMono({ value, field, onCopied, onCopyFailed }: t.CopyableMonoProps): ReactElement {
+  const localize = useLocalize();
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => {
@@ -72,16 +44,16 @@ function CopyableMono({
       return;
     }
     setCopied(true);
+    onCopied?.(field);
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => setCopied(false), 1500);
-  }, [value, onCopyFailed]);
+  }, [value, field, onCopied, onCopyFailed]);
 
   return (
     <button
       type="button"
       onClick={() => void handleCopy()}
-      aria-label={ariaLabel}
-      aria-live="polite"
+      aria-label={localize('com_audit_detail_copy_value', { value, field })}
       className={cn(
         'inline-flex w-fit items-center gap-1 self-start rounded px-1 py-0.5 font-mono text-[11px]',
         'text-(--cui-color-text-muted) hover:bg-(--cui-color-background-hover)',
@@ -90,7 +62,7 @@ function CopyableMono({
       )}
     >
       <span>{value}</span>
-      <Icon name={copied ? 'check' : 'copy'} size="xs" />
+      <DecorativeIcon name={copied ? 'check' : 'copy'} size="xs" />
     </button>
   );
 }
@@ -129,12 +101,15 @@ export function AuditLogDetailDrawer({
   open,
   onClose,
   onCopyPermalink,
+  onCopied,
   onCopyFailed,
   notFound = false,
   loading = false,
   loadError = false,
-}: AuditLogDetailDrawerProps): ReactElement | null {
+  returnFocusTo,
+}: t.AuditLogDetailDrawerProps): ReactElement | null {
   const localize = useLocalize();
+  const returnFocus = useReturnFocus(open, returnFocusTo);
 
   // Keep the last non-null entry so the close animation has content to render
   // while Radix Dialog slides the panel out. Without this, unmounting on
@@ -225,6 +200,7 @@ export function AuditLogDetailDrawer({
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
+            onCloseAutoFocus={returnFocus}
             className={cn(
               'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
               'border-l border-(--cui-color-stroke-default)',
@@ -237,13 +213,7 @@ export function AuditLogDetailDrawer({
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
               </span>
-              <IconButton
-                icon="cross"
-                type="ghost"
-                size="sm"
-                aria-label={localize('com_audit_detail_close')}
-                onClick={onClose}
-              />
+              <CloseButton label={localize('com_audit_detail_close')} onClick={onClose} />
             </header>
             <div className="flex flex-1 items-center justify-center px-4 py-8">
               <LoadingState />
@@ -272,6 +242,7 @@ export function AuditLogDetailDrawer({
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
+            onCloseAutoFocus={returnFocus}
             className={cn(
               'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
               'border-l border-(--cui-color-stroke-default)',
@@ -284,13 +255,7 @@ export function AuditLogDetailDrawer({
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
               </span>
-              <IconButton
-                icon="cross"
-                type="ghost"
-                size="sm"
-                aria-label={localize('com_audit_detail_close')}
-                onClick={onClose}
-              />
+              <CloseButton label={localize('com_audit_detail_close')} onClick={onClose} />
             </header>
             <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
               <p className="text-sm text-(--cui-color-text-muted)">
@@ -298,7 +263,12 @@ export function AuditLogDetailDrawer({
               </p>
             </div>
             <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
-              <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
+              <Button
+                htmlType="button"
+                type="primary"
+                label={localize('com_audit_detail_close')}
+                onClick={onClose}
+              />
             </footer>
           </Dialog.Content>
         </Dialog.Portal>
@@ -324,6 +294,7 @@ export function AuditLogDetailDrawer({
           <Dialog.Content
             aria-label={localize('com_audit_detail_title')}
             onEscapeKeyDown={() => onClose()}
+            onCloseAutoFocus={returnFocus}
             className={cn(
               'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
               'border-l border-(--cui-color-stroke-default)',
@@ -336,13 +307,7 @@ export function AuditLogDetailDrawer({
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
               </span>
-              <IconButton
-                icon="cross"
-                type="ghost"
-                size="sm"
-                aria-label={localize('com_audit_detail_close')}
-                onClick={onClose}
-              />
+              <CloseButton label={localize('com_audit_detail_close')} onClick={onClose} />
             </header>
             <div className="flex flex-1 items-center justify-center px-4 py-8 text-center">
               <p className="text-sm text-(--cui-color-text-muted)">
@@ -350,7 +315,12 @@ export function AuditLogDetailDrawer({
               </p>
             </div>
             <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
-              <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
+              <Button
+                htmlType="button"
+                type="primary"
+                label={localize('com_audit_detail_close')}
+                onClick={onClose}
+              />
             </footer>
           </Dialog.Content>
         </Dialog.Portal>
@@ -360,13 +330,10 @@ export function AuditLogDetailDrawer({
 
   if (!latestEntry) return null;
 
-  const targetConfig = getScopeTypeConfig(latestEntry.target.type as PrincipalType);
-  const capability = auditCapability(latestEntry);
+  const targetBadge = auditTargetBadge(latestEntry.target.type, localize);
+  const subject = auditSubject(latestEntry, localize);
+  const grantee = auditGrantee(latestEntry);
   const targetLabel = latestEntry.target.name ?? latestEntry.target.id ?? '';
-  const summaryKey =
-    latestEntry.action === 'grant.assigned'
-      ? 'com_audit_detail_summary_assigned'
-      : 'com_audit_detail_summary_removed';
 
   const before = latestEntry.before ?? [];
   const after = latestEntry.after ?? [];
@@ -389,6 +356,7 @@ export function AuditLogDetailDrawer({
         <Dialog.Content
           aria-label={localize('com_audit_detail_title')}
           onEscapeKeyDown={() => onClose()}
+          onCloseAutoFocus={returnFocus}
           className={cn(
             'fixed top-0 right-0 z-(--z-overlay) flex h-full w-full flex-col bg-(--cui-color-background-panel) shadow-xl sm:w-120',
             'border-l border-(--cui-color-stroke-default)',
@@ -401,29 +369,25 @@ export function AuditLogDetailDrawer({
             <div className="flex items-center gap-2">
               <Badge
                 size="sm"
-                state={ACTION_BADGE_STATE[latestEntry.action]}
-                text={localize(ACTION_LABEL_KEY[latestEntry.action])}
+                state={auditActionBadgeState(latestEntry.action)}
+                text={auditActionLabel(latestEntry.action, localize)}
               />
               <span className="text-sm font-semibold text-(--cui-color-text-default)">
                 {localize('com_audit_detail_title')}
               </span>
             </div>
-            <IconButton
-              icon="cross"
-              type="ghost"
-              size="sm"
-              aria-label={localize('com_audit_detail_close')}
-              onClick={onClose}
-            />
+            <CloseButton label={localize('com_audit_detail_close')} onClick={onClose} />
           </header>
 
           <div className="flex-1 overflow-y-auto">
             <div className="flex flex-col gap-5 px-4 py-4">
               <p className="text-sm text-(--cui-color-text-default)">
-                {localize(summaryKey, {
+                {localize(auditActionSummaryKey(latestEntry.action), {
+                  action: latestEntry.action,
                   actor: latestEntry.actor.name,
-                  capability: capabilityLabel(capability, localize),
+                  capability: subject.label,
                   target: targetLabel,
+                  grantee: grantee ? `${grantee.type} ${grantee.id}` : '',
                 })}
               </p>
 
@@ -435,7 +399,8 @@ export function AuditLogDetailDrawer({
                     </span>
                     <CopyableMono
                       value={latestEntry.timestamp}
-                      ariaLabel={`Copy ${localize('com_audit_detail_timestamp')}`}
+                      field={localize('com_audit_field_timestamp')}
+                      onCopied={onCopied}
                       onCopyFailed={onCopyFailed}
                     />
                   </div>
@@ -448,7 +413,8 @@ export function AuditLogDetailDrawer({
                     </span>
                     <CopyableMono
                       value={latestEntry.actor.id ?? ''}
-                      ariaLabel={`Copy ${localize('com_audit_detail_actor')} ID`}
+                      field={localize('com_audit_field_actor_id')}
+                      onCopied={onCopied}
                       onCopyFailed={onCopyFailed}
                     />
                   </div>
@@ -462,8 +428,8 @@ export function AuditLogDetailDrawer({
                         state="neutral"
                         text={
                           <span className="inline-flex items-center gap-1">
-                            <Icon name={targetConfig.icon} size="xs" />
-                            {localize(targetConfig.labelKey)}
+                            <DecorativeIcon name={targetBadge.icon} size="xs" />
+                            {targetBadge.label}
                           </span>
                         }
                       />
@@ -473,29 +439,50 @@ export function AuditLogDetailDrawer({
                     </span>
                     <CopyableMono
                       value={latestEntry.target.id ?? ''}
-                      ariaLabel={`Copy ${localize('com_audit_detail_target')} ID`}
+                      field={localize('com_audit_field_target_id')}
+                      onCopied={onCopied}
                       onCopyFailed={onCopyFailed}
                     />
                   </div>
                 </DetailRow>
 
-                <DetailRow label={localize('com_audit_detail_capability')}>
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm text-(--cui-color-text-default)">
-                      {capabilityLabel(capability, localize)}
-                    </span>
-                    <CopyableMono
-                      value={capability}
-                      ariaLabel={`Copy ${localize('com_audit_detail_capability')}`}
-                      onCopyFailed={onCopyFailed}
-                    />
-                  </div>
-                </DetailRow>
+                {grantee && (
+                  <DetailRow label={localize('com_audit_detail_grantee')}>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm text-(--cui-color-text-default)">
+                        {grantee.type}
+                      </span>
+                      <CopyableMono
+                        value={grantee.id}
+                        field={localize('com_audit_field_grantee_id')}
+                        onCopied={onCopied}
+                        onCopyFailed={onCopyFailed}
+                      />
+                    </div>
+                  </DetailRow>
+                )}
+
+                {subject.value && (
+                  <DetailRow label={localize('com_audit_detail_capability')}>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm text-(--cui-color-text-default)">
+                        {subject.label}
+                      </span>
+                      <CopyableMono
+                        value={subject.value}
+                        field={localize('com_audit_field_capability')}
+                        onCopied={onCopied}
+                        onCopyFailed={onCopyFailed}
+                      />
+                    </div>
+                  </DetailRow>
+                )}
 
                 <DetailRow label={localize('com_audit_detail_entry_id')}>
                   <CopyableMono
                     value={latestEntry.id}
-                    ariaLabel={`Copy ${localize('com_audit_detail_entry_id')}`}
+                    field={localize('com_audit_field_entry_id')}
+                    onCopied={onCopied}
                     onCopyFailed={onCopyFailed}
                   />
                 </DetailRow>
@@ -524,6 +511,7 @@ export function AuditLogDetailDrawer({
 
           <footer className="flex items-center justify-end gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
             <Button
+              htmlType="button"
               type="secondary"
               iconLeft={copied ? 'check' : 'share'}
               label={
@@ -533,7 +521,12 @@ export function AuditLogDetailDrawer({
               }
               onClick={() => void handleCopyPermalinkClick()}
             />
-            <Button type="primary" label={localize('com_audit_detail_close')} onClick={onClose} />
+            <Button
+              htmlType="button"
+              type="primary"
+              label={localize('com_audit_detail_close')}
+              onClick={onClose}
+            />
           </footer>
         </Dialog.Content>
       </Dialog.Portal>

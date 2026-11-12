@@ -11,6 +11,7 @@ const { RuleTester } = require('eslint');
 const buttonRequiresLabel = require('../rules/button-requires-label');
 const iconNameFormat = require('../rules/icon-name-format');
 const logoNameFormat = require('../rules/logo-name-format');
+const requireButtonHtmlType = require('../rules/require-button-html-type');
 
 const ruleTester = new RuleTester({
   parserOptions: {
@@ -87,6 +88,31 @@ describe('Click UI ESLint Rules', () => {
         {
           code: '<Logo name="digitalOcean" />',
           errors: [{ messageId: 'wrongFormat' }],
+        },
+      ],
+    });
+  });
+  describe('require-button-html-type', () => {
+    ruleTester.run('require-button-html-type', requireButtonHtmlType, {
+      valid: [
+        {
+          code: "import { Button } from '@clickhouse/click-ui';\n<Button htmlType=\"button\" label=\"Add\" />",
+        },
+        {
+          code: "import { IconButton } from '@clickhouse/click-ui';\n<IconButton htmlType=\"button\" icon=\"trash\" />",
+        },
+        {
+          code: "import { Button } from './local';\n<Button label=\"Not click-ui\" />",
+        },
+      ],
+      invalid: [
+        {
+          code: "import { Button } from '@clickhouse/click-ui';\n<Button label=\"Add\" />",
+          errors: [{ messageId: 'missingHtmlType' }],
+        },
+        {
+          code: "import { IconButton as IB } from '@clickhouse/click-ui';\n<IB icon=\"trash\" />",
+          errors: [{ messageId: 'missingHtmlType' }],
         },
       ],
     });

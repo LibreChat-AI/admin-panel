@@ -1,11 +1,12 @@
 import {
   INTERFACE_PERMISSION_FIELDS,
   PERMISSION_SUB_KEYS,
+  RUNTIME_CONFIG_INTERFACE_FIELDS,
 } from 'librechat-data-provider';
 import type { TInterfaceConfig } from 'librechat-data-provider';
 import type * as t from '@/types';
 
-export { INTERFACE_PERMISSION_FIELDS, PERMISSION_SUB_KEYS };
+export { INTERFACE_PERMISSION_FIELDS, PERMISSION_SUB_KEYS, RUNTIME_CONFIG_INTERFACE_FIELDS };
 
 /** Returns true if a dot-path should be blocked from config override writes.
  *
@@ -19,21 +20,28 @@ export { INTERFACE_PERMISSION_FIELDS, PERMISSION_SUB_KEYS };
  *  - `interface.mcpServers.use` → true (permission sub-key, blocked)
  *  - `interface.mcpServers.placeholder` → false (UI sub-key, allowed)
  *  - `interface.peoplePicker.users` → true (permission sub-key, blocked)
+ *  - `interface.schedules` → false (runtime enable toggle, see `RUNTIME_CONFIG_INTERFACE_FIELDS`)
+ *  - `interface.schedules.use` → true (permission sub-key, blocked)
  *  - `interface.endpointsMenu` → false (pure UI field) */
 export function isInterfacePermissionPath(fieldPath: string): boolean {
   const segments = fieldPath.split('.');
   if (segments[0] !== 'interface' || segments.length < 2) return false;
   if (!INTERFACE_PERMISSION_FIELDS.has(segments[1])) return false;
   // Bare field path (e.g. `interface.prompts` or `interface.mcpServers`) —
-  // blocked because writing the whole field could include permission bits.
-  if (segments.length === 2) return true;
+  // blocked because writing the whole field could include permission bits,
+  // except dual-purpose runtime fields whose bare value is a feature toggle.
+  if (segments.length === 2) return !RUNTIME_CONFIG_INTERFACE_FIELDS.has(segments[1]);
   // Sub-key path — only block if the sub-key is a permission bit
   return PERMISSION_SUB_KEYS.has(segments[2]);
 }
 
 /** Strips permission fields and permission sub-keys from an interface config
  *  object. Boolean permission fields are removed entirely; composite permission
- *  fields have their permission sub-keys stripped while UI sub-keys pass through. */
+ *  fields have their permission sub-keys stripped while UI sub-keys pass through.
+ *
+ *  Runtime fields (`RUNTIME_CONFIG_INTERFACE_FIELDS`) mirror LibreChat's override
+ *  sanitizer: the boolean form is a feature toggle and is preserved, and an object
+ *  with `use: false` collapses to `false` so stripping `use` cannot re-enable it. */
 export function stripInterfacePermissionFields(
   obj: Partial<TInterfaceConfig>,
 ): Partial<TInterfaceConfig> {
@@ -41,6 +49,15 @@ export function stripInterfacePermissionFields(
   for (const [key, value] of Object.entries(obj)) {
     if (!INTERFACE_PERMISSION_FIELDS.has(key)) {
       (result as Record<string, unknown>)[key] = value;
+      continue;
+    }
+    const isRuntimeField = RUNTIME_CONFIG_INTERFACE_FIELDS.has(key);
+    if (isRuntimeField && typeof value === 'boolean') {
+      (result as Record<string, unknown>)[key] = value;
+      continue;
+    }
+    if (isRuntimeField && (value as Record<string, unknown> | null)?.use === false) {
+      (result as Record<string, unknown>)[key] = false;
       continue;
     }
     // Composite field — strip permission sub-keys, keep UI sub-keys
@@ -63,9 +80,7 @@ export function stripInterfacePermissionFields(
 /** Filters a schema tree's interface children, removing boolean permission fields
  *  entirely and stripping permission sub-key children from composite fields.
  *  Returns only fields/sub-fields that are editable in config overrides. */
-export function filterInterfacePermissionChildren(
-  children: t.SchemaField[],
-): t.SchemaField[] {
+export function filterInterfacePermissionChildren(children: t.SchemaField[]): t.SchemaField[] {
   return children.reduce<t.SchemaField[]>((acc, child) => {
     if (!INTERFACE_PERMISSION_FIELDS.has(child.key)) {
       acc.push(child);
@@ -77,34 +92,4 @@ export function filterInterfacePermissionChildren(
     }
     return acc;
   }, []);
-}
-
-/** Keys added by AppService that should be replaced with their canonical names.
- *  After normalization, these legacy keys must be deleted to avoid persisting
- *  redundant paths to the DB. */
-const LEGACY_APP_SERVICE_KEYS = ['interfaceConfig', 'turnstileConfig', 'mcpConfig'] as const;
-
-/** Normalizes an AppService/fallback config object to use canonical schema keys
- *  and strips interface permission fields. Removes legacy AppService key aliases
- *  so they aren't persisted alongside the canonical keys. */
-export function normalizeImportConfig<T extends Record<string, unknown>>(appConfig: T): T {
-  const normalized = {
-    ...appConfig,
-    interface: appConfig.interfaceConfig ?? appConfig.interface,
-    turnstile: appConfig.turnstileConfig ?? appConfig.turnstile,
-    mcpServers: appConfig.mcpConfig ?? appConfig.mcpServers,
-  };
-  for (const key of LEGACY_APP_SERVICE_KEYS) {
-    delete normalized[key];
-  }
-  if (
-    normalized.interface &&
-    typeof normalized.interface === 'object' &&
-    !Array.isArray(normalized.interface)
-  ) {
-    normalized.interface = stripInterfacePermissionFields(
-      normalized.interface as Partial<TInterfaceConfig>,
-    );
-  }
-  return normalized as T;
 }

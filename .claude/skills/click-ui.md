@@ -10,7 +10,7 @@ alwaysApply: false
 
 ## Overview
 
-Click UI is the official design system and component library for ClickHouse, built with React, TypeScript, and styled-components. This skill provides guidance for effectively using Click UI in development workflows.
+Click UI is the official design system and component library for ClickHouse, built with React, TypeScript, and CSS Modules. This skill provides guidance for effectively using Click UI in development workflows.
 
 **Official Documentation**: https://clickhouse.design/click-ui  
 **GitHub Repository**: https://github.com/ClickHouse/click-ui  
@@ -64,7 +64,7 @@ function App() {
 }
 ```
 
-**Note**: Click UI uses styled-components for styling, so no CSS import is required. The styles are injected automatically via JavaScript.
+**Note**: Since 0.10, Click UI ships CSS Modules that each component imports itself, so no CSS import is required. All of its styles sit in one `clickui` cascade layer: unlayered app CSS always beats them, and Tailwind's layers lose to them.
 
 ## Core Architecture Concepts
 
@@ -509,13 +509,13 @@ const [open, setOpen] = useState(false)
 
 ## Critical: Avoid Custom CSS
 
-**NEVER write custom CSS or styled-components unless absolutely necessary.** Click UI provides components for almost every use case. When you must customize:
+**NEVER write custom CSS unless absolutely necessary.** Click UI provides components for almost every use case. When you must customize:
 
 ### Hierarchy of Approaches (Best to Worst)
 
 1. **Use existing Click UI components** - Check if a component already exists
 2. **Use component props** - Most components have extensive prop options
-3. **Extend with styled-components** - Only for adding theme-aware styles
+3. **Extend with Tailwind classes on theme tokens** - Only for adding theme-aware styles
 4. **Inline styles** - Only for one-off positioning tweaks
 5. **Custom CSS** - Last resort, avoid if possible
 
@@ -523,12 +523,9 @@ const [open, setOpen] = useState(false)
 
 ```typescript
 // WRONG - Don't rebuild what Click UI provides
-const CustomDropdown = styled.div`
-  background: white;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  /* ... 50 more lines of CSS ... */
-`;
+const CustomDropdown = () => (
+  <div className="rounded border border-gray-300 bg-white">{/* ... 50 more lines ... */}</div>
+);
 
 // CORRECT - Use the Select component
 <Select value={value} onSelect={setValue}>
@@ -539,33 +536,37 @@ const CustomDropdown = styled.div`
 
 ### When Extending is Necessary
 
-If you must extend, use styled-components to add theme-aware styles:
+If you must extend, add Tailwind classes that read the app's `--cui-*` theme tokens (`src/styles.css`):
 
-```typescript
-import { Container } from '@clickhouse/click-ui'
-import styled from 'styled-components'
+```tsx
+import { Container } from '@clickhouse/click-ui';
 
 // CORRECT - Extend with theme tokens
-const SidebarContainer = styled(Container)`
-  background: ${({ theme }) => theme.global.color.background.default};
-  border-right: 1px solid ${({ theme }) => theme.global.color.stroke.default};
-`
-
-// If flex properties aren't working, you may need to add them explicitly
-const FlexContainer = styled(Container)`
-  display: flex;
-  flex-direction: column;
-`
+function Sidebar({ children }: { children: ReactNode }) {
+  return (
+    <Container
+      orientation="vertical"
+      className="border-r border-(--cui-color-stroke-default) bg-(--cui-color-background-panel)"
+    >
+      {children}
+    </Container>
+  );
+}
 ```
+
+Tailwind classes can only add properties Click UI leaves unset. Its `clickui` layer comes after Tailwind's `utilities` layer, so a utility never overrides a property Click UI sets, however specific the selector: `grid` on `Tabs.TriggersList` still renders `display: flex`. To change such a property, write an unlayered rule in `src/styles.css`.
 
 ### Theme Token Reference
 
-When extending components, use these theme tokens:
+When extending components, use the app's `--cui-*` tokens from `src/styles.css`. They switch with the light and dark theme:
 
-- `theme.global.color.background.default` - Main background
-- `theme.global.color.background.muted` - Muted/secondary background
-- `theme.global.color.stroke.default` - Borders
-- `theme.click.sidebar.main.color.background.default` - Sidebar background
+- `--cui-color-background-default` - Main background
+- `--cui-color-background-muted` - Muted/secondary background
+- `--cui-color-background-panel` - Panels and cards
+- `--cui-color-stroke-default` - Borders
+- `--cui-color-text-default` and `--cui-color-text-muted` - Text
+
+Click UI's own tokens are CSS variables named after its theme paths, such as `--click-global-color-background-default` and `--click-sidebar-main-color-background-default`.
 
 ## Component Selection Guide
 
@@ -714,28 +715,23 @@ Tabs require specific sub-components:
 </Tabs>
 ```
 
-For styled tabs (like in sidebars), extend the components:
+For styled tabs (like in sidebars), add classes to the parts. `Tabs.TriggersList` is already `display: flex` in Click UI's layer, so split it evenly with `flex-1` on each trigger rather than a Tailwind grid:
 
-```typescript
-const TabsStyled = styled(Tabs)`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-`
-
-const TabsTriggersList = styled(Tabs.TriggersList)`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  min-height: 50px;
-`
-
-const TabContent = styled(Tabs.Content)`
-  display: flex;
-  flex-direction: column;
-  &[data-state='active'] {
-    flex: 1;
-    overflow: hidden auto;
-  }
-`
+```tsx
+<Tabs className="flex flex-1 flex-col overflow-hidden">
+  <Tabs.TriggersList className="min-h-12.5">
+    <Tabs.Trigger value="tables" className="flex-1">
+      Tables
+    </Tabs.Trigger>
+    <Tabs.Trigger value="queries" className="flex-1">
+      Queries
+    </Tabs.Trigger>
+  </Tabs.TriggersList>
+  <Tabs.Content
+    value="tables"
+    className="flex flex-col data-[state=active]:flex-1 data-[state=active]:overflow-y-auto"
+  >
+    {/* Tables content */}
+  </Tabs.Content>
+</Tabs>
 ```

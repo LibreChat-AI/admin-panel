@@ -28,13 +28,16 @@ module.exports = {
     'checkbox-radiogroup-controlled': require('./rules/checkbox-radiogroup-controlled'),
     'valid-provider-config': require('./rules/valid-provider-config'),
     'avoid-generic-label': require('./rules/avoid-generic-label'),
+    'require-button-html-type': require('./rules/require-button-html-type'),
+    'no-bare-icon-in-interactive': require('./rules/no-bare-icon-in-interactive'),
+    'no-legacy-arbitrary-variable': require('./rules/no-legacy-arbitrary-variable'),
   },
   configs: {
     recommended: {
       plugins: ['click-ui'],
       rules: {
         'click-ui/require-provider': 'error',
-        'click-ui/require-css-import': 'off', // Disabled: Click UI uses styled-components, no CSS import needed
+        'click-ui/require-css-import': 'off', // Disabled: since 0.10 each Click UI component imports its own CSS Modules, no CSS import needed
         'click-ui/button-requires-label': 'error',
         'click-ui/icon-name-format': 'error',
         'click-ui/logo-name-format': 'error',
@@ -56,13 +59,16 @@ module.exports = {
         'click-ui/checkbox-radiogroup-controlled': 'error',
         'click-ui/valid-provider-config': 'warn',
         'click-ui/avoid-generic-label': 'off',
+        'click-ui/require-button-html-type': 'error',
+        'click-ui/no-bare-icon-in-interactive': 'error',
+        'click-ui/no-legacy-arbitrary-variable': 'error',
       },
     },
     strict: {
       plugins: ['click-ui'],
       rules: {
         'click-ui/require-provider': 'error',
-        'click-ui/require-css-import': 'off', // Disabled: Click UI uses styled-components, no CSS import needed
+        'click-ui/require-css-import': 'off', // Disabled: since 0.10 each Click UI component imports its own CSS Modules, no CSS import needed
         'click-ui/button-requires-label': 'error',
         'click-ui/icon-name-format': 'error',
         'click-ui/logo-name-format': 'error',
@@ -84,6 +90,9 @@ module.exports = {
         'click-ui/checkbox-radiogroup-controlled': 'error',
         'click-ui/valid-provider-config': 'error',
         'click-ui/avoid-generic-label': 'warn',
+        'click-ui/require-button-html-type': 'error',
+        'click-ui/no-bare-icon-in-interactive': 'error',
+        'click-ui/no-legacy-arbitrary-variable': 'error',
       },
     },
   },

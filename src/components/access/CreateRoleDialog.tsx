@@ -5,14 +5,16 @@ import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { addRoleMemberFn, createRoleFn, updateRolePermissionsFn } from '@/server';
 import { SelectedMemberList, UserSearchInline } from '@/components/shared';
+import { useLocalize, useReturnFocus, useRefreshScopes } from '@/hooks';
 import { RolePermissionsPanel } from './RolePermissionsPanel';
 import { cn, notifySuccess, notifyError } from '@/utils';
 import { defaultPermissions } from '@/constants';
-import { useLocalize } from '@/hooks';
 
 export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const refreshScopes = useRefreshScopes();
+  const returnFocus = useReturnFocus(open);
   const [activeTab, setActiveTab] = useState<t.CreateRoleTab>('details');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -39,11 +41,13 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
       }
       return { name: submittedName };
     },
-    onSuccess: (data) => {
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['roles'] });
       queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
       queryClient.invalidateQueries({ queryKey: ['roleAssignments'] });
+      void refreshScopes();
+    },
+    onSuccess: (data) => {
       notifySuccess(localize('com_toast_role_created', { name: data.name }));
       resetAndClose();
     },
@@ -87,6 +91,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
         title={localize('com_access_create_role')}
         showClose
         onClose={resetAndClose}
+        onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-5">
@@ -123,7 +128,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
                     onChange={(e) => setName(e.target.value)}
                     placeholder={localize('com_access_role_name_placeholder')}
                     autoFocus
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted)"
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -139,7 +144,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder={localize('com_access_role_desc_placeholder')}
-                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-disabled)"
+                    className="rounded-lg border border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-3 py-2 text-sm text-(--cui-color-text-default) placeholder:text-(--cui-color-text-muted)"
                   />
                 </div>
               </div>
@@ -187,12 +192,14 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
           )}
           <div className="flex items-center justify-end gap-2">
             <Button
+              htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
               onClick={resetAndClose}
               disabled={mutation.isPending}
             />
             <Button
+              htmlType="submit"
               type="primary"
               label={localize('com_access_create_role')}
               disabled={!name.trim() || mutation.isPending}

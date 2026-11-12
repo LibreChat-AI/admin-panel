@@ -7,17 +7,20 @@ export function StickyActionBar({
   onDiscard,
   onSave,
   message,
+  label,
 }: t.StickyActionBarProps) {
   return (
-    <div className="flex shrink-0 animate-[slideUp_200ms_ease-out] items-center gap-2 border-t border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-6 py-3">
+    <div
+      role="region"
+      aria-label={label}
+      className="flex shrink-0 animate-[slideUp_200ms_ease-out] flex-wrap items-center gap-2 border-t border-(--cui-color-stroke-default) bg-(--cui-color-background-default) px-6 py-3"
+    >
       {message && (
-        <span className="flex-1 text-sm font-medium text-(--cui-color-text-default)">
-          {message}
-        </span>
+        <span className="min-w-0 flex-1 text-sm text-(--cui-color-text-default)">{message}</span>
       )}
       <div className="ml-auto flex items-center gap-2">
-        <Button type="secondary" label={discardLabel} onClick={onDiscard} />
-        <Button type="primary" label={saveLabel} onClick={onSave} />
+        <Button htmlType="button" type="secondary" label={discardLabel} onClick={onDiscard} />
+        <Button htmlType="button" type="primary" label={saveLabel} onClick={onSave} />
       </div>
     </div>
   );

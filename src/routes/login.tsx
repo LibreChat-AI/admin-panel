@@ -1,26 +1,23 @@
 import { Container } from '@clickhouse/click-ui';
 import { createFileRoute } from '@tanstack/react-router';
+import { useDocumentTitle, useLocalize } from '@/hooks';
 import ThemeSelector from '@/components/ThemeSelector';
 import { AuthCard } from '@/components/AuthCard';
-import { checkOpenIdFn } from '@/server';
+import { ssoProvidersFn } from '@/server';
 
 export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>) => ({
     redirect: typeof search.redirect === 'string' ? search.redirect : '/',
   }),
-  loader: async () => {
-    const openIdStatus = await checkOpenIdFn();
-    return {
-      ssoAvailable: openIdStatus.available,
-      ssoOnly: openIdStatus.available && openIdStatus.ssoOnly,
-    };
-  },
+  loader: () => ssoProvidersFn(),
   component: LoginPage,
 });
 
 function LoginPage() {
+  const localize = useLocalize();
   const { redirect } = Route.useSearch();
-  const { ssoAvailable, ssoOnly } = Route.useLoaderData();
+  useDocumentTitle(localize('com_auth_sign_in'));
+  const { providers, ssoOnly } = Route.useLoaderData();
 
   return (
     <Container
@@ -29,7 +26,7 @@ function LoginPage() {
       justifyContent="center"
       style={{ minHeight: '100vh', padding: '1rem', gap: '1rem' }}
     >
-      <AuthCard redirectTo={redirect} autoRedirectSso={ssoOnly} ssoAvailable={ssoAvailable} />
+      <AuthCard redirectTo={redirect} providers={providers} ssoOnly={ssoOnly} />
       <div className="sm:absolute sm:bottom-0 sm:left-0 sm:m-4">
         <ThemeSelector returnThemeOnly />
       </div>

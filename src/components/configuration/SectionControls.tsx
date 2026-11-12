@@ -1,5 +1,13 @@
 import type * as t from '@/types';
 
-export function SectionControls({ children }: t.SectionControlsProps) {
-  return <div className="flex min-w-0 flex-1 flex-col gap-3">{children}</div>;
+/**
+ * Control cell of a settings row; `width` caps click-ui fields at the S/M/L
+ * token. Without one the cell sizes by control type (numbers S, others M).
+ */
+export function SectionControls({ children, width }: t.SectionControlsProps) {
+  return (
+    <div className="settings-row-control" data-width={width ?? 'auto'}>
+      {children}
+    </div>
+  );
 }

@@ -19,12 +19,12 @@ import {
   ScreenReaderAnnouncer,
   SearchInput,
 } from '@/components/shared';
-import { useAnnouncement, useCapabilities, useLocalize } from '@/hooks';
-import { cn, notifySuccess, notifyError } from '@/utils';
+import { useLocalize, useAnnouncement, useCapabilities, useRefreshScopes } from '@/hooks';
+import { SystemCapabilities, USER_DELETE_UNAVAILABLE } from '@/constants';
+import { cn, errorText, notifySuccess, notifyError } from '@/utils';
 import { CreateUserDialog } from './CreateUserDialog';
 import { UserDetailDialog } from './UserDetailDialog';
 import { ConfirmDialog } from '@/components/access';
-import { SystemCapabilities } from '@/constants';
 
 const ROLE_FILTER_LABELS: Record<t.RoleFilter, string> = {
   all: 'com_ui_all',
@@ -35,6 +35,7 @@ const ROLE_FILTER_LABELS: Record<t.RoleFilter, string> = {
 export function UsersPage() {
   const localize = useLocalize();
   const queryClient = useQueryClient();
+  const refreshScopes = useRefreshScopes();
   const { hasCapability } = useCapabilities();
   const canManage = hasCapability(SystemCapabilities.MANAGE_USERS);
   const canManageRoles = hasCapability(SystemCapabilities.MANAGE_ROLES);
@@ -68,11 +69,16 @@ export function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ['groupAssignments'] });
       queryClient.invalidateQueries({ queryKey: ['roleMembers'] });
       queryClient.invalidateQueries({ queryKey: ['groupMembers'] });
-      queryClient.invalidateQueries({ queryKey: ['availableScopes'] });
+      void refreshScopes();
       notifySuccess(localize('com_toast_user_deleted', { name: user.name }));
       setDeleteTarget(null);
     },
-    onError: (err: Error) => notifyError(err.message),
+    onError: (err: Error) =>
+      notifyError(
+        err.message === USER_DELETE_UNAVAILABLE
+          ? localize('com_users_delete_unavailable')
+          : errorText(err, localize('com_users_delete_failed'), localize),
+      ),
   });
 
   const applyFilters = (list: TUser[], q: string, role: t.RoleFilter) =>
