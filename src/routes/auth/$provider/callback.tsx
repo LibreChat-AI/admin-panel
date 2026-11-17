@@ -33,6 +33,6 @@ function SsoCallback() {
   const router = useRouter();
   const search = Route.useSearch();
   const canRetry = code === 'session_unavailable' && !!search.code && !search.error;
-  if (canRetry) return <SessionError onRetry={() => router.invalidate()} />;
+  if (canRetry) return <SessionError onRetry={() => router.invalidate({ sync: true })} />;
   return <SsoError code={code} />;
 }
