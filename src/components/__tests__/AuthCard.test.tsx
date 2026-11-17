@@ -88,6 +88,19 @@ async function idleWithoutWindow(ms: number): Promise<void> {
 }
 
 describe('AuthCard sign-in failures', () => {
+  it('identifies the username and current password for browser autofill', () => {
+    renderCard();
+
+    expect(screen.getByLabelText(localizeEn('com_auth_email_label'))).toHaveAttribute(
+      'autocomplete',
+      'username',
+    );
+    expect(screen.getByLabelText(localizeEn('com_auth_password_label'))).toHaveAttribute(
+      'autocomplete',
+      'current-password',
+    );
+  });
+
   it('tells an admin refused for a missing tenant to use their organization address', async () => {
     loginFn.mockResolvedValue({ error: true, code: 'tenant_required' });
 

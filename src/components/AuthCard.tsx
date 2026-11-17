@@ -310,6 +310,7 @@ export function AuthCard({
               <>
                 <TextField
                   label={localize('com_auth_email_label')}
+                  autoComplete="username"
                   placeholder={localize('com_auth_email_placeholder')}
                   value={email}
                   onChange={(value) => {
@@ -322,6 +323,7 @@ export function AuthCard({
 
                 <PasswordInput
                   label={localize('com_auth_password_label')}
+                  autoComplete="current-password"
                   placeholder={localize('com_auth_password_placeholder')}
                   value={password}
                   onChange={(value) => {
