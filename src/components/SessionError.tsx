@@ -62,12 +62,14 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
         )}
         <div className="flex gap-3">
           <Button
+            type="primary"
             label={localize('com_ui_retry')}
             htmlType="button"
             disabled={busy}
             onClick={retry}
           />
           <Button
+            type="secondary"
             label={localize('com_ui_sign_out')}
             htmlType="button"
             disabled={busy}
