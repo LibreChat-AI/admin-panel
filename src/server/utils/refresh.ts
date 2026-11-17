@@ -26,6 +26,40 @@ function extractRefreshTokenCookie(response: Response): string | undefined {
   return undefined;
 }
 
+/** A refused renewal ends the session; an unavailable check leaves it ready for Retry. */
+async function readRefreshResponse(response: Response): Promise<RefreshedTokenset | undefined> {
+  const body = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const errorBody = body as t.AuthErrorBody | undefined;
+    if (
+      ![400, 401, 403].includes(response.status) ||
+      errorBody?.code === 'AUTH_SESSION_CHECK_UNAVAILABLE' ||
+      errorBody?.error_code === 'AUTH_SESSION_CHECK_UNAVAILABLE'
+    ) {
+      throw new Error('AUTH_SESSION_CHECK_UNAVAILABLE');
+    }
+    return undefined;
+  }
+  const parsed = refreshResponseSchema.safeParse(body);
+  if (!parsed.success) throw new Error('AUTH_SESSION_CHECK_UNAVAILABLE');
+  return parsed.data;
+}
+
+export async function clearAdminSession(session: t.SessionManager): Promise<void> {
+  await session.update({
+    token: undefined,
+    user: undefined,
+    refreshToken: undefined,
+    tokenProvider: undefined,
+    expiresAt: undefined,
+    lastVerified: undefined,
+    lastActivity: undefined,
+    codeVerifier: undefined,
+    ssoProvider: undefined,
+    ssoRedirect: undefined,
+  });
+}
+
 /**
  * Renews an SSO session through LibreChat's body-based
  * `POST /api/admin/oauth/refresh`, which returns the rotated refresh token
@@ -45,9 +79,7 @@ async function refreshSsoSession(
     headers: { 'Content-Type': 'application/json', ...tenantHeaders() },
     body: JSON.stringify({ refresh_token: refreshToken, user_id: userId, provider }),
   });
-  if (!response.ok) return undefined;
-  const parsed = refreshResponseSchema.safeParse(await response.json());
-  return parsed.success ? parsed.data : undefined;
+  return readRefreshResponse(response);
 }
 
 /** Renews a password session through LibreChat's cookie-based `POST /api/auth/refresh`. */
@@ -58,10 +90,9 @@ async function refreshPasswordSession(
     method: 'POST',
     headers: { Cookie: `refreshToken=${refreshToken}`, ...tenantHeaders() },
   });
-  if (!response.ok) return undefined;
-  const parsed = refreshResponseSchema.safeParse(await response.json());
-  if (!parsed.success) return undefined;
-  return { token: parsed.data.token, refreshToken: extractRefreshTokenCookie(response) };
+  const refreshed = await readRefreshResponse(response);
+  if (!refreshed) return undefined;
+  return { token: refreshed.token, refreshToken: extractRefreshTokenCookie(response) };
 }
 
 /**
@@ -76,8 +107,8 @@ async function refreshPasswordSession(
  * Both forward the deployment's `X-Tenant-Id` header (`tenantHeaders`) so the
  * backend's `preAuthTenantMiddleware` scopes the user lookup correctly.
  *
- * Returns `undefined` on any network or schema failure — callers decide
- * whether to clear the session.
+ * Returns `undefined` when renewal is refused or unavailable for this provider.
+ * Throws on temporary failures so callers keep the credentials for Retry.
  */
 export async function refreshAdminToken(
   refreshToken: string,
@@ -92,7 +123,7 @@ export async function refreshAdminToken(
     return await refreshSsoSession(refreshToken, tokenProvider, userId);
   } catch (error) {
     console.warn('[refreshAdminToken] Token refresh request failed:', error);
-    return undefined;
+    throw new Error('AUTH_SESSION_CHECK_UNAVAILABLE');
   }
 }
 
@@ -138,8 +169,8 @@ export function refreshAdminTokenDeduped(
 /**
  * Refresh the bearer if the session is missing one or its `expiresAt` falls
  * within `skewMs` of now. Persists the rotated refresh token (if any) to the
- * session and returns the bearer the caller should use. Returns `undefined`
- * when no token is available and refresh either failed or is impossible.
+ * session and returns the bearer the caller should use. A refused renewal
+ * clears the session; a temporary failure keeps its credentials and throws.
  */
 export async function ensureFreshBearer(skewMs: number): Promise<string | undefined> {
   const session = await useAppSession();
@@ -157,7 +188,8 @@ export async function ensureFreshBearer(skewMs: number): Promise<string | undefi
 
   const refreshed = await refreshAdminTokenDeduped(refreshToken, tokenProvider, user?.id);
   if (!refreshed) {
-    return token;
+    await clearAdminSession(session);
+    throw new Error('OPENID_SESSION_ENDED');
   }
 
   await session.update({
@@ -172,15 +204,19 @@ export async function ensureFreshBearer(skewMs: number): Promise<string | undefi
 
 /**
  * After a 401 from a downstream admin call, force a refresh attempt regardless
- * of `expiresAt`. Returns the new bearer or `undefined` if refresh failed.
+ * of `expiresAt`. A refused or impossible renewal clears the session.
+ * A temporary failure keeps its credentials and throws.
  */
-export async function refreshOn401(): Promise<string | undefined> {
+export async function refreshOn401(): Promise<string> {
   const session = await useAppSession();
   const { refreshToken, tokenProvider, user } = session.data;
-  if (!refreshToken) return undefined;
-
-  const refreshed = await refreshAdminTokenDeduped(refreshToken, tokenProvider, user?.id);
-  if (!refreshed) return undefined;
+  const refreshed = refreshToken
+    ? await refreshAdminTokenDeduped(refreshToken, tokenProvider, user?.id)
+    : undefined;
+  if (!refreshed) {
+    await clearAdminSession(session);
+    throw new Error('OPENID_SESSION_ENDED');
+  }
 
   const now = Date.now();
   await session.update({

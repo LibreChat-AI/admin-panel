@@ -1,8 +1,11 @@
+import { createServerOnlyFn } from '@tanstack/react-start';
+import { setResponseHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
-import { ensureFreshBearer, refreshOn401 } from './refresh';
+import { clearAdminSession, ensureFreshBearer, refreshOn401 } from './refresh';
 import { getApiBaseUrl, getServerApiUrl } from './url';
-import { TERMS_NOT_ACCEPTED_CODE } from '@/constants';
+import { SESSION_ERROR_HEADER, TERMS_NOT_ACCEPTED_CODE } from '@/constants';
 import { describeApiError } from '@/utils';
+import { useAppSession } from '../session';
 
 /** Skew window: refresh proactively when the bearer is within this of expiry. */
 const PROACTIVE_REFRESH_SKEW_MS = 30_000;
@@ -19,10 +22,27 @@ const PROACTIVE_REFRESH_SKEW_MS = 30_000;
  * @throws {Error} If no session bearer is available even after a refresh
  *   attempt.
  */
-export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+export const apiFetch = createServerOnlyFn(
+  async (path: string, init?: RequestInit): Promise<Response> => {
+    try {
+      return await fetchWithSession(path, init);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message === 'OPENID_SESSION_ENDED' ||
+          error.message === 'AUTH_SESSION_CHECK_UNAVAILABLE')
+      ) {
+        setResponseHeader(SESSION_ERROR_HEADER, error.message);
+      }
+      throw error;
+    }
+  },
+);
+
+async function fetchWithSession(path: string, init?: RequestInit): Promise<Response> {
   const initialToken = await ensureFreshBearer(PROACTIVE_REFRESH_SKEW_MS);
   if (!initialToken) {
-    throw new Error('No admin session token available');
+    throw new Error('OPENID_SESSION_ENDED');
   }
 
   const url = `${getServerApiUrl()}${path}`;
@@ -41,10 +61,12 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
   }
 
   const refreshedToken = await refreshOn401();
-  if (!refreshedToken) {
-    return response;
+  const retried = await fetch(url, buildInit(refreshedToken));
+  if (retried.status === 401) {
+    await clearAdminSession(await useAppSession());
+    throw new Error('OPENID_SESSION_ENDED');
   }
-  return fetch(url, buildInit(refreshedToken));
+  return retried;
 }
 
 /**

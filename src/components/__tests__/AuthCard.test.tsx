@@ -245,6 +245,16 @@ describe('AuthCard SSO providers', () => {
     expect(emailField()).toBeVisible();
   });
 
+  it('waits for an explicit SSO sign-in after the session ends', async () => {
+    startFn.mockResolvedValue({ error: false, authUrl: '#provider' });
+    renderCard({ providers: OPENID, ssoOnly: true, autoRedirect: false });
+
+    expect(startFn).not.toHaveBeenCalled();
+    expect(screen.queryByText(localizeEn('com_auth_sso_redirecting_auto'))).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: localizeEn('com_auth_sso_sign_in') }));
+    await waitFor(() => expect(startFn).toHaveBeenCalledTimes(1));
+  });
+
   it('brings the password form back when the automatic redirect fails', async () => {
     startFn.mockResolvedValue({ error: true, code: 'sso_start_failed' });
 

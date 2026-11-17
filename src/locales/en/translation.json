@@ -1,4 +1,8 @@
 {
+  "com_auth_session_unavailable_title": "Could not check your session",
+  "com_auth_logout_failed": "Could not sign out. Please try again.",
+  "com_auth_session_ended": "Your session has ended. Sign in again.",
+  "com_auth_session_unavailable": "We could not check your session. Please retry.",
   "com_ui_read_more": "Read more",
   "com_ui_add_item": "Add {{item}}",
   "com_ui_discard": "Discard",

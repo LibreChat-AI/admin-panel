@@ -24,6 +24,7 @@ export function AuthCard({
   redirectTo = '/',
   providers = NO_SSO_PROVIDERS,
   ssoOnly = false,
+  autoRedirect = true,
 }: t.AuthCardProps) {
   const router = useRouter();
   const localize = useLocalize();
@@ -34,7 +35,8 @@ export function AuthCard({
   const [errors, setErrors] = useState<t.FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [announcement, setAnnouncement] = useState('');
-  const autoRedirectProvider = ssoOnly && providers.length === 1 ? providers[0].id : undefined;
+  const autoRedirectProvider =
+    autoRedirect && ssoOnly && providers.length === 1 ? providers[0].id : undefined;
   const [ssoStarting, setSsoStarting] = useState<t.SsoProviderId | null>(
     autoRedirectProvider ?? null,
   );

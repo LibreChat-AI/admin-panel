@@ -28,22 +28,43 @@ const DOCUMENT_TITLE_KEYS: Record<string, string> = {
 };
 
 export const Route = createFileRoute('/_app')({
-  beforeLoad: async ({ location }) => {
-    const result = await verifyAdminTokenFn();
+  beforeLoad: async ({ location, cause }) => {
+    const result = await verifyAdminTokenFn({ data: { refresh: cause === 'enter' } });
 
     if (!result.valid) {
+      let session: 'ended' | 'unavailable' | undefined;
+      if (result.error === 'AUTH_SESSION_CHECK_UNAVAILABLE') session = 'unavailable';
+      if (result.error === 'OPENID_SESSION_ENDED') session = 'ended';
       throw redirect({
         to: '/login',
-        search: { redirect: location.href },
+        search: {
+          redirect: location.href,
+          ...(session ? { session } : {}),
+        },
       });
     }
 
     return { user: result.user };
   },
-  loader: ({ context }): Promise<t.AppGateLoaderData> =>
+  loader: ({ context, location }): Promise<t.AppGateLoaderData> =>
     context.queryClient.fetchQuery(capabilitiesQueryOptions(context.user.id)).then(
       () => ({ verified: true }),
-      () => ({ verified: false }),
+      (error) => {
+        if (
+          error instanceof Error &&
+          (error.message === 'AUTH_SESSION_CHECK_UNAVAILABLE' ||
+            error.message === 'OPENID_SESSION_ENDED')
+        ) {
+          throw redirect({
+            to: '/login',
+            search: {
+              redirect: location.href,
+              session: error.message === 'OPENID_SESSION_ENDED' ? 'ended' : 'unavailable',
+            },
+          });
+        }
+        return { verified: false };
+      },
     ),
   pendingMs: 300,
   pendingComponent: AppPending,

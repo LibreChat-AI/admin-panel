@@ -15,6 +15,7 @@ export interface AuthCardProps {
   providers?: readonly SsoProviderOption[];
   /** `ADMIN_SSO_ONLY`: no password form, and straight to the provider when there is one. */
   ssoOnly?: boolean;
+  autoRedirect?: boolean;
 }
 
 /** A provider of LibreChat's admin OAuth routes the panel signs admins in through. */
@@ -77,6 +78,8 @@ export type AuthErrorCode =
   | 'unreachable'
   | 'totp_invalid'
   | 'totp_expired'
+  | 'session_ended'
+  | 'session_unavailable'
   | 'session_invalid'
   | 'verification_failed'
   | 'sso_start_failed'
@@ -146,4 +149,8 @@ export type SsoExchange = (code: string) => Promise<SsoExchangeResult>;
 
 export interface SsoErrorProps {
   code: AuthErrorCode;
+}
+
+export interface SessionErrorProps {
+  onRetry?: () => Promise<void>;
 }

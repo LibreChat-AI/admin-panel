@@ -1,5 +1,7 @@
 import type * as t from '@/types';
 
+export const SESSION_ERROR_HEADER = 'X-Admin-Session-Error';
+
 /**
  * LibreChat's code for a pre-auth request that strict tenant isolation refused
  * because it carried no tenant: the 403 body's `code` on sign-in and 2FA, and
@@ -25,6 +27,8 @@ export const AUTH_ERROR_KEYS: Readonly<Record<t.AuthErrorCode, string>> = {
   unreachable: 'com_auth_unable_connect',
   totp_invalid: 'com_auth_2fa_invalid_code',
   totp_expired: 'com_auth_2fa_expired',
+  session_ended: 'com_auth_session_ended',
+  session_unavailable: 'com_auth_session_unavailable',
   session_invalid: 'com_auth_error_session_invalid',
   verification_failed: 'com_auth_error_verification_failed',
   sso_start_failed: 'com_auth_sso_redirect_failed',
@@ -44,6 +48,8 @@ export const AUTH_ERROR_KEYS: Readonly<Record<t.AuthErrorCode, string>> = {
  */
 export const SSO_CALLBACK_ERRORS: ReadonlyMap<string, t.AuthErrorCode> = new Map([
   [TENANT_CONTEXT_REQUIRED_CODE, 'tenant_required'],
+  ['OPENID_SESSION_ENDED', 'session_ended'],
+  ['AUTH_SESSION_CHECK_UNAVAILABLE', 'session_unavailable'],
   ['auth_failed', 'sso_auth_failed'],
   ['pkce_store_failed', 'sso_pkce_failed'],
   ['pkce_retrieval_failed', 'sso_pkce_failed'],
