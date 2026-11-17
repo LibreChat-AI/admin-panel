@@ -57,6 +57,7 @@ import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
 import { ChangeReview, ChangesBar } from './review';
 import { ConfigLoadError } from './ConfigLoadError';
+import { SaveSessionError } from './SaveSessionError';
 import { ContentToolbar } from './ContentToolbar';
 import { availableScopesOptions } from '@/server';
 import { SystemCapabilities } from '@/constants';
@@ -303,6 +304,7 @@ export function ConfigPage({
     openReview: save.openReview,
     reviewOpen: save.confirmSaveOpen,
     saving: save.saving,
+    paused: !!save.sessionResult,
     describeScope,
   });
   const backToBase = useCallback(() => selectScope({ type: 'BASE' }), [selectScope]);
@@ -525,6 +527,8 @@ export function ConfigPage({
     if (isDirty) return localize('com_config_reset_base_dirty');
     return undefined;
   })();
+
+  if (save.sessionResult) return <SaveSessionError result={save.sessionResult} />;
 
   return (
     <ConfigErrorsProvider value={save.fieldErrors}>

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { sessionFetch } from './session';
+import { holdSessionRedirects, sessionFetch } from './session';
 
 const fetchMock = vi.fn<typeof fetch>();
 const assign = vi.fn();
@@ -17,6 +17,24 @@ afterEach(() => {
 });
 
 describe('sessionFetch', () => {
+  it.each(['OPENID_SESSION_ENDED', 'AUTH_SESSION_CHECK_UNAVAILABLE'])(
+    'keeps the save outcome visible during %s and restores redirects after recovery unmounts',
+    async (code) => {
+      fetchMock.mockResolvedValue(
+        new Response('{}', { headers: { 'X-Admin-Session-Error': code } }),
+      );
+      const release = holdSessionRedirects();
+      try {
+        await expect(sessionFetch('/_serverFn/background')).rejects.toThrow(code);
+        expect(assign).not.toHaveBeenCalled();
+      } finally {
+        release();
+      }
+      await expect(sessionFetch('/_serverFn/background')).rejects.toThrow(code);
+      expect(assign).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it.each([
     ['OPENID_SESSION_ENDED', 'ended'],
     ['AUTH_SESSION_CHECK_UNAVAILABLE', 'unavailable'],

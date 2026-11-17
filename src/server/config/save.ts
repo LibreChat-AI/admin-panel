@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createServerFn } from '@tanstack/react-start';
 import { PrincipalType } from 'librechat-data-provider';
 import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
+import { getResponseHeader, removeResponseHeader } from '@tanstack/react-start/server';
 import type * as t from '@/types';
 import {
   toBatchOps,
@@ -40,6 +41,7 @@ import {
   VERSION_CONFLICT_CODE,
   TERMS_NOT_ACCEPTED_CODE,
   TERMS_NOT_ACCEPTED_ISSUE,
+  SESSION_ERROR_HEADER,
 } from '@/constants';
 import {
   requireCapability,
@@ -1011,13 +1013,22 @@ export const applyConfigChangesFn = createServerFn({ method: 'POST' })
       expectedRevision: z.string().min(1).max(200).optional(),
     }),
   )
-  .handler(({ data }): Promise<t.ApplyConfigChangesResult> =>
-    applyConfigChanges(
+  .handler(async ({ data }): Promise<t.ApplyConfigChangesResult> => {
+    const result = await applyConfigChanges(
       data.target as t.WriteTargetRef,
       data.ops as t.ConfigChange[],
       data.expectedRevision,
-    ),
-  );
+    );
+    const sessionError = getResponseHeader(SESSION_ERROR_HEADER);
+    if (
+      sessionError !== 'OPENID_SESSION_ENDED' &&
+      sessionError !== 'AUTH_SESSION_CHECK_UNAVAILABLE'
+    ) {
+      return result;
+    }
+    removeResponseHeader(SESSION_ERROR_HEADER);
+    return { ...result, sessionError };
+  });
 
 /** Deletes the entire base config DB override, reverting every value back to
  *  what librechat.yaml defines. Removes the `__base__` config document outright;

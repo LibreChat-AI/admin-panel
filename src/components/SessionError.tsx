@@ -5,12 +5,14 @@ import { useDocumentTitle, useLocalize } from '@/hooks';
 import { BusyButton } from '@/components/shared';
 import { adminLogoutFn } from '@/server';
 
-export function SessionError({ onRetry }: t.SessionErrorProps) {
+export function SessionError({ onRetry, ended, embedded, children }: t.SessionErrorProps) {
   const router = useRouter();
   const localize = useLocalize();
   const [busy, setBusy] = useState<'retry' | 'logout' | null>(null);
   const [logoutFailed, setLogoutFailed] = useState(false);
-  useDocumentTitle(localize('com_auth_session_unavailable_title'));
+  const title = localize(ended ? 'com_auth_sign_in' : 'com_auth_session_unavailable_title');
+  useDocumentTitle(title);
+  const Region = embedded ? 'section' : 'main';
 
   const retry = async () => {
     setBusy('retry');
@@ -47,14 +49,16 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
+    <Region
+      className="flex min-h-full flex-1 items-center justify-center p-6"
+      style={embedded ? undefined : { minHeight: '100vh' }}
+    >
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
-        <h1 className="text-xl font-semibold text-(--cui-color-title-default)">
-          {localize('com_auth_session_unavailable_title')}
-        </h1>
+        <h1 className="text-xl font-semibold text-(--cui-color-title-default)">{title}</h1>
         <p role="alert" className="text-sm text-(--cui-color-text-muted)">
-          {localize('com_auth_session_unavailable')}
+          {localize(ended ? 'com_auth_session_ended' : 'com_auth_session_unavailable')}
         </p>
+        {children}
         {logoutFailed && (
           <p role="alert" className="text-sm text-(--cui-color-text-danger)">
             {localize('com_auth_logout_failed')}
@@ -63,7 +67,7 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
         <div className="flex gap-3">
           <BusyButton
             type="primary"
-            label={localize('com_ui_retry')}
+            label={localize(ended ? 'com_auth_sign_in' : 'com_ui_retry')}
             htmlType="button"
             busy={busy === 'retry'}
             disabled={busy === 'logout'}
@@ -82,6 +86,6 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
           {busy && localize(busy === 'logout' ? 'com_ui_signing_out' : 'com_ui_loading')}
         </p>
       </div>
-    </main>
+    </Region>
   );
 }

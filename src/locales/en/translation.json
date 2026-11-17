@@ -1,5 +1,10 @@
 {
   "com_auth_session_unavailable_title": "Could not check your session",
+  "com_config_session_saved_one": "{{count}} change was saved.",
+  "com_config_session_saved_other": "{{count}} changes were saved.",
+  "com_config_session_not_saved": "No changes were saved.",
+  "com_config_session_skipped_one": "{{count}} change was skipped or did not fully take effect.",
+  "com_config_session_skipped_other": "{{count}} changes were skipped or did not fully take effect.",
   "com_auth_logout_failed": "Could not sign out. Please try again.",
   "com_auth_session_ended": "Your session has ended. Sign in again.",
   "com_auth_session_unavailable": "We could not check your session. Please retry.",

@@ -30,14 +30,17 @@ export function useNavigationGuard({
   openReview,
   reviewOpen,
   saving,
+  paused,
   describeScope,
 }: t.NavigationGuardOptions): t.NavigationGuardState {
   const shouldBlockFn = useCallback(
     ({ current, next }: { current: BlockerLocation; next: BlockerLocation }) =>
-      isDirty && (current.pathname !== next.pathname || scopeOf(current) !== scopeOf(next)),
-    [isDirty],
+      !paused &&
+      isDirty &&
+      (current.pathname !== next.pathname || scopeOf(current) !== scopeOf(next)),
+    [isDirty, paused],
   );
-  const enableBeforeUnload = useCallback(() => isDirty, [isDirty]);
+  const enableBeforeUnload = useCallback(() => isDirty && !paused, [isDirty, paused]);
 
   const blocker = useBlocker({ shouldBlockFn, enableBeforeUnload, withResolver: true });
   const [awaitingSave, setAwaitingSave] = useState(false);
@@ -46,6 +49,11 @@ export function useNavigationGuard({
   const { proceed, reset } = blocker;
 
   useEffect(() => {
+    if (paused) {
+      setAwaitingSave(false);
+      reset?.();
+      return;
+    }
     if (!awaitingSave || !blocked) return;
     if (!isDirty) {
       setAwaitingSave(false);
@@ -56,7 +64,7 @@ export function useNavigationGuard({
       setAwaitingSave(false);
       reset?.();
     }
-  }, [awaitingSave, blocked, isDirty, reviewOpen, saving, proceed, reset]);
+  }, [awaitingSave, blocked, isDirty, reviewOpen, saving, paused, proceed, reset]);
 
   const intent: t.NavigationIntent = (() => {
     if (!blocked || !blocker.next) return { kind: 'leave' };

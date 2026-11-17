@@ -14,7 +14,7 @@ import { BUNDLED_CONFIG_CONTRACT } from '@/constants';
 import { applyConfigChangesFn } from '@/server';
 import { useChangeReview, useBaseOverrides } from './review';
 import { useConfigEdits } from './edits';
-import { flattenObject, createBaseLayers } from '@/utils';
+import { flattenObject, createBaseLayers, sessionFetch } from '@/utils';
 import { useConfigSave } from './save';
 
 vi.mock('@/server', () => ({ applyConfigChangesFn: vi.fn(), resetBaseConfigFn: vi.fn() }));
@@ -494,6 +494,120 @@ describe('saving against the loaded revision (changesBatch)', () => {
     );
     invalidate.mockRestore();
   });
+
+  it.each([false, true])(
+    'retains the save outcome without refetching when session recovery is needed (partial: %s)',
+    async (partiallyWritten) => {
+      const outcome: t.ApplyConfigChangesResult = {
+        ...saved,
+        sessionError: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+        partiallyWritten,
+        failed: partiallyWritten
+          ? [
+              {
+                path: 'balance.startBalance',
+                code: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+                message: 'Retry',
+              },
+            ]
+          : [],
+      };
+      applyMock.mockResolvedValue(outcome);
+      const invalidate = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+      try {
+        const { result } = renderPage(yaml, {}, yaml, batch, 'base:4');
+        act(() => result.current.edits.handleFieldChange('balance.startBalance', 5));
+        act(() => result.current.save.openReview());
+        invalidate.mockClear();
+        await act(() => result.current.review.confirm());
+        expect(result.current.save.sessionResult).toEqual(outcome);
+        expect(result.current.save.saving).toBe(false);
+        expect(result.current.review.open).toBe(false);
+        expect(invalidate).not.toHaveBeenCalled();
+        expect(applyMock).toHaveBeenCalledTimes(1);
+      } finally {
+        invalidate.mockRestore();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'retains an imported save outcome before returning or throwing (partial: %s)',
+    async (partiallyWritten) => {
+      const outcome: t.ApplyConfigChangesResult = {
+        ...saved,
+        sessionError: 'OPENID_SESSION_ENDED',
+        partiallyWritten,
+        failed: partiallyWritten
+          ? [{ path: 'balance.startBalance', code: 'OPENID_SESSION_ENDED', message: 'Ended' }]
+          : [],
+      };
+      applyMock.mockResolvedValue(outcome);
+      const invalidate = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+      try {
+        const { result } = renderPage();
+        await act(async () => {
+          const write = result.current.save.writeChanges(
+            { type: 'base' },
+            [{ fieldPath: 'balance.startBalance', value: 5 }],
+            [],
+          );
+          if (partiallyWritten) await expect(write).rejects.toThrow('Save failed partway');
+          else await expect(write).resolves.toEqual({ skipped: [], reported: [] });
+        });
+        expect(result.current.save.sessionResult).toEqual(outcome);
+        expect(invalidate).not.toHaveBeenCalled();
+        expect(applyMock).toHaveBeenCalledTimes(1);
+      } finally {
+        invalidate.mockRestore();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    'releases session redirects when the save resolves before unmount: %s',
+    async (beforeUnmount) => {
+      let complete: (result: t.ApplyConfigChangesResult) => void = () => undefined;
+      applyMock.mockReturnValue(
+        new Promise<t.ApplyConfigChangesResult>((resolve) => {
+          complete = resolve;
+        }),
+      );
+      const { result, unmount } = renderPage();
+      const write = result.current.save.writeChanges(
+        { type: 'base' },
+        [{ fieldPath: 'balance.startBalance', value: 5 }],
+        [],
+      );
+      if (!beforeUnmount) unmount();
+      await act(async () => {
+        complete({ ...saved, sessionError: 'AUTH_SESSION_CHECK_UNAVAILABLE' });
+        await write;
+      });
+      if (beforeUnmount) unmount();
+
+      const assign = vi.fn();
+      vi.stubGlobal('window', {
+        location: { pathname: '/configuration', search: '', hash: '', assign },
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response('{}', {
+            headers: { 'X-Admin-Session-Error': 'AUTH_SESSION_CHECK_UNAVAILABLE' },
+          }),
+        ),
+      );
+      try {
+        await expect(sessionFetch('/_serverFn/background')).rejects.toThrow(
+          'AUTH_SESSION_CHECK_UNAVAILABLE',
+        );
+        expect(assign).toHaveBeenCalledWith('/login?session=unavailable&redirect=%2Fconfiguration');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it('names a target without a document as absent', async () => {
     applyMock.mockResolvedValue(saved);

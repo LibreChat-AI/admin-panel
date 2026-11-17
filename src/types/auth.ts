@@ -1,4 +1,5 @@
 import type { TStartupConfig } from 'librechat-data-provider';
+import type { ReactNode } from 'react';
 import type { SerializableUser } from './server';
 import type { ApiErrorBody } from './changes';
 
@@ -153,4 +154,7 @@ export interface SsoErrorProps {
 
 export interface SessionErrorProps {
   onRetry?: () => Promise<void>;
+  ended?: boolean;
+  embedded?: boolean;
+  children?: ReactNode;
 }

@@ -1,6 +1,16 @@
 import { SESSION_ERROR_HEADER } from '@/constants';
 import { withBasePath } from './navigation';
 
+let redirectHolds = 0;
+
+/** Keep a returned write outcome visible while its caller shows session recovery. */
+export function holdSessionRedirects(): () => void {
+  redirectHolds++;
+  return () => {
+    redirectHolds--;
+  };
+}
+
 /** A failed renewal reaches the login screen even when a server function catches the error. */
 export async function sessionFetch(
   input: RequestInfo | URL,
@@ -11,6 +21,7 @@ export async function sessionFetch(
   if (code !== 'OPENID_SESSION_ENDED' && code !== 'AUTH_SESSION_CHECK_UNAVAILABLE') {
     return response;
   }
+  if (redirectHolds > 0) throw new Error(code);
   const basePath = (import.meta.env.VITE_BASE_PATH ?? '').replace(/\/$/, '');
   const path = window.location.pathname;
   let pathname = path;

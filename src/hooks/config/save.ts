@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type * as t from '@/types';
 import {
   errorText,
@@ -16,6 +16,7 @@ import {
   carriedEntries,
   describeIssueCode,
   restateChanges,
+  holdSessionRedirects,
   isRestateWarning,
   findEntryKeyMoves,
   findRemovedSecrets,
@@ -152,6 +153,17 @@ export function useConfigSave({
   const [sessionExpired, setSessionExpired] = useState(false);
   const [termsUrl, setTermsUrl] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  const [sessionResult, setSessionResult] = useState<t.ApplyConfigChangesResult | null>(null);
+  const mounted = useRef(false);
+  const releaseSessionRedirects = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      releaseSessionRedirects.current?.();
+      releaseSessionRedirects.current = undefined;
+    };
+  }, []);
 
   useEffect(() => setServerIssues([]), [editedValues, visibilityEdits]);
 
@@ -228,6 +240,13 @@ export function useConfigSave({
         const result = await applyConfigChangesFn({
           data: { target: toTargetRef(target), ops, expectedRevision: revision },
         });
+        if (result.sessionError) {
+          if (mounted.current) {
+            releaseSessionRedirects.current ??= holdSessionRedirects();
+            setSessionResult(result);
+          }
+          return result;
+        }
         await invalidateTarget(target);
         return result;
       } catch (err) {
@@ -537,6 +556,11 @@ export function useConfigSave({
       setConflict(false);
       try {
         const result = await applyChanges(editTarget, ops, revision);
+        if (result.sessionError) {
+          setSaving(false);
+          setConfirmSaveOpen(false);
+          return;
+        }
         if (result.conflict) {
           setSaving(false);
           setConflict(true);
@@ -649,6 +673,7 @@ export function useConfigSave({
     confirmSaveOpen,
     saving,
     sessionExpired,
+    sessionResult,
     termsUrl,
     savePlan,
     unsafeKeys,

@@ -85,6 +85,8 @@ export type NavigationIntent = { kind: 'leave' } | { kind: 'scope'; name: string
 
 /** Options of `useNavigationGuard` (WS5: SH-6). */
 export interface NavigationGuardOptions {
+  /** Session recovery owns navigation until the write outcome has been shown. */
+  paused?: boolean;
   isDirty: boolean;
   discardEdits: () => void;
   /** Opens the change review ("Save & continue"). */

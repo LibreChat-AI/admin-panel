@@ -310,6 +310,8 @@ export interface ConfigSaveOptions {
 
 /** The save plan, the review dialog state and the write path shared with import (WS1). */
 export interface ConfigSaveState {
+  /** The completed or partial write to show alongside session recovery. */
+  sessionResult: ApplyConfigChangesResult | null;
   confirmSaveOpen: boolean;
   saving: boolean;
   /** The last save failed because the admin session ended; signing in again and saving keeps the edits. */
