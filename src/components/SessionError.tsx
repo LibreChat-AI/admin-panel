@@ -47,16 +47,16 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
   };
 
   return (
-    <div role="alert" className="flex min-h-screen items-center justify-center p-6">
+    <main className="flex min-h-screen items-center justify-center p-6">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
-        <h2 className="text-xl font-semibold text-(--cui-color-title-default)">
+        <h1 className="text-xl font-semibold text-(--cui-color-title-default)">
           {localize('com_auth_session_unavailable_title')}
-        </h2>
-        <p className="text-sm text-(--cui-color-text-muted)">
+        </h1>
+        <p role="alert" className="text-sm text-(--cui-color-text-muted)">
           {localize('com_auth_session_unavailable')}
         </p>
         {logoutFailed && (
-          <p className="text-sm text-(--cui-color-text-danger)">
+          <p role="alert" className="text-sm text-(--cui-color-text-danger)">
             {localize('com_auth_logout_failed')}
           </p>
         )}
@@ -82,6 +82,6 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
           {busy && localize(busy === 'logout' ? 'com_ui_signing_out' : 'com_ui_loading')}
         </p>
       </div>
-    </div>
+    </main>
   );
 }

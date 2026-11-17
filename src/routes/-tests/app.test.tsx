@@ -169,7 +169,8 @@ describe('/_app admin gate', () => {
       expect(screen.queryByText(localizeEn('com_perm_unavailable_title'))).toBeNull();
       expect(router.state.location.pathname).toBe('/login');
       expect(router.state.location.search).toMatchObject({ session: 'unavailable', redirect: '/' });
-      expectNoChrome(chrome);
+      expect(chrome.mounted).toEqual([screen.getByRole('main')]);
+      expect(document.querySelector('aside, header')).toBeNull();
     },
   );
 

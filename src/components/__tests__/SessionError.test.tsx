@@ -18,6 +18,24 @@ beforeEach(() => {
 });
 
 describe('SessionError', () => {
+  it('provides a page landmark and heading while limiting the alert to the message', () => {
+    render(<SessionError />);
+
+    const main = screen.getByRole('main');
+    expect(main).toContainElement(
+      screen.getByRole('heading', {
+        level: 1,
+        name: localizeEn('com_auth_session_unavailable_title'),
+      }),
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(localizeEn('com_auth_session_unavailable'));
+    expect(screen.getByRole('alert')).not.toContainElement(
+      screen.getByRole('button', {
+        name: localizeEn('com_ui_retry'),
+      }),
+    );
+  });
+
   it.each(['retry', 'logout'] as const)(
     'keeps focus and blocks other actions while %s is running',
     async (action) => {
