@@ -29,22 +29,28 @@ export const TERMS_NOT_ACCEPTED_ISSUE = 'TERMS_NOT_ACCEPTED';
 const PRE_AUTH_YAML_SECTIONS: readonly string[] = ['turnstile'];
 
 /**
- * Sections and fields LibreChat reads only from librechat.yaml although its
- * `DEPLOYMENT_ONLY_CONFIG_PATHS` (data-provider 0.8.530) doesn't list them,
- * so the panel adds them on every server: the startup config's client limits
- * and real user monitoring (and the RUM proxy) read the raw file
- * (`appConfig.config`), the conversation list's limits and skill deletion's
- * cleanup concurrency `getAppConfig({ baseOnly: true })`, and the password
- * hashing pool and the HTML shell's color-mode handoff are set once at
- * startup. Drop an entry once LibreChat reads it from the merged config.
+ * Sections and fields LibreChat reads only from librechat.yaml. Its
+ * `DEPLOYMENT_ONLY_CONFIG_PATHS` lists them since LibreChat#17820
+ * (data-provider 0.8.531), but a server that reports its rules from before
+ * that reads them the same way without listing them, so the panel adds them
+ * on every server; a newer server reports the same paths. The startup
+ * config's client limits and real user monitoring (and the RUM proxy) read
+ * the raw file (`appConfig.config`); the conversation list's limits, skill
+ * deletion's cleanup concurrency and the agent management API's sign-in read
+ * `getAppConfig({ baseOnly: true })`; the password hashing pool and the HTML
+ * shell's color-mode handoff are set once at startup. `telemetry` stands for
+ * the whole section, whose only fields (`stackTraceLimit`, `rum`) LibreChat
+ * lists one by one. Drop an entry once LibreChat reads it from the merged
+ * config.
  */
-const RAW_YAML_PATHS: Readonly<Record<string, t.DeploymentOnlyReason>> = {
+export const RAW_YAML_PATHS: Readonly<Record<string, t.DeploymentOnlyReason>> = {
   clientLimits: 'operator',
   telemetry: 'operator',
   conversationList: 'operator',
   passwordHashing: 'startup',
   'fileConfig.skills.deletionCleanupConcurrency': 'operator',
   'interface.colorModeFromUrl': 'startup',
+  'endpoints.agents.managementApi': 'operator',
 };
 
 /** `paths` with the ones LibreChat reads from librechat.yaml without listing them (`RAW_YAML_PATHS`). */

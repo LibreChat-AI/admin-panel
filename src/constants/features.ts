@@ -203,7 +203,14 @@ export const INTERFACE_GROUPS: readonly t.FeatureGroupDef[] = [
     key: 'appearance',
     labelKey: 'com_config_features_group_appearance',
     descriptionKey: 'com_config_features_group_appearance_desc',
-    fields: ['theme', 'colorModeFromUrl', 'landingHeading', 'landingFooter', 'mascot'],
+    fields: [
+      'theme',
+      'colorModeFromUrl',
+      'landingHeading',
+      'landingFooter',
+      'messageAuthor',
+      'mascot',
+    ],
   },
   {
     key: 'onboarding',

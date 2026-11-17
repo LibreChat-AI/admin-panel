@@ -170,6 +170,12 @@ export const SECTION_META: Record<string, t.SectionMeta> = {
     tab: 'files',
     order: 60,
   },
+  spreadsheetParsing: {
+    titleKey: 'com_config_section_spreadsheetParsing',
+    descriptionKey: 'com_config_section_spreadsheetParsing_desc',
+    tab: 'files',
+    order: 70,
+  },
 
   endpoints: {
     titleKey: 'com_config_section_endpoints',
@@ -335,6 +341,18 @@ export const SECTION_META: Record<string, t.SectionMeta> = {
     descriptionKey: 'com_config_section_telemetry_desc',
     tab: 'system',
     order: 180,
+  },
+  configCache: {
+    titleKey: 'com_config_section_configCache',
+    descriptionKey: 'com_config_section_configCache_desc',
+    tab: 'system',
+    order: 190,
+  },
+  persistence: {
+    titleKey: 'com_config_section_persistence',
+    descriptionKey: 'com_config_section_persistence_desc',
+    tab: 'system',
+    order: 200,
   },
 };
 

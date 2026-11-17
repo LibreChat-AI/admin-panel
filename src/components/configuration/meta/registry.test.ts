@@ -65,6 +65,9 @@ describe('getFieldMeta / labelForPath', () => {
     expect(getFieldMeta('version')).toBeUndefined();
     expect(getFieldMeta('endpoints.openAI.titlePrompt')).toMatchObject({ multiline: true });
     expect(getFieldMeta('webSearch.jinaApiKey')).toEqual({ secret: true });
+    expect(getFieldMeta('endpoints.agents.sdkRuntimes.worker.remote.secret')).toEqual({
+      secret: true,
+    });
     expect(getFieldMeta('fileStrategy')).toMatchObject({ confirmChange: true });
   });
 

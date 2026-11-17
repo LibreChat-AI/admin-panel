@@ -130,7 +130,7 @@ const ASSISTANTS_LAYOUT: t.ProviderGroupDef[] = [
 export const PROVIDER_LAYOUTS: Readonly<Record<string, t.ProviderGroupDef[]>> = {
   [GLOBAL_PROVIDER_KEY]: STANDARD_TAIL,
   openAI: [MODELS, ...STANDARD_TAIL, unused(['baseURL'])],
-  google: [MODELS, ...STANDARD_TAIL, unused(['baseURL'])],
+  google: [{ ...MODELS, fields: ['models', 'tokenConfig'] }, ...STANDARD_TAIL, unused(['baseURL'])],
   anthropic: [
     {
       key: 'models',
@@ -211,7 +211,13 @@ export const PROVIDER_LAYOUTS: Readonly<Record<string, t.ProviderGroupDef[]>> = 
       key: 'apis',
       labelKey: 'com_config_providers_group_apis',
       descriptionKey: 'com_config_providers_group_apis_desc',
-      fields: ['managementApi', 'remoteApi'],
+      fields: ['managementApi', 'remoteApi', 'sdkRuntimes'],
+    },
+    {
+      key: 'channels',
+      labelKey: 'com_config_providers_group_channels',
+      descriptionKey: 'com_config_providers_group_channels_desc',
+      fields: ['channels'],
     },
     {
       key: 'limits',
@@ -307,6 +313,35 @@ function capabilityMeta(kind: 'cap' | 'acap', values: string[]): t.FieldMeta {
   };
 }
 
+/** The Slack channel settings: setup and transport first, then links and runs, artifacts and storage. */
+const CHANNEL_FIELDS = [
+  'enabled',
+  'transport',
+  'gatewayUrl',
+  'nativeSessions',
+  'lifecycleReactions',
+  'signatureToleranceSeconds',
+  'socketReconnectDelayMs',
+  'slackApp',
+  'maxBotManagers',
+  'ticketLifetimeMs',
+  'linkLifetimeMs',
+  'leaseMs',
+  'responseCredentialLifetimeMs',
+  'artifactMaxBytes',
+  'artifactMaxFiles',
+  'artifactReadTimeoutMs',
+  'artifactAnswerFileThresholdBytes',
+  'maxDeliveryParts',
+  'claimBatchSize',
+  'erasureBatchSize',
+  'maxMetadataPageSize',
+  'projectionYieldMs',
+  'maxPriorSummaryRows',
+  'cleanup',
+  'feedback',
+];
+
 /** `*Model` fields of a provider suggest that provider's models (AP-9). */
 const MODEL_REFERENCE_FIELDS = [
   'titleModel',
@@ -349,6 +384,7 @@ const DESCRIPTIONS: Readonly<Record<string, string>> = {
   'endpoints.azureAssistants.models': 'com_config_providers_desc_unused_models',
   'endpoints.anthropic.models': 'com_config_providers_desc_models',
   'endpoints.anthropic.vertex': 'com_config_providers_desc_vertex',
+  'endpoints.google.tokenConfig': 'com_config_providers_desc_google_tokenConfig',
   'endpoints.bedrock.models': 'com_config_providers_desc_models',
   'endpoints.bedrock.availableRegions': 'com_config_providers_desc_availableRegions',
   'endpoints.bedrock.guardrailConfig.guardrailIdentifier':
@@ -468,6 +504,16 @@ const STATIC_META: t.FieldMetaRegistry = {
   },
   'endpoints.agents.checkpointer.ttl': { unit: 's' },
   'endpoints.agents.fileSharing.maxPrivateBytes': { width: 'M' },
+  'endpoints.agents.sdkRuntimes.{}.remote.secret': { secret: true },
+  'endpoints.agents.channels': { order: CHANNEL_FIELDS },
+  'endpoints.agents.channels.slackApp': {
+    order: ['enabled', 'flowLifetimeMs', 'requestTimeoutMs', 'maxResponseBytes', 'gateway'],
+  },
+  'endpoints.agents.channels.feedback': { labelKey: 'com_config_label_channels_feedback' },
+  'endpoints.agents.channels.transport': {
+    enumLabels: { socket_mode: 'com_config_enum_socket_mode' },
+  },
+  'endpoints.google.tokenConfig': { labelKey: 'com_config_ce_section_pricing' },
 };
 
 /**

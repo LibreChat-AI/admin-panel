@@ -83,6 +83,18 @@ describe('InterfaceRenderer', () => {
     expect(trace).toHaveTextContent(/1 of 7 set/);
   });
 
+  it("names the landing footer's places and the response author's choices", () => {
+    renderSection(InterfaceRenderer, { section: 'interface' });
+    const optionsOf = (id: string) =>
+      Array.from(document.querySelectorAll(`#${id} option`)).map((option) => option.textContent);
+    expect(optionsOf('interface-landingFooter')).toEqual(
+      expect.arrayContaining(['Off', 'At the bottom of the page', 'Under the composer']),
+    );
+    expect(optionsOf('interface-messageAuthor')).toEqual(
+      expect.arrayContaining(['Always', 'When the agent differs']),
+    );
+  });
+
   it('asks before requiring acceptance of the terms, since it also gates the admin', () => {
     const { onChange } = renderSection(InterfaceRenderer, { section: 'interface' });
     const control = document.getElementById('interface-termsOfService-modalAcceptance');

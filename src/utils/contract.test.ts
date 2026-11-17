@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import { configSchema, DEPLOYMENT_ONLY_CONFIG_PATHS } from 'librechat-data-provider';
 import type * as t from '@/types';
 import {
+  RAW_YAML_PATHS,
   getWriteRules,
   resolveWriteRules,
   getReadOnlyReason,
@@ -18,6 +20,7 @@ import {
   READ_ONLY_CONFIG_SECTIONS,
 } from '@/constants';
 import { resolveConfigContract, foldsEndpointReferences } from './contract';
+import { extractSchemaTree, flattenTree } from '@/server/config';
 import { createServerContract } from '@/test/fixtures';
 
 describe('resolveConfigContract', () => {
@@ -139,6 +142,11 @@ describe('BUNDLED_CONFIG_RULES', () => {
   });
 });
 
+/** `path` equals `prefix` or lies below it. */
+function isPathUnder(path: string, prefix: string): boolean {
+  return path === prefix || path.startsWith(`${prefix}.`);
+}
+
 /** `rules.deploymentOnlyPaths` as LibreChat with the write report publishes it (abridged). */
 const DEPLOYMENT_ONLY: t.ConfigRules['deploymentOnlyPaths'] = {
   rateLimits: 'operator',
@@ -224,9 +232,32 @@ describe('write rules', () => {
       expect(isYamlManagedPath('fileConfig.skills.importCleanupConcurrency', rules)).toBe(false);
       expect(isStartupOnlyPath('interface.colorModeFromUrl', rules)).toBe(true);
       expect(isYamlManagedPath('interface.landingFooter', rules)).toBe(false);
+      expect(isYamlManagedPath('endpoints.agents.managementApi.auth.oidc.enabled', rules)).toBe(
+        true,
+      );
+      expect(isStartupOnlyPath('endpoints.agents.managementApi', rules)).toBe(false);
+      expect(isYamlManagedPath('endpoints.agents.remoteApi.auth', rules)).toBe(false);
     }
     expect(isYamlManagedPath('telemetry.stackTraceLimit', server)).toBe(true);
     expect(getReadOnlyReason('skillSync.github.enabled', server)).toBeUndefined();
+  });
+
+  it("adds only settings LibreChat's own list holds, a whole section only when it lists all of it", () => {
+    const listed = Object.entries(DEPLOYMENT_ONLY_CONFIG_PATHS);
+    const leaves = flattenTree(extractSchemaTree(configSchema as t.ZodSchemaLike))
+      .filter((field) => !field.children?.length)
+      .map((field) => field.path);
+    const unlisted = Object.entries(RAW_YAML_PATHS).flatMap(([raw, reason]) =>
+      leaves
+        .filter((leaf) => isPathUnder(leaf, raw))
+        .filter(
+          (leaf) =>
+            !listed.some(
+              ([path, listedReason]) => isPathUnder(leaf, path) && listedReason === reason,
+            ),
+        ),
+    );
+    expect(unlisted).toEqual([]);
   });
 
   it('lets Base set the social sign-in buttons once Base overrides apply before sign-in', () => {
