@@ -1,19 +1,19 @@
 import { useState } from 'react';
-import { Button } from '@clickhouse/click-ui';
 import { useRouter } from '@tanstack/react-router';
 import type * as t from '@/types';
 import { useDocumentTitle, useLocalize } from '@/hooks';
+import { BusyButton } from '@/components/shared';
 import { adminLogoutFn } from '@/server';
 
 export function SessionError({ onRetry }: t.SessionErrorProps) {
   const router = useRouter();
   const localize = useLocalize();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'retry' | 'logout' | null>(null);
   const [logoutFailed, setLogoutFailed] = useState(false);
   useDocumentTitle(localize('com_auth_session_unavailable_title'));
 
   const retry = async () => {
-    setBusy(true);
+    setBusy('retry');
     setLogoutFailed(false);
     try {
       if (onRetry) await onRetry();
@@ -21,12 +21,12 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
     } catch {
       return;
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
   const logout = async () => {
-    setBusy(true);
+    setBusy('logout');
     setLogoutFailed(false);
     try {
       const result = await adminLogoutFn();
@@ -42,7 +42,7 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
     } catch {
       setLogoutFailed(true);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -61,21 +61,26 @@ export function SessionError({ onRetry }: t.SessionErrorProps) {
           </p>
         )}
         <div className="flex gap-3">
-          <Button
+          <BusyButton
             type="primary"
             label={localize('com_ui_retry')}
             htmlType="button"
-            disabled={busy}
+            busy={busy === 'retry'}
+            disabled={busy === 'logout'}
             onClick={retry}
           />
-          <Button
+          <BusyButton
             type="secondary"
             label={localize('com_ui_sign_out')}
             htmlType="button"
-            disabled={busy}
+            busy={busy === 'logout'}
+            disabled={busy === 'retry'}
             onClick={logout}
           />
         </div>
+        <p role="status" className="sr-only">
+          {busy && localize(busy === 'logout' ? 'com_ui_signing_out' : 'com_ui_loading')}
+        </p>
       </div>
     </div>
   );

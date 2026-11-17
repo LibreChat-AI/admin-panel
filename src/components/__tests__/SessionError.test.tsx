@@ -1,5 +1,6 @@
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { adminLogoutFn } from '@/server';
 import { localizeEn } from '@/test/coverage';
 import { SessionError } from '../SessionError';
@@ -17,6 +18,48 @@ beforeEach(() => {
 });
 
 describe('SessionError', () => {
+  it.each(['retry', 'logout'] as const)(
+    'keeps focus and blocks other actions while %s is running',
+    async (action) => {
+      const user = userEvent.setup();
+      let fail: (error: Error) => void = () => undefined;
+      const pending = new Promise<never>((_, reject) => {
+        fail = reject;
+      });
+      const retry = vi.fn(() => pending);
+      vi.mocked(adminLogoutFn).mockReturnValue(pending);
+      render(<SessionError onRetry={retry} />);
+      const retryButton = screen.getByRole('button', { name: localizeEn('com_ui_retry') });
+      const logoutButton = screen.getByRole('button', { name: localizeEn('com_ui_sign_out') });
+      const active = action === 'retry' ? retryButton : logoutButton;
+      const other = action === 'retry' ? logoutButton : retryButton;
+
+      await user.click(active);
+
+      expect(active).toHaveFocus();
+      expect(active).toBeEnabled();
+      expect(active).toHaveAttribute('aria-busy', 'true');
+      expect(active).toHaveAttribute('aria-disabled', 'true');
+      expect(other).toBeDisabled();
+      expect(other).not.toHaveAttribute('aria-busy');
+      expect(screen.getByRole('status')).toHaveTextContent(
+        localizeEn(action === 'retry' ? 'com_ui_loading' : 'com_ui_signing_out'),
+      );
+      await user.click(active);
+      fireEvent.click(other);
+      expect(retry).toHaveBeenCalledTimes(action === 'retry' ? 1 : 0);
+      expect(adminLogoutFn).toHaveBeenCalledTimes(action === 'logout' ? 1 : 0);
+
+      await act(async () => fail(new Error('Temporary failure')));
+
+      expect(active).toHaveFocus();
+      expect(active).not.toHaveAttribute('aria-busy');
+      expect(active).not.toHaveAttribute('aria-disabled');
+      expect(other).toBeEnabled();
+      expect(screen.getByRole('status')).toBeEmptyDOMElement();
+    },
+  );
+
   it('retries the session check without signing out', async () => {
     const retry = vi.fn().mockResolvedValue(undefined);
     render(<SessionError onRetry={retry} />);
