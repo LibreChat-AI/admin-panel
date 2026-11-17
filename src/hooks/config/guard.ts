@@ -35,12 +35,10 @@ export function useNavigationGuard({
 }: t.NavigationGuardOptions): t.NavigationGuardState {
   const shouldBlockFn = useCallback(
     ({ current, next }: { current: BlockerLocation; next: BlockerLocation }) =>
-      !paused &&
-      isDirty &&
-      (current.pathname !== next.pathname || scopeOf(current) !== scopeOf(next)),
-    [isDirty, paused],
+      isDirty && (current.pathname !== next.pathname || scopeOf(current) !== scopeOf(next)),
+    [isDirty],
   );
-  const enableBeforeUnload = useCallback(() => isDirty && !paused, [isDirty, paused]);
+  const enableBeforeUnload = useCallback(() => isDirty, [isDirty]);
 
   const blocker = useBlocker({ shouldBlockFn, enableBeforeUnload, withResolver: true });
   const [awaitingSave, setAwaitingSave] = useState(false);
@@ -49,7 +47,7 @@ export function useNavigationGuard({
   const { proceed, reset } = blocker;
 
   useEffect(() => {
-    if (paused) {
+    if (paused && awaitingSave) {
       setAwaitingSave(false);
       reset?.();
       return;

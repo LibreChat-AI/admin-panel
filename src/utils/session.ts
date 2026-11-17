@@ -1,13 +1,21 @@
+import type * as t from '@/types';
 import { SESSION_ERROR_HEADER } from '@/constants';
 import { withBasePath } from './navigation';
 
-let redirectHolds = 0;
+export function hasSessionRedirectHold(): boolean {
+  return redirectHolds.size > 0;
+}
 
-/** Keep a returned write outcome visible while its caller shows session recovery. */
-export function holdSessionRedirects(): () => void {
-  redirectHolds++;
+const redirectHolds = new Set<(code: t.SessionErrorCode) => void>();
+
+/** Keep unsaved work mounted and let its owner show session recovery. */
+export function holdSessionRedirects(
+  onError: (code: t.SessionErrorCode) => void = () => undefined,
+): () => void {
+  const listener = (code: t.SessionErrorCode) => onError(code);
+  redirectHolds.add(listener);
   return () => {
-    redirectHolds--;
+    redirectHolds.delete(listener);
   };
 }
 
@@ -21,7 +29,10 @@ export async function sessionFetch(
   if (code !== 'OPENID_SESSION_ENDED' && code !== 'AUTH_SESSION_CHECK_UNAVAILABLE') {
     return response;
   }
-  if (redirectHolds > 0) throw new Error(code);
+  if (redirectHolds.size > 0) {
+    for (const onError of redirectHolds) onError(code);
+    throw new Error(code);
+  }
   const basePath = (import.meta.env.VITE_BASE_PATH ?? '').replace(/\/$/, '');
   const path = window.location.pathname;
   let pathname = path;

@@ -11,6 +11,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => ({
 }));
 vi.mock('@/server', () => ({ adminLogoutFn: vi.fn(), applyConfigChangesFn: vi.fn() }));
 
+const retry = vi.fn(async () => undefined);
 const reload = vi.fn();
 const assign = vi.fn();
 const saved: t.ApplyConfigChangesResult = {
@@ -47,7 +48,14 @@ describe('save outcome during session recovery', () => {
     [{ ...saved, applied: 0, compensated: true }, 'com_config_session_not_saved'],
     [{ ...saved, applied: 0 }, 'com_config_session_not_saved'],
   ] as const)('shows the outcome %j with %s', (result, key) => {
-    render(<SaveSessionError result={result} />);
+    render(
+      <SaveSessionError
+        code="AUTH_SESSION_CHECK_UNAVAILABLE"
+        error={null}
+        onRetry={retry}
+        result={result}
+      />,
+    );
     expect(screen.getByText(i18n.t(key, { count: result.applied }))).toBeVisible();
     expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('com_auth_session_unavailable'));
     expect(screen.getByRole('button', { name: i18n.t('com_ui_retry') })).toBeEnabled();
@@ -55,35 +63,70 @@ describe('save outcome during session recovery', () => {
   });
 
   it('rechecks the session without applying the saved changes again', async () => {
-    render(<SaveSessionError result={saved} />);
+    render(
+      <SaveSessionError
+        code="AUTH_SESSION_CHECK_UNAVAILABLE"
+        error={null}
+        onRetry={retry}
+        result={saved}
+      />,
+    );
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: i18n.t('com_ui_retry') }));
     });
-    expect(reload).toHaveBeenCalledTimes(1);
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(reload).not.toHaveBeenCalled();
     expect(assign).not.toHaveBeenCalled();
     expect(applyConfigChangesFn).not.toHaveBeenCalled();
     expect(adminLogoutFn).not.toHaveBeenCalled();
   });
 
-  it('offers sign-in for an ended session while keeping the saved outcome visible', async () => {
+  it('opens sign-in in another tab and retries without leaving the draft', async () => {
     vi.stubEnv('VITE_BASE_PATH', '/admin/');
-    window.location.pathname = '/admin/configuration';
-    render(<SaveSessionError result={{ ...saved, sessionError: 'OPENID_SESSION_ENDED' }} />);
-    expect(screen.getByText(i18n.t('com_config_session_saved', { count: 2 }))).toBeVisible();
-    expect(screen.queryByRole('button', { name: i18n.t('com_ui_retry') })).not.toBeInTheDocument();
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: i18n.t('com_auth_sign_in') }));
-    });
-    expect(assign).toHaveBeenCalledWith(
-      '/admin/login?session=ended&redirect=%2Fconfiguration%3Fscope%3Dbase',
+    render(
+      <SaveSessionError
+        result={{ ...saved, sessionError: 'OPENID_SESSION_ENDED' }}
+        code="OPENID_SESSION_ENDED"
+        error={null}
+        onRetry={retry}
+      />,
     );
+    const link = screen.getByRole('link', { name: i18n.t('com_config_session_sign_in') });
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('href', '/admin/login?session=ended');
+    await act(async () =>
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('com_ui_retry') })),
+    );
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
     expect(applyConfigChangesFn).not.toHaveBeenCalled();
   });
 
+  it('keeps a failure before writing readable without claiming a saved result', () => {
+    render(
+      <SaveSessionError
+        result={null}
+        code="AUTH_SESSION_CHECK_UNAVAILABLE"
+        error={i18n.t('com_config_session_retry_failed')}
+        onRetry={retry}
+      />,
+    );
+    expect(screen.getByText(i18n.t('com_config_session_draft_kept'))).toBeVisible();
+    expect(screen.getByText(i18n.t('com_config_session_retry_failed'))).toBeVisible();
+    expect(screen.queryByText(i18n.t('com_config_session_not_saved'))).not.toBeInTheDocument();
+  });
+
   it('counts a skipped change only once when the result also reports it', () => {
     const skipped: t.SkippedChange = { fieldPath: 'balance.startBalance', reason: 'notStored' };
-    render(<SaveSessionError result={{ ...saved, skipped: [skipped], reported: [skipped] }} />);
+    render(
+      <SaveSessionError
+        code="AUTH_SESSION_CHECK_UNAVAILABLE"
+        error={null}
+        onRetry={retry}
+        result={{ ...saved, skipped: [skipped], reported: [skipped] }}
+      />,
+    );
     expect(screen.getByText(i18n.t('com_config_session_skipped', { count: 1 }))).toBeVisible();
   });
 });

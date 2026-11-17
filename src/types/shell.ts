@@ -109,6 +109,7 @@ export interface NavigationGuardState {
 export interface NavigationGuardDialogProps
   extends Omit<NavigationGuardState, 'open'>, Pick<NavigationGuardState, 'open'> {
   changeCount: number;
+  saveDisabled?: boolean;
 }
 
 /** Why a section is shown read-only, and what its banner says (WS5; HF-8, FX-10, PR-7). */

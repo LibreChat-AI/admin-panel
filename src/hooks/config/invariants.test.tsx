@@ -241,6 +241,7 @@ function renderTargets(
         targetRevision: read ? loaded.data : targetRevision,
       };
       const save = useConfigSave({
+        sessionIdentity: { userId: 'admin-1', tenantId: null },
         schemaTree: tree,
         schemaPathSet,
         editingScope: scope,

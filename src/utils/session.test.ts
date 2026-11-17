@@ -17,6 +17,26 @@ afterEach(() => {
 });
 
 describe('sessionFetch', () => {
+  it('notifies each draft owner and releases only the matching hold', async () => {
+    const onError = vi.fn();
+    const first = holdSessionRedirects(onError);
+    const second = holdSessionRedirects(onError);
+    first();
+    first();
+    fetchMock.mockResolvedValue(
+      new Response('{}', { headers: { 'X-Admin-Session-Error': 'OPENID_SESSION_ENDED' } }),
+    );
+    try {
+      await expect(sessionFetch('/background')).rejects.toThrow('OPENID_SESSION_ENDED');
+      expect(onError).toHaveBeenCalledExactlyOnceWith('OPENID_SESSION_ENDED');
+      expect(assign).not.toHaveBeenCalled();
+    } finally {
+      second();
+    }
+    await expect(sessionFetch('/background')).rejects.toThrow('OPENID_SESSION_ENDED');
+    expect(assign).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['OPENID_SESSION_ENDED', 'AUTH_SESSION_CHECK_UNAVAILABLE'])(
     'keeps the save outcome visible during %s and restores redirects after recovery unmounts',
     async (code) => {

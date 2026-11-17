@@ -14,6 +14,7 @@ export function NavigationGuardDialog({
   intent,
   changeCount,
   onSave,
+  saveDisabled,
   onDiscard,
   onCancel,
 }: t.NavigationGuardDialogProps) {
@@ -51,7 +52,9 @@ export function NavigationGuardDialog({
             id={descriptionId}
             className="m-0 text-sm leading-relaxed text-(--cui-color-text-default)"
           >
-            {localize('com_config_shell_guard_desc', { count: changeCount })}
+            {localize(saveDisabled ? 'com_config_session_leave' : 'com_config_shell_guard_desc', {
+              count: changeCount,
+            })}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
@@ -70,6 +73,7 @@ export function NavigationGuardDialog({
               htmlType="button"
               type="primary"
               label={localize('com_config_shell_guard_save')}
+              disabled={saveDisabled}
               onClick={onSave}
             />
           </div>

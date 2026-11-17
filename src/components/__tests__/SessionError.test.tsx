@@ -18,6 +18,18 @@ beforeEach(() => {
 });
 
 describe('SessionError', () => {
+  it.each([false, true])(
+    'leaves the page title unchanged during embedded recovery (ended: %s)',
+    (ended) => {
+      const title = 'Configuration · LibreChat Admin Panel';
+      document.title = title;
+      const { unmount } = render(<SessionError embedded ended={ended} />);
+      expect(document.title).toBe(title);
+      unmount();
+      expect(document.title).toBe(title);
+    },
+  );
+
   it('provides a page landmark and heading while limiting the alert to the message', () => {
     render(<SessionError />);
 

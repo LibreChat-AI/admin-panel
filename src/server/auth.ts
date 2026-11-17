@@ -16,7 +16,7 @@ import { getApiBaseUrl, getServerApiUrl } from './utils/url';
 import { clearAdminSession, refreshAdminTokenDeduped } from './utils/refresh';
 import { buildOAuthExchangePayload } from './utils/oauth';
 import { useAppSession, getSessionConfig } from './session';
-import { tenantHeaders } from './utils/tenant';
+import { readTenantHeader, tenantHeaders } from './utils/tenant';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
 function extractCookieValue(response: Response, name: string): string | undefined {
@@ -301,7 +301,7 @@ export const verifyAdminTokenFn = createServerFn({ method: 'GET' })
         await session.update({ lastActivity: now });
       }
 
-      return { valid: true, user };
+      return { valid: true, user, tenantId: readTenantHeader() ?? null };
     } catch (error) {
       console.error('Token verification error:', error);
       return {

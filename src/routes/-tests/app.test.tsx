@@ -14,6 +14,7 @@ import type * as t from '@/types';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { Route as DashboardRoute } from '../_app/index';
 import { SystemCapabilities } from '@/constants';
+import { holdSessionRedirects } from '@/utils';
 import { localizeEn } from '@/test/coverage';
 import { Route as AppRoute } from '../_app';
 import { Route as LoginRoute } from '../login';
@@ -349,6 +350,21 @@ describe('/_app admin gate', () => {
     expect(screen.getByRole('complementary')).toBeVisible();
     expect(screen.queryByText(localizeEn('com_error_page_title'))).toBeNull();
     expect(screen.queryByText(localizeEn('com_perm_unavailable_title'))).toBeNull();
+  });
+
+  it('does not refresh permissions under a draft hold', async () => {
+    server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: ADMIN_CAPABILITIES });
+    const { queryClient } = renderApp();
+    await screen.findByRole('complementary');
+    const release = holdSessionRedirects();
+    try {
+      server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: [] });
+      await act(() => queryClient.invalidateQueries({ queryKey: ['effectiveCapabilities'] }));
+      expect(server.getEffectiveCapabilitiesFn).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('complementary')).toBeVisible();
+    } finally {
+      release();
+    }
   });
 
   it('takes the panel away when a refetch shows access:admin was revoked', async () => {

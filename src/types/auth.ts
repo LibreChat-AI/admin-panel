@@ -154,7 +154,16 @@ export interface SsoErrorProps {
 
 export interface SessionErrorProps {
   onRetry?: () => Promise<void>;
+  /** A draft rechecks the session after sign-in in another tab. */
+  retryLabel?: string;
   ended?: boolean;
   embedded?: boolean;
   children?: ReactNode;
+}
+
+export type SessionErrorCode = 'OPENID_SESSION_ENDED' | 'AUTH_SESSION_CHECK_UNAVAILABLE';
+
+export interface AdminSessionIdentity {
+  userId: string;
+  tenantId: string | null;
 }

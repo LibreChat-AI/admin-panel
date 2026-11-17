@@ -5,13 +5,19 @@ import { useDocumentTitle, useLocalize } from '@/hooks';
 import { BusyButton } from '@/components/shared';
 import { adminLogoutFn } from '@/server';
 
-export function SessionError({ onRetry, ended, embedded, children }: t.SessionErrorProps) {
+export function SessionError({
+  onRetry,
+  retryLabel,
+  ended,
+  embedded,
+  children,
+}: t.SessionErrorProps) {
   const router = useRouter();
   const localize = useLocalize();
   const [busy, setBusy] = useState<'retry' | 'logout' | null>(null);
   const [logoutFailed, setLogoutFailed] = useState(false);
   const title = localize(ended ? 'com_auth_sign_in' : 'com_auth_session_unavailable_title');
-  useDocumentTitle(title);
+  useDocumentTitle(embedded ? undefined : title);
   const Region = embedded ? 'section' : 'main';
 
   const retry = async () => {
@@ -67,7 +73,7 @@ export function SessionError({ onRetry, ended, embedded, children }: t.SessionEr
         <div className="flex gap-3">
           <BusyButton
             type="primary"
-            label={localize(ended ? 'com_auth_sign_in' : 'com_ui_retry')}
+            label={retryLabel ?? localize(ended ? 'com_auth_sign_in' : 'com_ui_retry')}
             htmlType="button"
             busy={busy === 'retry'}
             disabled={busy === 'logout'}

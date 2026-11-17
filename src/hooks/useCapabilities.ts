@@ -4,6 +4,7 @@ import { queryOptions, useQuery } from '@tanstack/react-query';
 import type * as t from '@/types';
 import { getEffectiveCapabilitiesFn } from '@/server';
 import { hasImpliedCapability } from '@/constants';
+import { hasSessionRedirectHold } from '@/utils';
 
 const Route = getRouteApi('/_app');
 
@@ -16,6 +17,7 @@ const AUTH_DENIED_PATTERN =
 export const capabilitiesQueryOptions = (userId: string) =>
   queryOptions({
     queryKey: ['effectiveCapabilities', userId],
+    enabled: () => !hasSessionRedirectHold(),
     queryFn: async (): Promise<t.CapabilitiesData> => {
       try {
         const res = await getEffectiveCapabilitiesFn();

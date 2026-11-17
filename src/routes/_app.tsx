@@ -44,7 +44,7 @@ export const Route = createFileRoute('/_app')({
       });
     }
 
-    return { user: result.user };
+    return { user: result.user, tenantId: result.tenantId };
   },
   loader: ({ context, location }): Promise<t.AppGateLoaderData> =>
     context.queryClient.fetchQuery(capabilitiesQueryOptions(context.user.id)).then(

@@ -280,9 +280,16 @@ describe('verifyAdminTokenFn', () => {
 
     const result = await verifyAdminTokenFn();
 
-    expect(result).toEqual({ valid: true, user });
+    expect(result).toEqual({ valid: true, user, tenantId: null });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(updateSession).toHaveBeenCalledWith({ lastActivity: expect.any(Number) });
+  });
+
+  it('returns the request tenant with the verified identity', async () => {
+    const user = { id: 'admin-1', role: 'ADMIN', email: 'admin@example.test' };
+    sessionState.data = { user, token: 'jwt', lastVerified: Date.now(), lastActivity: Date.now() };
+    requestHeaders.set('x-tenant-id', ' tenant-a ');
+    expect(await verifyAdminTokenFn()).toEqual({ valid: true, user, tenantId: 'tenant-a' });
   });
 
   it('clears a delegated admin session when backend capability revalidation is denied', async () => {
@@ -378,7 +385,11 @@ describe('verifyAdminTokenFn', () => {
       )
       .mockResolvedValueOnce(jsonResponse(200, { user }));
 
-    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({ valid: true, user });
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: true,
+      user,
+      tenantId: null,
+    });
     expect(sessionState.data).toMatchObject({
       token: 'new-token',
       refreshToken: 'new-refresh',
@@ -411,7 +422,11 @@ describe('verifyAdminTokenFn', () => {
       )
       .mockResolvedValueOnce(jsonResponse(200, { user }));
 
-    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({ valid: true, user });
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: true,
+      user,
+      tenantId: null,
+    });
     expect(JSON.parse(fetchMock.mock.calls[2][1].body).refresh_token).toBe('new-refresh');
   });
 
@@ -421,7 +436,11 @@ describe('verifyAdminTokenFn', () => {
       const user = freshSession();
       sessionState.data.tokenProvider = tokenProvider;
 
-      expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({ valid: true, user });
+      expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+        valid: true,
+        user,
+        tenantId: null,
+      });
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
@@ -430,14 +449,22 @@ describe('verifyAdminTokenFn', () => {
     const user = freshSession();
     sessionState.data.refreshToken = undefined;
 
-    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({ valid: true, user });
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: true,
+      user,
+      tenantId: null,
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('does not renew a fresh OpenID session during navigation within Admin', async () => {
     const user = freshSession();
 
-    expect(await verifyAdminTokenFn({ data: { refresh: false } })).toEqual({ valid: true, user });
+    expect(await verifyAdminTokenFn({ data: { refresh: false } })).toEqual({
+      valid: true,
+      user,
+      tenantId: null,
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -472,7 +499,7 @@ describe('verifyAdminTokenFn', () => {
       .mockResolvedValueOnce(jsonResponse(200, { token: 'new-token', refreshToken: 'new-refresh' }))
       .mockResolvedValueOnce(jsonResponse(200, { user }));
 
-    expect(await verifyAdminTokenFn()).toEqual({ valid: true, user });
+    expect(await verifyAdminTokenFn()).toEqual({ valid: true, user, tenantId: null });
     expect(sessionState.data).toMatchObject({ token: 'new-token', refreshToken: 'new-refresh' });
     expect(sessionState.data.lastVerified).toBeGreaterThan(0);
     expect(fetchMock.mock.calls[3][1].body).toBe(
@@ -512,7 +539,7 @@ describe('verifyAdminTokenFn', () => {
       expect(updateSession).not.toHaveBeenCalled();
 
       fetchMock.mockResolvedValueOnce(jsonResponse(200, { user }));
-      expect(await verifyAdminTokenFn()).toEqual({ valid: true, user });
+      expect(await verifyAdminTokenFn()).toEqual({ valid: true, user, tenantId: null });
       expect(fetchMock).toHaveBeenCalledTimes(2);
     },
   );
@@ -535,7 +562,7 @@ describe('verifyAdminTokenFn', () => {
     });
 
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { user }));
-    expect(await verifyAdminTokenFn()).toEqual({ valid: true, user });
+    expect(await verifyAdminTokenFn()).toEqual({ valid: true, user, tenantId: null });
     expect(fetchMock).toHaveBeenLastCalledWith('http://librechat.test/api/admin/verify', {
       headers: { Authorization: 'Bearer new-token' },
     });

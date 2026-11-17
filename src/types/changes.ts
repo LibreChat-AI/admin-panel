@@ -1,3 +1,4 @@
+import type { SessionErrorCode } from './auth';
 import type { ReactNode } from 'react';
 import type { core } from 'zod';
 import type { SaveEntry, WriteTarget, SaveContext, SavePayload, SkippedChange } from './config-ui';
@@ -339,7 +340,7 @@ export interface ConfigWarning {
 /** Result of `applyConfigChangesFn` (WS1). */
 export interface ApplyConfigChangesResult {
   /** Session recovery needed after the operation produced this result. */
-  sessionError?: 'OPENID_SESSION_ENDED' | 'AUTH_SESSION_CHECK_UNAVAILABLE';
+  sessionError?: SessionErrorCode;
   /** Changes (ops) that were written. */
   applied: number;
   /** Write failures after the pre-flight passed; the written part was rolled back. */

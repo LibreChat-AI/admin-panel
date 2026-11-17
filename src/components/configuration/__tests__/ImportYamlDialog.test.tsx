@@ -80,19 +80,20 @@ function renderDialog(currentScope?: t.ConfigScope) {
   const onImport = vi.fn<t.ImportYamlDialogProps['onImport']>().mockResolvedValue(undefined);
   const onClose = vi.fn();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const view = (open: boolean) => (
     <QueryClientProvider client={queryClient}>
       <ImportYamlDialog
-        open
+        open={open}
         onClose={onClose}
         currentScope={currentScope}
         schemaTree={tree}
         schemaPathSet={schemaPathSet}
         onImport={onImport}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { onImport, onClose };
+  const rendered = render(view(true));
+  return { onImport, onClose, setOpen: (open: boolean) => rendered.rerender(view(open)) };
 }
 
 async function toTargets(text = 'balance:\n  startBalance: 777\n') {
@@ -317,6 +318,25 @@ describe('ImportYamlDialog wizard', () => {
     await toTargets();
     await toPreview();
     expect(screen.queryByRole('region', { name: /this panel doesn't recognize/ })).toBeNull();
+  });
+
+  it('preserves imported YAML and the selected changes while session recovery hides the dialog', async () => {
+    const { onImport, onClose, setOpen } = renderDialog();
+    onImport.mockRejectedValueOnce(new Error('OPENID_SESSION_ENDED'));
+    const text = 'balance:\n  startBalance: 777\n';
+    await toTargets(text);
+    await toPreview();
+    fireEvent.click(screen.getByRole('button', { name: /^Import 1 setting/ }));
+    await screen.findByText('Your session has ended. Sign in again.');
+    setOpen(false);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    setOpen(true);
+    expect(await screen.findByRole('button', { name: /^Import 1 setting/ })).toBeEnabled();
+    expect(onImport).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByRole('textbox', { name: 'Paste YAML' })).toHaveValue(text);
   });
 
   it('keeps the dialog open and shows the reason when the import is rejected', async () => {
