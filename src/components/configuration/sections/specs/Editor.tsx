@@ -33,6 +33,7 @@ const CAPABILITIES = [
   'artifacts',
   'runInBackground',
   'describeIntent',
+  'deferLoading',
   'skills',
   'mcpServers',
 ];

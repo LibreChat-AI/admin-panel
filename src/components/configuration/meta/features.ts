@@ -29,6 +29,18 @@ const INTERFACE_META: t.FieldMetaRegistry = {
       ephemeral: 'com_config_enum_retention_ephemeral',
     },
   },
+  'interface.landingFooter': {
+    enumLabels: {
+      true: 'com_config_enum_landingFooter_page',
+      composer: 'com_config_enum_landingFooter_composer',
+    },
+  },
+  'interface.messageAuthor': {
+    enumLabels: {
+      always: 'com_config_enum_messageAuthor_always',
+      whenDifferent: 'com_config_enum_messageAuthor_whenDifferent',
+    },
+  },
   'interface.generalChatRetention': {
     descriptionKey: 'com_config_desc_interface_generalChatRetention_all',
   },
