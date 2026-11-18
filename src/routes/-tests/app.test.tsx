@@ -418,6 +418,36 @@ describe('/_app admin gate', () => {
     }
   });
 
+  it.each(['AUTH_SESSION_CHECK_UNAVAILABLE', 'OPENID_SESSION_ENDED'] as const)(
+    'keeps the page if a draft hold starts during a loader request that fails with %s',
+    async (code) => {
+      server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: ADMIN_CAPABILITIES });
+      const { queryClient, router } = renderApp();
+      await screen.findByRole('complementary');
+      await queryClient.invalidateQueries({ queryKey: ['effectiveCapabilities'], refetchType: 'none' });
+      let rejectCapabilities: (error: Error) => void = () => undefined;
+      server.getEffectiveCapabilitiesFn.mockImplementation(
+        () => new Promise((_resolve, reject) => { rejectCapabilities = reject; }),
+      );
+      const navigation = router.invalidate({ sync: true });
+      await waitFor(() => expect(server.getEffectiveCapabilitiesFn).toHaveBeenCalledTimes(2));
+      const notify = vi.fn();
+      const release = holdSessionRedirects(notify);
+      try {
+        await act(async () => {
+          rejectCapabilities(new Error(code));
+          await navigation;
+        });
+        expect(router.state.location.pathname).toBe('/');
+        expect(screen.getByRole('region', { name: localizeEn('com_dash_quick_links') })).toBeVisible();
+        expect(notify).toHaveBeenCalledExactlyOnceWith(code);
+        expect(queryClient.getQueryState(['effectiveCapabilities', USER.id])?.error).toBeNull();
+      } finally {
+        release();
+      }
+    },
+  );
+
   it('takes the panel away when a refetch shows access:admin was revoked', async () => {
     server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: ADMIN_CAPABILITIES });
     const { queryClient } = renderApp();

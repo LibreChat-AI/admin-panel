@@ -19,6 +19,11 @@ export function holdSessionRedirects(
   };
 }
 
+/** Tell mounted draft owners why session recovery is needed. */
+export function notifySessionRedirectHolds(code: t.SessionErrorCode): void {
+  for (const onError of redirectHolds) onError(code);
+}
+
 /** A failed renewal reaches the login screen even when a server function catches the error. */
 export async function sessionFetch(
   input: RequestInfo | URL,
@@ -30,7 +35,7 @@ export async function sessionFetch(
     return response;
   }
   if (redirectHolds.size > 0) {
-    for (const onError of redirectHolds) onError(code);
+    notifySessionRedirectHolds(code);
     throw new Error(code);
   }
   const basePath = (import.meta.env.VITE_BASE_PATH ?? '').replace(/\/$/, '');

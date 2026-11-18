@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { ConfigValue, ReadOnlyReason } from './config';
 import type { ConfigSectionConfig } from './config-ui';
 import type { ConfigScope } from './scope';
+import type { SerializableUser } from './server';
 
 /** Search params of `/configuration` (WS5). */
 export interface ConfigSearchParams {
@@ -30,6 +31,13 @@ export interface SectionMeta {
   pathPrefix?: string;
   /** Paths under this prefix belong to another section (providers vs custom endpoints). */
   excludePrefix?: string;
+}
+
+/** The last verified identity keeps an existing draft mounted during recovery. */
+export interface AppSessionContext {
+  pathname: string;
+  user: SerializableUser;
+  tenantId: string | null;
 }
 
 /** Context every route receives from `getRouter` (WS5: page shell). */

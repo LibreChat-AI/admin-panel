@@ -5,7 +5,7 @@ import type * as t from '@/types';
 import { ConfigPage, ConfigSkeleton, ConfigLoadError } from '@/components/configuration';
 import { AccessDenied, PermissionsUnavailable } from '@/components/shared';
 import { baseConfigOptions, configSchemaTreeOptions } from '@/server';
-import { hasConfigCapability } from '@/utils';
+import { hasConfigCapability, hasSessionRedirectHold } from '@/utils';
 import { useCapabilities } from '@/hooks';
 
 function optionalString(value: unknown): string | undefined {
@@ -24,6 +24,7 @@ export const Route = createFileRoute('/_app/configuration/')({
    * form mounts with its baseline. A base-config failure is left to the page
    * (it can be a missing permission), a schema failure shows the error route.
    */
+  shouldReload: ({ cause }) => cause !== 'stay' || !hasSessionRedirectHold(),
   loader: async ({ context: { queryClient } }) => {
     const [tree] = await Promise.all([
       queryClient.query({ ...configSchemaTreeOptions, staleTime: 'static' }),
