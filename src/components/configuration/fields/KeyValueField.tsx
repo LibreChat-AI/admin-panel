@@ -1,7 +1,13 @@
 import { useRef, useState, useEffect, useContext, useLayoutEffect } from 'react';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
-import { useDraftValue, useListKeys, useLocalize, useConfigKeyProblem } from '@/hooks';
+import {
+  useDraftValue,
+  useListKeys,
+  useLocalize,
+  useConfigKeyProblem,
+  useSessionDraft,
+} from '@/hooks';
 import { RowProblemsContext } from '@/contexts/RowProblemsContext';
 import { AddItemButton, TrashButton } from '@/components/shared';
 import { RemovedKeyRow } from './RemovedKeyRow';
@@ -136,6 +142,7 @@ export function KeyValueField({
   const [pinned, setPinned] = useState<ReadonlySet<string>>(() => new Set());
   /** Typed keys of saved rows not committed yet (refused, or still being typed), by row id. */
   const [keyTexts, setKeyTexts] = useState<Readonly<Record<string, string>>>({});
+  useSessionDraft(!disabled && (drafts.length > 0 || Object.keys(keyTexts).length > 0));
   const draftCounter = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const focusDraftRef = useRef<number | null>(null);

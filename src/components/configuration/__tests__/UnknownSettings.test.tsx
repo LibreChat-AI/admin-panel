@@ -3,7 +3,10 @@ import { render, screen } from '@testing-library/react';
 import type * as t from '@/types';
 import { UnknownSettings } from '../UnknownSettings';
 
-vi.mock('@/hooks', () => ({ useLocalize: () => (key: string) => key }));
+vi.mock('@/hooks', async () => ({
+  ...(await vi.importActual<typeof import('@/hooks/config/pending')>('@/hooks/config/pending')),
+  useLocalize: () => (key: string) => key,
+}));
 
 const known: t.SchemaField[] = [
   {

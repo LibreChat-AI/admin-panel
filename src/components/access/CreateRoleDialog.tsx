@@ -4,11 +4,11 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { addRoleMemberFn, createRoleFn, updateRolePermissionsFn } from '@/server';
-import { SelectedMemberList, UserSearchInline } from '@/components/shared';
-import { useLocalize, useReturnFocus, useRefreshScopes } from '@/hooks';
+import { SelectedMemberList, SessionDraftError, UserSearchInline } from '@/components/shared';
+import { useLocalize, useReturnFocus, useRefreshScopes, useSessionRecovery } from '@/hooks';
 import { RolePermissionsPanel } from './RolePermissionsPanel';
-import { cn, notifySuccess, notifyError } from '@/utils';
-import { defaultPermissions } from '@/constants';
+import { cn, errorText, notifySuccess, notifyError } from '@/utils';
+import { defaultPermissions, SystemCapabilities } from '@/constants';
 
 export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
   const localize = useLocalize();
@@ -21,6 +21,15 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
   const [permissions, setPermissions] = useState<t.RolePermissions>(defaultPermissions);
   const [selectedUsers, setSelectedUsers] = useState<AdminUserSearchResult[]>([]);
   const [error, setError] = useState('');
+  const recovery = useSessionRecovery({
+    active: open,
+    dirty:
+      !!name ||
+      !!description ||
+      selectedUsers.length > 0 ||
+      JSON.stringify(permissions) !== JSON.stringify(defaultPermissions()),
+    requiredCapabilities: [SystemCapabilities.MANAGE_ROLES],
+  });
 
   const resetAndClose = () => {
     setName('');
@@ -34,9 +43,12 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
 
   const mutation = useMutation({
     mutationFn: async ({ name: submittedName }: { name: string }) => {
+      recovery.requireSession();
       const { role } = await createRoleFn({ data: { name: submittedName, description } });
+      recovery.requireSession();
       await updateRolePermissionsFn({ data: { id: role.id, permissions } });
       for (const user of selectedUsers) {
+        recovery.requireSession();
         await addRoleMemberFn({ data: { roleId: role.id, userId: user.id } });
       }
       return { name: submittedName };
@@ -51,10 +63,11 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
       notifySuccess(localize('com_toast_role_created', { name: data.name }));
       resetAndClose();
     },
-    onError: (err: Error) => notifyError(err.message),
+    onError: (err: Error) => notifyError(errorText(err, err.message, localize)),
   });
 
   const doSubmit = () => {
+    if (recovery.blocked) return;
     setError('');
     if (!name.trim()) {
       setError(localize('com_access_name_required'));
@@ -94,7 +107,19 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
         onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        {recovery.sessionError && (
+          <SessionDraftError
+            code={recovery.sessionError}
+            error={recovery.recoveryError}
+            onRetry={recovery.retrySession}
+          />
+        )}
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col gap-5"
+          hidden={recovery.blocked}
+          inert={recovery.blocked || undefined}
+        >
           <Tabs
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as t.CreateRoleTab)}
@@ -174,7 +199,7 @@ export function CreateRoleDialog({ open, onClose }: t.CreateRoleDialogProps) {
                   existingIds={selectedUsers.map((u) => u.id)}
                   onAdd={addUser}
                   listboxId="create-role-member-results"
-                  disabled={mutation.isPending}
+                  disabled={mutation.isPending || recovery.blocked}
                 />
                 <SelectedMemberList
                   users={selectedUsers}

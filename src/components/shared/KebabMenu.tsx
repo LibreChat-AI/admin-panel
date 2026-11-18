@@ -1,8 +1,9 @@
 import { flushSync } from 'react-dom';
-import { useId, useRef, useState } from 'react';
 import { Dropdown } from '@clickhouse/click-ui';
+import { useId, useRef, useState, useContext, useEffect } from 'react';
 import type * as t from '@/types';
 import { useStripAriaExpanded, useLocalize } from '@/hooks';
+import { DraftsContext } from '@/contexts/DraftsContext';
 import { DecorativeIcon } from './DecorativeIcon';
 import { isFocusLost } from '@/utils';
 
@@ -62,22 +63,32 @@ function KebabItem({ item, onChoose }: t.KebabItemProps) {
  */
 export function KebabMenu({ items, ariaLabel }: t.KebabMenuProps) {
   const localize = useLocalize();
+  const recovery = useContext(DraftsContext);
+  const blocked = recovery?.blocked ?? false;
+  const blockedRef = useRef(blocked);
+  blockedRef.current = blocked;
   const triggerRef = useStripAriaExpanded<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const selectedRef = useRef(false);
 
+  useEffect(() => {
+    if (blocked) setOpen(false);
+  }, [blocked]);
+
   const restoreFocus = () => {
+    if (blockedRef.current) return;
     const trigger = triggerRef.current;
     if (trigger?.isConnected) trigger.focus();
   };
 
   return (
-    <Dropdown open={open} onOpenChange={setOpen}>
+    <Dropdown open={open && !blocked} onOpenChange={(next) => setOpen(next && !blocked)}>
       <Dropdown.Trigger>
         <button
           ref={triggerRef}
           type="button"
           aria-haspopup="menu"
+          disabled={blocked}
           aria-label={ariaLabel ?? localize('com_ui_actions')}
           className="rounded p-1 text-(--cui-color-text-muted) transition-colors hover:bg-(--cui-color-background-hover)"
         >
@@ -105,6 +116,7 @@ export function KebabMenu({ items, ariaLabel }: t.KebabMenuProps) {
             key={item.label}
             item={item}
             onChoose={() => {
+              if (blockedRef.current) return;
               selectedRef.current = true;
               /**
                * Close first and put focus back on the button: the menu's focus
@@ -113,7 +125,7 @@ export function KebabMenu({ items, ariaLabel }: t.KebabMenuProps) {
                */
               flushSync(() => setOpen(false));
               restoreFocus();
-              item.onClick();
+              if (!blockedRef.current) item.onClick();
             }}
           />
         ))}

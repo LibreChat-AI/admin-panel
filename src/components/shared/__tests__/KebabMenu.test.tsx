@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { DraftsContext } from '@/contexts/DraftsContext';
 import { FormDialog } from '../FormDialog';
 import { KebabMenu } from '../KebabMenu';
 
@@ -45,6 +46,46 @@ function openMenu() {
 }
 
 describe('KebabMenu', () => {
+  it('closes its open portal during recovery and requires a fresh action afterward', async () => {
+    const onDelete = vi.fn();
+    const content = (blocked: boolean) => (
+      <DraftsContext.Provider
+        value={{
+          blocked,
+          editSessionId: 0,
+          sessionError: blocked ? 'AUTH_SESSION_CHECK_UNAVAILABLE' : null,
+          recoveryError: null,
+          registerDraft: vi.fn(),
+          retrySession: async () => undefined,
+        }}
+      >
+        <KebabMenu
+          ariaLabel="Actions for Shadow"
+          items={[{ label: 'Delete', onClick: onDelete }]}
+        />
+      </DraftsContext.Provider>
+    );
+    const { container, rerender } = render(content(false));
+    const trigger = openMenu();
+    const menu = await screen.findByRole('menu');
+    expect(menu).toBeVisible();
+    expect(container).not.toContainElement(menu);
+
+    rerender(content(true));
+    await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument());
+    expect(trigger).toBeDisabled();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(onDelete).not.toHaveBeenCalled();
+
+    rerender(content(false));
+    expect(trigger).toBeEnabled();
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    openMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }));
+    expect(onDelete).toHaveBeenCalledTimes(1);
+  });
+
   it('leaves focus in the dialog an action opens, and gets it back when the dialog closes', async () => {
     render(<Harness />);
     const trigger = openMenu();

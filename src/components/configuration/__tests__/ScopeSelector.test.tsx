@@ -37,6 +37,7 @@ vi.mock('@/hooks', async () => {
   const { useReturnFocus } =
     await vi.importActual<typeof import('@/hooks/dialogs')>('@/hooks/dialogs');
   return {
+    ...(await vi.importActual<typeof import('@/hooks/config/pending')>('@/hooks/config/pending')),
     useLocalize: () => localize,
     useDebouncedFilter,
     useConfigFeatures,

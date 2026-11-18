@@ -6,8 +6,8 @@ import type { ReactNode } from 'react';
 import type * as t from '@/types';
 import { setScopePriorityFn, toggleScopeActiveFn, availableScopesOptions } from '@/server';
 import { ConfigContractContext } from '@/contexts/ContractContext';
-import { createServerContract } from '@/test/fixtures';
 import { ScopeActionsProvider } from '@/contexts/ScopeContext';
+import { createServerContract } from '@/test/fixtures';
 import { ScopeGate } from '../ScopeGate';
 import { ScopeBar } from '../ScopeBar';
 
@@ -29,6 +29,7 @@ vi.mock('@/hooks', async () => {
   const { useRefreshScopes } =
     await vi.importActual<typeof import('@/hooks/config/scope')>('@/hooks/config/scope');
   return {
+    ...(await vi.importActual<typeof import('@/hooks/config/pending')>('@/hooks/config/pending')),
     useLocalize: () => localize,
     useScopeActions,
     useRefreshScopes,

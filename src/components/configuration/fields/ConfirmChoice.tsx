@@ -1,7 +1,8 @@
 import { useId } from 'react';
 import { Button, Dialog } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { useReturnFocus, useLocalize } from '@/hooks';
+import { useReturnFocus, useLocalize, useSessionDraft } from '@/hooks';
+import { SessionDraftError } from '@/components/shared';
 
 /**
  * Asks before a change with consequences beyond the field (switching file
@@ -19,22 +20,38 @@ export function ConfirmChoiceDialog({
   const localize = useLocalize();
   const returnFocus = useReturnFocus(open);
   const descriptionId = useId();
+  const recovery = useSessionDraft(open);
+  const blocked = recovery?.blocked ?? false;
+  const cancel = () => {
+    if (!blocked) onCancel();
+  };
   return (
     <Dialog
       open={open}
       onOpenChange={(isOpen) => {
-        if (!isOpen) onCancel();
+        if (!isOpen) cancel();
       }}
     >
       <Dialog.Content
         title={title}
         showClose
-        onClose={onCancel}
+        onClose={cancel}
         onCloseAutoFocus={returnFocus}
         aria-describedby={descriptionId}
         className="modal-frost"
       >
-        <div className="flex flex-col gap-4">
+        {recovery?.sessionError && (
+          <SessionDraftError
+            code={recovery.sessionError}
+            error={recovery.recoveryError}
+            onRetry={recovery.retrySession}
+          />
+        )}
+        <div
+          className="flex flex-col gap-4"
+          style={blocked ? { display: 'none' } : undefined}
+          inert={blocked}
+        >
           <div
             id={descriptionId}
             className="flex flex-col gap-2 text-sm leading-relaxed text-(--cui-color-text-default)"
@@ -46,7 +63,7 @@ export function ConfirmChoiceDialog({
               htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
-              onClick={onCancel}
+              onClick={cancel}
             />
             {actions.map((action) => (
               <Button
@@ -54,7 +71,9 @@ export function ConfirmChoiceDialog({
                 htmlType="button"
                 type={action.type ?? 'primary'}
                 label={action.label}
-                onClick={action.onSelect}
+                onClick={() => {
+                  if (!blocked) action.onSelect();
+                }}
               />
             ))}
           </div>

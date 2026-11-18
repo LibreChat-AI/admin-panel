@@ -10,10 +10,11 @@ import {
   updateGroupFn,
   MEMBERS_PAGE_SIZE,
 } from '@/server';
-import { SelectedMemberList, UserSearchInline } from '@/components/shared';
-import { useLocalize, useReturnFocus, useRefreshScopes } from '@/hooks';
-import { cn, notifySuccess, notifyError } from '@/utils';
+import { SelectedMemberList, SessionDraftError, UserSearchInline } from '@/components/shared';
+import { useLocalize, useReturnFocus, useRefreshScopes, useSessionRecovery } from '@/hooks';
+import { cn, errorText, notifySuccess, notifyError } from '@/utils';
 import { MemberList } from './MemberList';
+import { SystemCapabilities } from '@/constants';
 
 type EditGroupTab = 'details' | 'members';
 
@@ -45,6 +46,11 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
 
   const detailsDirty = name !== group?.name || description !== group?.description;
   const membersDirty = pendingAdditions.length > 0 || pendingRemovals.length > 0;
+  const recovery = useSessionRecovery({
+    active: !!group,
+    dirty: detailsDirty || membersDirty,
+    requiredCapabilities: [SystemCapabilities.MANAGE_GROUPS],
+  });
 
   const addUser = (user: AdminUserSearchResult) => {
     setPendingAdditions((prev) => {
@@ -70,10 +76,12 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
 
   const mutation = useMutation({
     mutationFn: async ({ name: submittedName }: { name: string }) => {
+      recovery.requireSession();
       if (!group) throw new Error(localize('com_access_group_unavailable'));
       if (detailsDirty) {
         await updateGroupFn({ data: { id: group.id, name: submittedName, description } });
       }
+      recovery.requireSession();
       const memberResults = await Promise.allSettled([
         ...pendingAdditions.map((user) =>
           addGroupMemberFn({ data: { groupId: group.id, userId: user.id } }),
@@ -103,10 +111,11 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
       notifySuccess(localize('com_toast_group_updated', { name: data.name }));
       onClose();
     },
-    onError: (err: Error) => notifyError(err.message),
+    onError: (err: Error) => notifyError(errorText(err, err.message, localize)),
   });
 
   const doSubmit = () => {
+    if (recovery.blocked) return;
     setError('');
     if (!group) return;
     if (!name.trim()) {
@@ -136,7 +145,19 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
         onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        {recovery.sessionError && (
+          <SessionDraftError
+            code={recovery.sessionError}
+            error={recovery.recoveryError}
+            onRetry={recovery.retrySession}
+          />
+        )}
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col gap-5"
+          hidden={recovery.blocked}
+          inert={recovery.blocked || undefined}
+        >
           <Tabs
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as EditGroupTab)}
@@ -204,7 +225,7 @@ export function EditGroupDialog({ group, canManage, onClose }: t.EditGroupDialog
                     existingIds={existingIds}
                     onAdd={addUser}
                     listboxId="edit-group-member-search"
-                    disabled={mutation.isPending}
+                    disabled={mutation.isPending || recovery.blocked}
                   />
                 )}
                 {pendingAdditions.length > 0 && (

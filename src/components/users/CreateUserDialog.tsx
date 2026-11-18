@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { SystemRoles } from 'librechat-data-provider';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type * as t from '@/types';
-import { notifySuccess, notifyError } from '@/utils';
+import { errorText, notifySuccess, notifyError } from '@/utils';
 import { FormDialog } from '@/components/shared';
 import { createUserFn } from '@/server';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useSessionRecovery } from '@/hooks';
+import { SystemCapabilities } from '@/constants';
 
 export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
   const localize = useLocalize();
@@ -14,9 +15,15 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<SystemRoles>(SystemRoles.USER);
   const [error, setError] = useState('');
+  const recovery = useSessionRecovery({
+    active: open,
+    dirty: !!name || !!email || role !== SystemRoles.USER,
+    requiredCapabilities: [SystemCapabilities.MANAGE_USERS],
+  });
 
   const mutation = useMutation({
     mutationFn: async ({ name: submittedName }: { name: string }) => {
+      recovery.requireSession();
       await createUserFn({ data: { name: submittedName, email, role } });
       return { name: submittedName };
     },
@@ -25,7 +32,7 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
       notifySuccess(localize('com_toast_user_invited', { name: data.name }));
       resetAndClose();
     },
-    onError: (err: Error) => notifyError(err.message),
+    onError: (err: Error) => notifyError(errorText(err, err.message, localize)),
   });
 
   const resetAndClose = () => {
@@ -37,6 +44,7 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
   };
 
   const doSubmit = () => {
+    if (recovery.blocked) return;
     setError('');
     if (!name.trim()) {
       setError(localize('com_access_name_required'));
@@ -56,6 +64,7 @@ export function CreateUserDialog({ open, onClose }: t.CreateUserDialogProps) {
       submitLabel={localize('com_users_add')}
       submitDisabled={!name.trim() || !email.trim()}
       saving={mutation.isPending}
+      recovery={recovery}
       error={error}
       onSubmit={doSubmit}
       onClose={resetAndClose}

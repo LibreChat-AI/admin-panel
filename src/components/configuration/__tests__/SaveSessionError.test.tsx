@@ -112,7 +112,9 @@ describe('save outcome during session recovery', () => {
         onRetry={retry}
       />,
     );
-    expect(screen.getByText(i18n.t('com_config_session_draft_kept'))).toBeVisible();
+    expect(screen.getByText(i18n.t('com_config_session_draft_kept_unavailable'))).toBeVisible();
+    expect(screen.queryByText(i18n.t('com_config_session_draft_kept'))).not.toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
     expect(screen.getByText(i18n.t('com_config_session_retry_failed'))).toBeVisible();
     expect(screen.queryByText(i18n.t('com_config_session_not_saved'))).not.toBeInTheDocument();
   });

@@ -1,9 +1,9 @@
 import { Button } from '@clickhouse/click-ui';
 import { useId, useState, useContext, useCallback, useEffect, useRef, memo } from 'react';
 import type * as t from '@/types';
+import { useLocalize, useConfigKeyProblem, useSessionDraft } from '@/hooks';
 import { RowProblemsContext } from '@/contexts/RowProblemsContext';
 import { RowFilterContext } from '@/contexts/RowFilterContext';
-import { useLocalize, useConfigKeyProblem } from '@/hooks';
 import { AddItemButton } from '@/components/shared';
 import { ObjectEntryCard } from './ObjectEntryCard';
 import { cn, isRowVisible } from '@/utils';
@@ -230,6 +230,7 @@ const AddKeyInput = memo(function AddKeyInput({
   const localize = useLocalize();
   const unsafeKeyProblem = useConfigKeyProblem();
   const [newKey, setNewKey] = useState('');
+  useSessionDraft(newKey !== '');
   const [error, setError] = useState<string | null>(null);
   const errorId = useId();
   const reportProblems = useContext(RowProblemsContext);

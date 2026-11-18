@@ -20,10 +20,10 @@ import {
 } from '@/utils';
 import { planTransportSwitch, transportLabelKey, transportOf, TRANSPORTS } from './transport';
 import { deepClone, isPlainObject, resolveEntryKey, setLeaf } from './validation';
+import { useLocalize, useConfigFeatures, useSessionDraft } from '@/hooks';
 import { ConfiguredOnlyContext } from '@/contexts/ConfiguredOnlyContext';
 import { ConfigErrorsProvider } from '@/contexts/ConfigErrorsContext';
 import { RowProblemsContext } from '@/contexts/RowProblemsContext';
-import { useLocalize, useConfigFeatures } from '@/hooks';
 import { FormDialog } from '@/components/shared';
 import { toFieldId } from '../../renderer/paths';
 import { serverNameProblem } from './names';
@@ -322,6 +322,7 @@ export function CreateMcpServerDialog({
     return [...ids].map((fieldId) => labelOfFieldId(fieldId, localize));
   }, [entry, rowProblems, dottedKeys, localize]);
   const isDirty = name !== '' || !isConfigValueEqual(draft, NEW_SERVER);
+  const recovery = useSessionDraft(open && isDirty);
   const blocked =
     !isInherited &&
     !isHidden &&
@@ -400,6 +401,7 @@ export function CreateMcpServerDialog({
       submitLabel={submitLabel}
       submitDisabled={blocked}
       saving={false}
+      recovery={recovery ?? undefined}
       error={
         shownNameProblem
           ? localize('com_config_mcp_create_field_error', {

@@ -6,6 +6,11 @@ vi.mock('@/hooks/useLocalize', () => ({
   useLocalize: () => (key: string) => key,
 }));
 
+vi.mock('@tanstack/react-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tanstack/react-router')>()),
+  useRouter: () => ({ navigate: vi.fn() }),
+}));
+
 describe('FormDialog', () => {
   const renderDialog = (props: Partial<React.ComponentProps<typeof FormDialog>> = {}) =>
     render(
@@ -63,5 +68,30 @@ describe('FormDialog', () => {
     const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     screen.getByLabelText('Name').dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
+  });
+
+  it('keeps input mounted during recovery and still permits an explicit discard', () => {
+    const onSubmit = vi.fn();
+    const onClose = vi.fn();
+    renderDialog({
+      onSubmit,
+      onClose,
+      discardPrompt: 'Discard this new server?',
+      recovery: {
+        blocked: true,
+        sessionError: 'OPENID_SESSION_ENDED',
+        recoveryError: null,
+        retrySession: vi.fn(async () => undefined),
+      },
+    });
+    const input = screen.getByLabelText('Name');
+    expect(input).toBeInTheDocument();
+    expect(input).not.toBeVisible();
+    fireEvent.submit(input);
+    expect(onSubmit).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'cross' }));
+    expect(screen.getByText('Discard this new server?')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'com_ui_discard' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

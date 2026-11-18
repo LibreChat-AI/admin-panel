@@ -1,9 +1,12 @@
 {
   "com_config_session_leave": "Cancel to keep your pending changes here, or discard them to leave.",
   "com_config_session_draft_kept": "Your pending changes stay in this tab. After signing in again, select Retry to check your session. Retry does not save changes.",
+  "com_config_session_draft_kept_unavailable": "Your pending changes stay in this tab. Select Retry to check your session. Retry does not save changes.",
+  "com_config_session_still_ended": "You are still signed out. Sign in in another tab, then select Retry.",
+  "com_config_session_permission_lost": "Your account no longer has permission to save these changes. Your pending changes stay in this tab.",
   "com_config_session_identity_changed": "Sign in with the same account and organization to continue with these changes.",
   "com_config_session_access_lost": "Your account no longer has admin access. Your pending changes stay in this tab.",
-  "com_config_session_retry_failed": "The session or configuration could not be checked. Your pending changes stay in this tab. Try again.",
+  "com_config_session_retry_failed": "We could not check whether you can continue. Your pending changes stay in this tab. Try again.",
   "com_auth_session_unavailable_title": "Could not check your session",
   "com_config_session_saved_one": "{{count}} change was saved.",
   "com_config_session_saved_other": "{{count}} changes were saved.",

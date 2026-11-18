@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ReadOnlySection } from '../ReadOnlySection';
 
-vi.mock('@/hooks', () => ({
+vi.mock('@/hooks', async () => ({
+  ...(await vi.importActual<typeof import('@/hooks/config/pending')>('@/hooks/config/pending')),
   useLocalize: () => (key: string) => key,
   useExpandSignal: () => undefined,
 }));

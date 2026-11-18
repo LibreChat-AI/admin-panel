@@ -3,11 +3,11 @@ import { Button } from '@clickhouse/click-ui';
 import type * as t from '@/types';
 import { cn, asConfigRecord, getUnknownConfigEntries } from '@/utils';
 import { InlineFieldRenderer } from '../../renderer/InlineField';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { DecorativeIcon } from '@/components/shared';
 import { INPUT_CLASSES } from '../../fields/display';
 import { NumberField } from '../../fields';
 import { toFieldId } from '../../renderer';
-import { useLocalize } from '@/hooks';
 
 /** The rates of one model, in table order. `context` is a token count; the rest are USD per million tokens. */
 const COLUMNS: ReadonlyArray<{ key: string; labelKey: string; required: boolean; int?: boolean }> =
@@ -40,6 +40,7 @@ export function PricingRow({
   const localize = useLocalize();
   const listId = useId();
   const [draft, setDraft] = useState('');
+  useSessionDraft(!disabled && draft !== '');
   const record = asConfigRecord(value);
   const rows = Object.entries(record);
   const fieldId = toFieldId(path);

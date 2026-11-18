@@ -20,6 +20,7 @@ export { SearchInput } from './SearchInput';
 export { default as SidebarIcon } from './SidebarIcon';
 export { SelectAllHeader } from './SelectAllHeader';
 export { SelectedMemberList } from './SelectedMemberList';
+export { SessionDraftError } from './SessionDraftError';
 export { StateChip } from './StateChip';
 export { StatusToggle } from './StatusToggle';
 export { StickyActionBar } from './StickyActionBar';

@@ -1,14 +1,14 @@
 import { useRef, useState, useLayoutEffect } from 'react';
 import { TextField as CUITextField } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useListKeys, useLocalize, useSessionDraft } from '@/hooks';
 import { AddItemButton, TrashButton } from '@/components/shared';
-import { useListKeys, useLocalize } from '@/hooks';
 import { TextareaField } from './TextareaField';
 import { SelectField } from './SelectField';
+import { cn, isFilledText } from '@/utils';
 import { TextField } from './TextField';
 import { FieldNotice } from './Notice';
 import { widthClass } from './display';
-import { cn, isFilledText } from '@/utils';
 
 const identity = (value: string) => value;
 
@@ -230,6 +230,7 @@ function DraftInput({
 }) {
   const localize = useLocalize();
   const [value, setValue] = useState('');
+  useSessionDraft(value !== '');
   const [error, setError] = useState<string | null>(null);
   const errorId = `${id}-error`;
 

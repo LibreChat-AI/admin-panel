@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { ButtonGroup } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { TextareaField } from './TextareaField';
 import { SelectField } from './SelectField';
 import { NumberField } from './NumberField';
 import { TextField } from './TextField';
 import { ListField } from './ListField';
-import { useLocalize } from '@/hooks';
 
 type Mode = 'default' | 'off' | 'on' | 'number' | 'string' | 'list';
 
@@ -55,6 +55,7 @@ export function ScalarUnionField({
   const localize = useLocalize();
   const valueMode = modeOf(value);
   const [pendingMode, setPendingMode] = useState<Mode | null>(null);
+  useSessionDraft(!disabled && pendingMode !== null && pendingMode !== valueMode);
   const hasBoolean = kinds.includes('boolean');
   const valueKinds = kinds.filter((kind) => kind !== 'boolean');
 
