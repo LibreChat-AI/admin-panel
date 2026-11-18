@@ -1,7 +1,13 @@
-import { useContext, useEffect, useState } from 'react';
 import { ButtonGroup } from '@clickhouse/click-ui';
+import { useContext, useEffect, useState } from 'react';
 import type * as t from '@/types';
-import { useLocalize, useFieldStates, useValuesScope, usePendingVisibility } from '@/hooks';
+import {
+  useLocalize,
+  useFieldStates,
+  useValuesScope,
+  usePendingVisibility,
+  useSessionDraft,
+} from '@/hooks';
 import { agentMode, isAgentKeyHidden, planAgentSwitch } from './state';
 import { RowFilterContext } from '@/contexts/RowFilterContext';
 import { NestedGroup, toFieldId } from '../../renderer';
@@ -84,6 +90,7 @@ export function MemoryAgent({ field, ...props }: t.MemoryAgentProps) {
     if (value !== undefined) visibleValue[child.key] = value;
   }
   const derived = agentMode(visibleValue);
+  useSessionDraft(!props.disabled && chosen !== undefined && chosen !== derived);
   const mode = derived ?? chosen;
   const pendingHides = paths.filter((childPath) => visibility[childPath] === 'hide');
   const storedHides = paths.filter(

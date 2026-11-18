@@ -2,15 +2,14 @@ import { flushSync } from 'react-dom';
 import { Button } from '@clickhouse/click-ui';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type * as t from '@/types';
-import { BLANK_ENDPOINT_TEMPLATE, ENDPOINT_TEMPLATES } from '@/constants';
 import {
   useLocalize,
   useValuesScope,
   useDiscardPrompt,
   useConfigContract,
   useConfigFeatures,
+  useSessionDraft,
 } from '@/hooks';
-import { ConfigValuesContext } from '@/contexts/ConfigValuesContext';
 import {
   firstControl,
   restoreFocus,
@@ -19,6 +18,8 @@ import {
   commitFocusedField,
   isConfigValueEqual,
 } from '@/utils';
+import { BLANK_ENDPOINT_TEMPLATE, ENDPOINT_TEMPLATES } from '@/constants';
+import { ConfigValuesContext } from '@/contexts/ConfigValuesContext';
 import { hasBlockingIssue, validateEndpoint } from './model';
 import { DiscardConfirm } from '@/components/shared';
 import { sourceLabel } from '../../values';
@@ -99,6 +100,7 @@ export function EndpointCreator({
   const maxKeyLength = keyedTombstones ? limits.maxEntryKeyLength : undefined;
   const [template, setTemplate] = useState<t.EndpointTemplate | null>(null);
   const [draft, setDraft] = useState<t.ConfigRecord>({});
+  const recovery = useSessionDraft(open && template !== null);
   const [attempted, setAttempted] = useState(false);
   /** What Discard does once confirmed: close the drawer, or go back to the templates. */
   const [discardAction, setDiscardAction] = useState<'close' | 'back'>('close');
@@ -198,6 +200,7 @@ export function EndpointCreator({
   };
 
   const submit = () => {
+    if (recovery?.blocked) return;
     if (blocked) {
       setAttempted(true);
       return;

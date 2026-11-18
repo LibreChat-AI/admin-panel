@@ -18,12 +18,20 @@ import {
   LoadingState,
   DecorativeIcon,
   SelectedMemberList,
+  SessionDraftError,
   UserSearchInline,
 } from '@/components/shared';
-import { useLocalize, useReturnFocus, useRefreshScopes, useConfigFeatures } from '@/hooks';
+import {
+  useLocalize,
+  useReturnFocus,
+  useRefreshScopes,
+  useConfigFeatures,
+  useSessionRecovery,
+} from '@/hooks';
 import { RolePermissionsPanel } from './RolePermissionsPanel';
-import { cn, notifySuccess, notifyError } from '@/utils';
+import { cn, errorText, notifySuccess, notifyError } from '@/utils';
 import { MemberList } from './MemberList';
+import { SystemCapabilities } from '@/constants';
 
 type EditRoleTab = 'details' | 'permissions' | 'members';
 
@@ -36,6 +44,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
   const [name, setName] = useState(role?.name ?? '');
   const [description, setDescription] = useState(role?.description ?? '');
   const [permissions, setPermissions] = useState<t.RolePermissions | null>(null);
+  const [initialPermissions, setInitialPermissions] = useState<t.RolePermissions | null>(null);
   const [error, setError] = useState('');
 
   const [page, setPage] = useState(1);
@@ -59,6 +68,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
   useEffect(() => {
     if (roleDetail.data && permissions === null) {
       setPermissions(roleDetail.data.permissions);
+      setInitialPermissions(roleDetail.data.permissions);
     }
   }, [roleDetail.data, permissions]);
 
@@ -76,9 +86,13 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
 
   const detailsDirty = name !== role?.name || description !== role?.description;
   const permissionsDirty =
-    permissions !== null &&
-    JSON.stringify(permissions) !== JSON.stringify(roleDetail.data?.permissions);
+    permissions !== null && JSON.stringify(permissions) !== JSON.stringify(initialPermissions);
   const membersDirty = pendingAdditions.length > 0 || pendingRemovals.length > 0;
+  const recovery = useSessionRecovery({
+    active: !!role,
+    dirty: detailsDirty || permissionsDirty || membersDirty,
+    requiredCapabilities: [SystemCapabilities.MANAGE_ROLES],
+  });
 
   const addUser = (user: AdminUserSearchResult) => {
     setPendingAdditions((prev) => {
@@ -108,6 +122,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
     }: {
       name: string;
     }): Promise<{ roleId: string; name: string }> => {
+      recovery.requireSession();
       if (!role) throw new Error(localize('com_access_role_unavailable'));
       let roleId = role.id;
       if (detailsDirty) {
@@ -117,6 +132,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
         roleId = result.role.id;
       }
       if (permissionsDirty && permissions) {
+        recovery.requireSession();
         try {
           await updateRolePermissionsFn({ data: { id: roleId, permissions } });
         } catch (err) {
@@ -130,6 +146,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
           throw err;
         }
       }
+      recovery.requireSession();
       const memberResults = await Promise.allSettled([
         ...pendingAdditions.map((user) => addRoleMemberFn({ data: { roleId, userId: user.id } })),
         ...pendingRemovals.map((member) =>
@@ -159,10 +176,11 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
       notifySuccess(localize('com_toast_role_updated', { name: data.name }));
       onClose();
     },
-    onError: (err: Error) => notifyError(err.message),
+    onError: (err: Error) => notifyError(errorText(err, err.message, localize)),
   });
 
   const doSubmit = () => {
+    if (recovery.blocked) return;
     setError('');
     if (!role) return;
     if (!name.trim()) {
@@ -192,7 +210,19 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
         onCloseAutoFocus={returnFocus}
         className="modal-frost max-w-2xl!"
       >
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        {recovery.sessionError && (
+          <SessionDraftError
+            code={recovery.sessionError}
+            error={recovery.recoveryError}
+            onRetry={recovery.retrySession}
+          />
+        )}
+        <form
+          onSubmit={handleSubmit}
+          className="flex flex-col gap-5"
+          hidden={recovery.blocked}
+          inert={recovery.blocked || undefined}
+        >
           <Tabs
             value={activeTab}
             onValueChange={(v) => setActiveTab(v as EditRoleTab)}
@@ -314,7 +344,7 @@ export function EditRoleDialog({ role, canManage, onClose }: t.EditRoleDialogPro
                     existingIds={existingIds}
                     onAdd={addUser}
                     listboxId="edit-role-member-search"
-                    disabled={updateMutation.isPending}
+                    disabled={updateMutation.isPending || recovery.blocked}
                   />
                 )}
                 {pendingAdditions.length > 0 && (

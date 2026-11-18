@@ -9,8 +9,8 @@ import {
   testLangfuseConnectionFn,
   updateLangfuseConnectionFn,
 } from '@/server';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { notifyError, notifySuccess } from '@/utils';
-import { useLocalize } from '@/hooks';
 
 type VerificationState = 'idle' | 'unverified' | 'checking' | 'verified' | 'failed';
 
@@ -130,6 +130,24 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   const testedConnectionRef = useRef<string | undefined>(undefined);
   const requestRef = useRef(0);
   const hasDraftRef = useRef(false);
+  const recovery = useSessionDraft(
+    !disabled &&
+      (secretKey !== '' ||
+        (status !== undefined &&
+          (destination !== (status.destination ?? '') || publicKey !== (status.publicKey ?? '')))),
+  );
+
+  const blocked = disabled || recovery?.blocked === true;
+  const blockedRef = useRef(blocked);
+  blockedRef.current = blocked;
+
+  useEffect(() => {
+    if (!blocked) return;
+    requestRef.current += 1;
+    testedConnectionRef.current = undefined;
+    setVerificationState('unverified');
+    setVerificationMessage('');
+  }, [blocked]);
 
   const connectionQuery = useQuery({
     queryKey: LANGFUSE_CONNECTION_QUERY_KEY,
@@ -174,7 +192,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     // Read-only viewers lack manage:configs:langfuse and cannot run verification. Show the stored
     // connection as unverified rather than "not configured", and clear the in-flight and
     // tested-connection markers so switching back to editable re-verifies from scratch.
-    if (disabled) {
+    if (blocked) {
       requestRef.current += 1;
       testedConnectionRef.current = undefined;
       setVerificationState('unverified');
@@ -191,13 +209,13 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
       { destination: status?.destination ?? '', publicKey: status?.publicKey ?? '' },
       {
         onSuccess: (result) => {
-          if (requestId !== requestRef.current) return;
+          if (blockedRef.current || requestId !== requestRef.current) return;
           testedConnectionRef.current = connectionKey;
           setVerificationState(result.success ? 'verified' : 'failed');
           setVerificationMessage(result.success ? '' : (result.message ?? ''));
         },
         onError: (error: Error) => {
-          if (requestId !== requestRef.current) return;
+          if (blockedRef.current || requestId !== requestRef.current) return;
           if (testedConnectionRef.current === connectionKey) {
             testedConnectionRef.current = undefined;
           }
@@ -206,7 +224,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         },
       },
     );
-  }, [status, connectionQuery.dataUpdatedAt, disabled]);
+  }, [status, connectionQuery.dataUpdatedAt, blocked]);
 
   if (isEditingScope) {
     return (
@@ -241,13 +259,14 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     publicKeyChanged ||
     trimmedSecretKey !== '';
   const canSave =
-    !disabled &&
+    !blocked &&
     destination !== '' &&
     trimmedPublicKey !== '' &&
     (configured || trimmedSecretKey !== '');
   const busy = updateMutation.isPending || testMutation.isPending;
 
   const markDraftUnverified = () => {
+    if (blockedRef.current) return;
     hasDraftRef.current = true;
     requestRef.current += 1;
     setVerificationState('unverified');
@@ -260,6 +279,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     nextSecretKey: string,
     onVerified?: () => void,
   ) => {
+    if (blockedRef.current) return;
     const requestId = ++requestRef.current;
     if (!nextDestination || !nextPublicKey || (!configured && !nextSecretKey)) {
       setVerificationState('idle');
@@ -277,13 +297,13 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
       },
       {
         onSuccess: (result) => {
-          if (requestId !== requestRef.current) return;
+          if (blockedRef.current || requestId !== requestRef.current) return;
           setVerificationState(result.success ? 'verified' : 'failed');
           setVerificationMessage(result.success ? '' : (result.message ?? ''));
           if (result.success) onVerified?.();
         },
         onError: (error: Error) => {
-          if (requestId !== requestRef.current) return;
+          if (blockedRef.current || requestId !== requestRef.current) return;
           setVerificationState('failed');
           setVerificationMessage(error.message);
         },
@@ -292,6 +312,8 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   };
 
   const saveConnection = () => {
+    if (blockedRef.current) return;
+    const requestId = requestRef.current;
     const payload = {
       // Credential edits are committed through the explicit "Save & enable" action.
       enabled: true,
@@ -301,6 +323,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
     };
     updateMutation.mutate(payload, {
       onSuccess: (nextStatus) => {
+        if (blockedRef.current || requestId !== requestRef.current) return;
         hasDraftRef.current = false;
         queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, nextStatus);
         testedConnectionRef.current = getConnectionKey(nextStatus);
@@ -312,7 +335,9 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         setEditingSecretKey(false);
         notifySuccess(localize('com_config_langfuse_saved'));
       },
-      onError: (error: Error) => notifyError(error.message),
+      onError: (error: Error) => {
+        if (!blockedRef.current) notifyError(error.message);
+      },
     });
   };
 
@@ -321,6 +346,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   };
 
   const handleCancel = () => {
+    if (blockedRef.current) return;
     hasDraftRef.current = false;
     const latestStatus =
       queryClient.getQueryData<TLangfuseConnectionStatus>(LANGFUSE_CONNECTION_QUERY_KEY) ?? status;
@@ -340,8 +366,9 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
   };
 
   const handleEnabledChange = () => {
-    if (!configured || !status?.destination || !status.publicKey) return;
+    if (blockedRef.current || !configured || !status?.destination || !status.publicKey) return;
 
+    const requestId = requestRef.current;
     const nextEnabled = status.enabled !== true;
     updateMutation.mutate(
       {
@@ -351,12 +378,15 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
       },
       {
         onSuccess: (nextStatus) => {
+          if (blockedRef.current || requestId !== requestRef.current) return;
           queryClient.setQueryData(LANGFUSE_CONNECTION_QUERY_KEY, nextStatus);
           testedConnectionRef.current = getConnectionKey(nextStatus);
           setStatus(nextStatus);
           notifySuccess(localize('com_config_langfuse_saved'));
         },
-        onError: (error: Error) => notifyError(error.message),
+        onError: (error: Error) => {
+          if (!blockedRef.current) notifyError(error.message);
+        },
       },
     );
   };
@@ -387,11 +417,13 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
       </div>
 
       <Select
+        key={blocked ? 'blocked' : 'active'}
         label={localize('com_config_langfuse_destination')}
         value={destination || undefined}
         placeholder={localize('com_config_langfuse_select_destination')}
-        disabled={disabled || busy || (status?.destinations.length ?? 0) === 0}
+        disabled={blocked || busy || (status?.destinations.length ?? 0) === 0}
         onSelect={(value) => {
+          if (blockedRef.current) return;
           hasDraftRef.current = true;
           setDestination(value);
           verify(value, trimmedPublicKey, trimmedSecretKey);
@@ -411,7 +443,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         autoFocus={editingPublicKey}
         value={publicKey}
         placeholder="pk-lf-..."
-        disabled={disabled || busy}
+        disabled={blocked || busy}
         onEdit={() => {
           hasDraftRef.current = true;
           setEditingPublicKey(true);
@@ -429,7 +461,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
         autoFocus={editingSecretKey}
         value={secretKey}
         placeholder="sk-lf-..."
-        disabled={disabled || busy}
+        disabled={blocked || busy}
         onEdit={() => {
           hasDraftRef.current = true;
           setEditingSecretKey(true);
@@ -447,7 +479,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
               htmlType="button"
               type="secondary"
               label={localize('com_ui_cancel')}
-              disabled={disabled || busy}
+              disabled={blocked || busy}
               onClick={handleCancel}
             />
             <Button
@@ -472,7 +504,7 @@ export function LangfuseRenderer({ disabled, isEditingScope }: t.FieldRendererPr
                 ? 'com_config_langfuse_disable'
                 : 'com_config_langfuse_enable',
             )}
-            disabled={disabled || busy}
+            disabled={blocked || busy}
             loading={updateMutation.isPending}
             onClick={handleEnabledChange}
           />

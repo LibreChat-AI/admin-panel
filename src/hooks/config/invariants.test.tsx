@@ -242,6 +242,8 @@ function renderTargets(
       };
       const save = useConfigSave({
         sessionIdentity: { userId: 'admin-1', tenantId: null },
+        sectionPermissions: {},
+        canManageConfig: false,
         schemaTree: tree,
         schemaPathSet,
         editingScope: scope,

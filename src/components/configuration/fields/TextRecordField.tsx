@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { ButtonGroup } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { TextareaField } from './TextareaField';
 import { KeyValueField } from './KeyValueField';
 import { TextField } from './TextField';
 import { ListField } from './ListField';
-import { useLocalize } from '@/hooks';
 
 type Mode = 'simple' | 'advanced';
 
@@ -44,6 +44,7 @@ export function TextRecordField({
   const [mode, setMode] = useState<Mode>(() => inferMode(value));
   const [syncedKind, setSyncedKind] = useState(() => inferMode(value));
   const valueMode = inferMode(value);
+  useSessionDraft(!disabled && mode !== valueMode);
   if (valueMode !== syncedKind) {
     setSyncedKind(valueMode);
     setMode(valueMode);

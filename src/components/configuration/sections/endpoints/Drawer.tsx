@@ -1,8 +1,10 @@
+import { useContext } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import type * as t from '@/types';
+import { CloseButton, SessionDraftError } from '@/components/shared';
 import { RowFilterContext } from '@/contexts/RowFilterContext';
+import { DraftsContext } from '@/contexts/DraftsContext';
 import { useLocalize, useMediaQuery } from '@/hooks';
-import { CloseButton } from '@/components/shared';
 import { cn } from '@/utils';
 
 /**
@@ -27,7 +29,11 @@ export function EndpointDrawer({
   returnFocus,
 }: t.EndpointDrawerProps) {
   const localize = useLocalize();
-  const requestClose = onRequestClose ?? onClose;
+  const recovery = useContext(DraftsContext);
+  const blocked = recovery?.blocked ?? false;
+  const requestClose = () => {
+    if (!blocked) (onRequestClose ?? onClose)();
+  };
   const isPhone = useMediaQuery('(max-width: 639.98px)');
 
   return (
@@ -75,17 +81,38 @@ export function EndpointDrawer({
             </div>
             <CloseButton onClick={requestClose} label={localize('com_ui_close')} />
           </header>
-          {notice && !isPhone && <div className="flex flex-col gap-2 px-4 pt-3">{notice}</div>}
+          {recovery?.sessionError && (
+            <SessionDraftError
+              code={recovery.sessionError}
+              error={recovery.recoveryError}
+              onRetry={recovery.retrySession}
+            />
+          )}
+          {notice && !isPhone && (
+            <div
+              className="flex flex-col gap-2 px-4 pt-3"
+              style={blocked ? { display: 'none' } : undefined}
+              inert={blocked}
+            >
+              {notice}
+            </div>
+          )}
           <RowFilterContext.Provider value={null}>
             <div
               ref={bodyRef}
               className="settings-content min-h-0 flex-1 overflow-y-auto px-4 pt-4 pb-8"
+              style={blocked ? { display: 'none' } : undefined}
+              inert={blocked}
             >
               {notice && isPhone && <div className="mb-8 flex flex-col gap-2">{notice}</div>}
               {children}
             </div>
           </RowFilterContext.Provider>
-          <footer className="flex flex-wrap items-center gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3">
+          <footer
+            className="flex flex-wrap items-center gap-2 border-t border-(--cui-color-stroke-default) px-4 py-3"
+            style={blocked ? { display: 'none' } : undefined}
+            inert={blocked}
+          >
             {footer}
           </footer>
         </Dialog.Content>

@@ -20,7 +20,8 @@ const { LABELS } = vi.hoisted(() => ({
   } as Readonly<Record<string, string>>,
 }));
 
-vi.mock('@/hooks', () => ({
+vi.mock('@/hooks', async () => ({
+  ...(await vi.importActual<typeof import('@/hooks/config/pending')>('@/hooks/config/pending')),
   useLocalize: () => (key: string) => LABELS[key] ?? key,
 }));
 

@@ -7,9 +7,9 @@
 import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type * as t from '@/types';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { DecorativeIcon } from '@/components/shared';
 import { INPUT_CLASSES } from '../../fields/display';
-import { useLocalize } from '@/hooks';
 import { cn } from '@/utils';
 
 /** OpenAI-compatible parameters providers commonly reject. */
@@ -61,6 +61,7 @@ export function TagListField({
 }: t.TagListFieldProps) {
   const localize = useLocalize();
   const [draft, setDraft] = useState('');
+  useSessionDraft(!disabled && draft !== '');
   const listId = `${id}-suggestions`;
   const taken = new Set(values);
 

@@ -279,6 +279,9 @@ export type AnnounceWriteFn = (
 /** Options for `useConfigSave` (WS1). */
 export interface ConfigSaveOptions {
   sessionIdentity: AdminSessionIdentity;
+  sectionPermissions: SectionPermissionMap;
+  canManageConfig: boolean;
+  hasPendingDrafts?: boolean;
   schemaTree: SchemaField[];
   schemaPathSet: Set<string>;
   editingScope?: ConfigScope;

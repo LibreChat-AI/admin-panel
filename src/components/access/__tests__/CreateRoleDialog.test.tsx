@@ -23,6 +23,8 @@ const role = {
 } as t.Role;
 
 vi.mock('@/hooks', async () => {
+  const { useSessionRecovery } =
+    await vi.importActual<typeof import('@/hooks/session')>('@/hooks/session');
   const { useRefreshScopes } =
     await vi.importActual<typeof import('@/hooks/config/scope')>('@/hooks/config/scope');
   const { useReturnFocus } =
@@ -32,8 +34,16 @@ vi.mock('@/hooks', async () => {
       options ? `${key}(${Object.values(options).join(',')})` : key,
     useRefreshScopes,
     useReturnFocus,
+    useSessionRecovery,
   };
 });
+
+vi.mock('@tanstack/react-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tanstack/react-router')>()),
+  getRouteApi: () => ({
+    useRouteContext: () => ({ user: { id: 'admin' }, tenantId: null }),
+  }),
+}));
 
 vi.mock('@/components/shared', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/components/shared')>()),

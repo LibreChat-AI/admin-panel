@@ -15,6 +15,7 @@ export * from './keys';
 export * from './layers';
 export * from './mime';
 export * from './options';
+export * from './pending';
 export * from './preview';
 export * from './accordion';
 export * from './reveal';

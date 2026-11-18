@@ -6,6 +6,26 @@ import { SystemCapabilities } from '@librechat/data-schemas/capabilities';
 const parsedPort = parseInt(process.env.MOCK_BACKEND_PORT || '3081', 10);
 const PORT = Number.isNaN(parsedPort) ? 3081 : parsedPort;
 const ADMIN_PANEL_URL = process.env.MOCK_ADMIN_PANEL_URL || 'http://localhost:3000';
+const SESSION_CONTROL = process.env.MOCK_SESSION_CONTROL === 'true';
+const sessionState = {
+  refreshStatus: 200,
+  rejectBearer: false,
+  refreshes: 0,
+  writes: 0,
+};
+const sessionConfig = {
+  balance: { enabled: true, startBalance: 1000 },
+  endpoints: {
+    custom: [
+      {
+        name: 'Example',
+        apiKey: 'user_provided',
+        baseURL: 'https://example.test/v1',
+        models: { default: ['example-model'] },
+      },
+    ],
+  },
+};
 
 function parseBody(req) {
   return new Promise((resolve) => {
@@ -305,6 +325,8 @@ function authFailure(req) {
   if (!auth || !auth.startsWith('Bearer ')) return [401, { error: 'Authentication required' }];
   if (!ADMIN_TOKENS.has(auth.slice('Bearer '.length)))
     return [401, { error: 'Invalid or expired token' }];
+  if (SESSION_CONTROL && sessionState.rejectBearer)
+    return [401, { error: 'Invalid or expired token' }];
   return null;
 }
 
@@ -322,6 +344,57 @@ const admin =
 // anything else as JSON with them (a redirect's Location, for example).
 
 const handlers = {
+  ...(SESSION_CONTROL
+    ? {
+        'POST /__test/session': (body) => {
+          Object.assign(sessionState, body);
+          if (Number.isFinite(body.startBalance))
+            sessionConfig.balance.startBalance = body.startBalance;
+          return [200, { ...sessionState }];
+        },
+        'GET /__test/session': () => [200, { ...sessionState }],
+        'POST /api/admin/oauth/refresh': (body) => {
+          sessionState.refreshes++;
+          if (body.provider !== 'openid' || body.refresh_token !== 'test-refresh-token')
+            return [401, { code: 'REFRESH_FAILED' }];
+          if (sessionState.refreshStatus !== 200)
+            return [
+              sessionState.refreshStatus,
+              {
+                code:
+                  sessionState.refreshStatus === 503
+                    ? 'AUTH_SESSION_CHECK_UNAVAILABLE'
+                    : 'REFRESH_FAILED',
+              },
+            ];
+          sessionState.rejectBearer = false;
+          return [
+            200,
+            {
+              token: 'test-admin-token',
+              refreshToken: 'test-refresh-token',
+              expiresAt: Date.now() + 15 * 60 * 1000,
+            },
+          ];
+        },
+        'GET /api/admin/config/meta': admin(() => [200, { features: { resolvedApi: true } }]),
+        'GET /api/admin/config/base': admin(() => [
+          200,
+          { config: { ...sessionConfig, config: sessionConfig } },
+        ]),
+        'GET /api/admin/config/role/:id': admin(() => [404, { error: 'Config not found' }]),
+        'GET /api/admin/config': admin(() => [200, { configs: [] }]),
+        'GET /api/admin/config/catalog': admin(() => [
+          200,
+          { endpoints: {}, models: {}, tools: [] },
+        ]),
+        'GET /api/admin/config/env-status': admin(() => [200, { vars: {} }]),
+        'GET /api/admin/config/resolved/:type/:id': admin(() => [
+          200,
+          { yaml: sessionConfig, resolved: sessionConfig, layers: [] },
+        ]),
+      }
+    : {}),
   'POST /api/admin/login/local': (body, req) => {
     if (body.email === 'rejected@test.com') return [404, { message: 'Incorrect password.' }];
     if (body.email === 'unverified@test.com') return [422, { message: 'Email not verified.' }];
@@ -707,6 +780,16 @@ const server = createServer(async (req, res) => {
   if (matched) {
     const reqBody = req.method === 'GET' ? {} : await parseBody(req);
     [status, body, headers = {}] = matched.handler(reqBody, req, matched.params, url.searchParams);
+    if (
+      SESSION_CONTROL &&
+      req.method !== 'GET' &&
+      status >= 200 &&
+      status < 300 &&
+      url.pathname.startsWith('/api/admin/') &&
+      !url.pathname.includes('/oauth/')
+    ) {
+      sessionState.writes++;
+    }
   }
 
   if (typeof body === 'string') {

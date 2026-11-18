@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { Button, NumberField } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { useLocalize, useRefreshScopes } from '@/hooks';
+import { useLocalize, useRefreshScopes, useSessionDraft } from '@/hooks';
 import { MAX_SCOPE_PRIORITY } from '@/constants';
 import { setScopePriorityFn } from '@/server';
 import { errorText } from '@/utils';
@@ -35,6 +35,7 @@ export function ScopePriorityEditor({ scope, onError }: t.ScopePriorityEditorPro
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const recovery = useSessionDraft(draft !== null && draft !== String(scope.priority));
 
   const close = () => {
     setDraft(null);
@@ -42,7 +43,7 @@ export function ScopePriorityEditor({ scope, onError }: t.ScopePriorityEditorPro
   };
 
   const save = async () => {
-    if (draft == null || saving) return;
+    if (draft == null || saving || recovery?.blocked) return;
     const invalid = priorityProblem(draft, localize);
     if (invalid) {
       setProblem(invalid);

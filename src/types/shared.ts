@@ -2,6 +2,7 @@ import type { ReactNode, Ref, RefObject, MutableRefObject } from 'react';
 import type { AdminUserSearchResult } from '@librechat/data-schemas';
 import type { ButtonProps } from '@clickhouse/click-ui';
 import type { MenuIconName } from './scope';
+import type { SessionRecoveryStatus } from './session';
 
 export interface ReorderableListHandle {
   discard: () => void;
@@ -68,6 +69,7 @@ export interface FormDialogProps {
   submitLabel: string;
   submitDisabled?: boolean;
   saving?: boolean;
+  recovery?: SessionRecoveryStatus;
   error?: string;
   /** Muted footer text shown while there is no error (e.g. what is still needed to submit). */
   hint?: string;

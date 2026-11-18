@@ -39,6 +39,30 @@ beforeAll(() => {
 });
 
 describe('UserSearchInline', () => {
+  it('hides open suggestions while the owner blocks editing and keeps the search text', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const onAdd = vi.fn();
+    const content = (disabled: boolean) => (
+      <QueryClientProvider client={queryClient}>
+        <UserSearchInline existingIds={[]} onAdd={onAdd} disabled={disabled} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(content(false));
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, { target: { value: 'al' } });
+    await screen.findByRole('listbox');
+
+    rerender(content(true));
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(input).toBeDisabled();
+    expect(input).toHaveValue('al');
+    expect(onAdd).not.toHaveBeenCalled();
+
+    rerender(content(false));
+    expect(await screen.findByRole('listbox')).toBeVisible();
+    expect(input).toHaveValue('al');
+  });
+
   it('points the field at the highlighted suggestion', async () => {
     const { input } = renderInDialog();
     fireEvent.change(input, { target: { value: 'al' } });

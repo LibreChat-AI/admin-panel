@@ -1,7 +1,6 @@
-import { Link } from '@clickhouse/click-ui';
 import type * as t from '@/types';
-import { SessionError } from '@/components/SessionError';
-import { withBasePath, uniqueSkipped } from '@/utils';
+import { SessionDraftError } from '@/components/shared';
+import { uniqueSkipped } from '@/utils';
 import { useLocalize } from '@/hooks';
 
 export function SaveSessionError({
@@ -16,7 +15,6 @@ export function SaveSessionError({
   onRetry: () => Promise<void>;
 }) {
   const localize = useLocalize();
-  const ended = code === 'OPENID_SESSION_ENDED';
   const outcome = (() => {
     if (!result) return null;
     if (result.partiallyWritten) return 'com_config_apply_partial';
@@ -26,36 +24,17 @@ export function SaveSessionError({
   const skipped = result ? uniqueSkipped([...result.skipped, ...result.reported]) : [];
 
   return (
-    <SessionError embedded ended={ended} onRetry={onRetry} retryLabel={localize('com_ui_retry')}>
+    <SessionDraftError code={code} error={error} onRetry={onRetry}>
       {result && outcome && (
         <p role="status" className="text-sm text-(--cui-color-text-default)">
           {localize(outcome, { count: result.applied })}
         </p>
-      )}
-      <p className="text-sm text-(--cui-color-text-muted)">
-        {localize('com_config_session_draft_kept')}
-      </p>
-      {ended && (
-        <Link
-          href={withBasePath('/login?session=ended', import.meta.env.VITE_BASE_PATH)}
-          target="_blank"
-          rel="noopener"
-          size="sm"
-          weight="medium"
-        >
-          {localize('com_config_session_sign_in')}
-        </Link>
       )}
       {skipped.length > 0 && (
         <p className="text-sm text-(--cui-color-text-muted)">
           {localize('com_config_session_skipped', { count: skipped.length })}
         </p>
       )}
-      {error && (
-        <p role="alert" className="text-sm text-(--cui-color-text-danger)">
-          {error}
-        </p>
-      )}
-    </SessionError>
+    </SessionDraftError>
   );
 }

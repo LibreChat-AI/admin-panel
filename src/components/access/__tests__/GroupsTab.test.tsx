@@ -34,12 +34,21 @@ vi.mock('@/hooks', async () => ({
     options ? `${key}(${Object.values(options).join(',')})` : key,
   useCapabilities: () => ({ hasCapability: () => true }),
   useRefreshScopes: () => vi.fn(),
+  useSessionRecovery: (await vi.importActual<typeof import('@/hooks/session')>('@/hooks/session'))
+    .useSessionRecovery,
   useClearButtonLabel: vi.fn(),
   useReturnFocus: (await vi.importActual<typeof import('@/hooks/dialogs')>('@/hooks/dialogs'))
     .useReturnFocus,
   useAnnouncement: (
     await vi.importActual<typeof import('@/hooks/useAnnouncement')>('@/hooks/useAnnouncement')
   ).useAnnouncement,
+}));
+
+vi.mock('@tanstack/react-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@tanstack/react-router')>()),
+  getRouteApi: () => ({
+    useRouteContext: () => ({ user: { id: 'admin' }, tenantId: null }),
+  }),
 }));
 
 /** The `search` of every groups list request sent so far. */
