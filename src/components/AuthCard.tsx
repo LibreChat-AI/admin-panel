@@ -24,6 +24,7 @@ export function AuthCard({
   redirectTo = '/',
   providers = NO_SSO_PROVIDERS,
   ssoOnly = false,
+  autoRedirect = true,
 }: t.AuthCardProps) {
   const router = useRouter();
   const localize = useLocalize();
@@ -34,7 +35,8 @@ export function AuthCard({
   const [errors, setErrors] = useState<t.FieldErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [announcement, setAnnouncement] = useState('');
-  const autoRedirectProvider = ssoOnly && providers.length === 1 ? providers[0].id : undefined;
+  const autoRedirectProvider =
+    autoRedirect && ssoOnly && providers.length === 1 ? providers[0].id : undefined;
   const [ssoStarting, setSsoStarting] = useState<t.SsoProviderId | null>(
     autoRedirectProvider ?? null,
   );
@@ -308,6 +310,7 @@ export function AuthCard({
               <>
                 <TextField
                   label={localize('com_auth_email_label')}
+                  autoComplete="username"
                   placeholder={localize('com_auth_email_placeholder')}
                   value={email}
                   onChange={(value) => {
@@ -320,6 +323,7 @@ export function AuthCard({
 
                 <PasswordInput
                   label={localize('com_auth_password_label')}
+                  autoComplete="current-password"
                   placeholder={localize('com_auth_password_placeholder')}
                   value={password}
                   onChange={(value) => {

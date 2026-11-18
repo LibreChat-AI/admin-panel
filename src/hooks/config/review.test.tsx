@@ -10,14 +10,19 @@ import { extractSchemaTree, getSchemaPathSet } from '@/server/config';
 import { ConfigContractContext } from '@/contexts/ContractContext';
 import { ReviewList } from '@/components/configuration/review';
 import { createServerContract } from '@/test/fixtures';
-import { BUNDLED_CONFIG_CONTRACT } from '@/constants';
-import { applyConfigChangesFn } from '@/server';
+import { BUNDLED_CONFIG_CONTRACT, SystemCapabilities } from '@/constants';
+import { applyConfigChangesFn, verifyAdminTokenFn, getEffectiveCapabilitiesFn } from '@/server';
 import { useChangeReview, useBaseOverrides } from './review';
 import { useConfigEdits } from './edits';
-import { flattenObject, createBaseLayers } from '@/utils';
+import { flattenObject, createBaseLayers, sessionFetch } from '@/utils';
 import { useConfigSave } from './save';
 
-vi.mock('@/server', () => ({ applyConfigChangesFn: vi.fn(), resetBaseConfigFn: vi.fn() }));
+vi.mock('@/server', () => ({
+  applyConfigChangesFn: vi.fn(),
+  resetBaseConfigFn: vi.fn(),
+  verifyAdminTokenFn: vi.fn(),
+  getEffectiveCapabilitiesFn: vi.fn(),
+}));
 
 vi.mock('@clickhouse/click-ui', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@clickhouse/click-ui')>();
@@ -53,7 +58,7 @@ function renderPage(
       <ConfigContractContext.Provider value={contract}>{children}</ConfigContractContext.Provider>
     </QueryClientProvider>
   );
-  return renderHook(
+  const rendered = renderHook(
     ({ targetRevision }: { targetRevision?: string | null }) => {
       const edits = useConfigEdits({
         isEditingScope: false,
@@ -75,7 +80,13 @@ function renderPage(
         baseActiveConfigValues: config,
         targetRevision,
       };
-      const save = useConfigSave({ schemaTree: tree, schemaPathSet, layers, edits });
+      const save = useConfigSave({
+        sessionIdentity: { userId: 'admin-1', tenantId: null },
+        schemaTree: tree,
+        schemaPathSet,
+        layers,
+        edits,
+      });
       const review = useChangeReview({
         schemaTree: tree,
         layers,
@@ -87,6 +98,7 @@ function renderPage(
     },
     { wrapper, initialProps: { targetRevision: initialRevision } },
   );
+  return { ...rendered, client };
 }
 
 /** The review's rows, entry rows included, in order. */
@@ -494,6 +506,265 @@ describe('saving against the loaded revision (changesBatch)', () => {
     );
     invalidate.mockRestore();
   });
+
+  it.each([
+    'OPENID_SESSION_ENDED',
+    'AUTH_SESSION_CHECK_UNAVAILABLE',
+    'No admin session token',
+  ] as const)('keeps the draft and revision after %s, then retries only reads', async (code) => {
+    applyMock.mockRejectedValueOnce(new Error(code));
+    const { result } = renderPage(yaml, {}, yaml, batch, 'base:4');
+    act(() => result.current.edits.handleFieldChange('balance.startBalance', 314159));
+    await act(() => result.current.save.handleConfirmSave());
+    expect(result.current.save.sessionError).toBe(
+      code === 'AUTH_SESSION_CHECK_UNAVAILABLE' ? code : 'OPENID_SESSION_ENDED',
+    );
+    expect(result.current.edits.editedValues['balance.startBalance']).toBe(314159);
+    expect(result.current.edits.saveError).not.toBe(code);
+    vi.mocked(verifyAdminTokenFn).mockResolvedValue({
+      valid: true,
+      user: { id: 'admin-1', email: 'admin@example.test', name: 'Admin', role: 'ADMIN' },
+      tenantId: null,
+    });
+    vi.mocked(getEffectiveCapabilitiesFn).mockResolvedValue({
+      capabilities: [SystemCapabilities.ACCESS_ADMIN],
+    });
+    await act(() => result.current.save.retrySession());
+    expect(result.current.save.sessionError).toBeNull();
+    expect(result.current.save.editRevision).toBe('base:4');
+    expect(result.current.edits.editedValues['balance.startBalance']).toBe(314159);
+    expect(applyMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels an older permission refetch before its denied answer can replace the draft', async () => {
+    const { result, client } = renderPage();
+    const queryKey = ['effectiveCapabilities', 'admin-1'];
+    const existing = { available: true, capabilities: [SystemCapabilities.ACCESS_ADMIN] };
+    client.setQueryData(queryKey, existing);
+    let finish: (value: typeof existing) => void = () => undefined;
+    const request = client
+      .fetchQuery({
+        queryKey,
+        queryFn: () =>
+          new Promise<typeof existing>((resolve) => {
+            finish = resolve;
+          }),
+      })
+      .catch(() => undefined);
+    act(() => result.current.edits.handleFieldChange('balance.startBalance', 314159));
+    await act(async () => {
+      finish({ available: true, capabilities: [] });
+      await request;
+    });
+    expect(client.getQueryData(queryKey)).toEqual(existing);
+    expect(result.current.edits.editedValues['balance.startBalance']).toBe(314159);
+  });
+
+  it('holds a background session redirect while edits are pending', async () => {
+    const { result } = renderPage();
+    act(() => result.current.edits.handleFieldChange('balance.startBalance', 314159));
+    const assign = vi.fn();
+    vi.stubGlobal('window', {
+      location: { pathname: '/configuration', search: '', hash: '', assign },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response('{}', { headers: { 'X-Admin-Session-Error': 'OPENID_SESSION_ENDED' } }),
+        ),
+    );
+    try {
+      await act(async () => {
+        await expect(sessionFetch('/background')).rejects.toThrow('OPENID_SESSION_ENDED');
+      });
+      expect(assign).not.toHaveBeenCalled();
+      expect(result.current.save.sessionError).toBe('OPENID_SESSION_ENDED');
+      expect(result.current.edits.editedValues['balance.startBalance']).toBe(314159);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
+    ['another account', 'other', null, [SystemCapabilities.ACCESS_ADMIN]],
+    ['another tenant', 'admin-1', 'other-tenant', [SystemCapabilities.ACCESS_ADMIN]],
+    ['revoked access', 'admin-1', null, []],
+  ] as const)('keeps recovery blocked for %s', async (_case, id, tenantId, capabilities) => {
+    const { result } = renderPage();
+    act(() => result.current.edits.handleFieldChange('balance.startBalance', 314159));
+    act(() => result.current.save.handleSessionError('OPENID_SESSION_ENDED'));
+    vi.mocked(verifyAdminTokenFn).mockResolvedValue({
+      valid: true,
+      user: { id, email: 'admin@example.test', name: 'Admin', role: 'ADMIN' },
+      tenantId,
+    });
+    vi.mocked(getEffectiveCapabilitiesFn).mockResolvedValue({ capabilities: [...capabilities] });
+    const publish = vi.spyOn(QueryClient.prototype, 'setQueryData');
+    try {
+      await act(() => result.current.save.retrySession());
+      expect(result.current.save.sessionError).toBe('OPENID_SESSION_ENDED');
+      expect(result.current.save.recoveryError).toBeTruthy();
+      expect(result.current.edits.editedValues['balance.startBalance']).toBe(314159);
+      expect(publish).not.toHaveBeenCalled();
+      expect(applyMock).not.toHaveBeenCalled();
+    } finally {
+      publish.mockRestore();
+    }
+  });
+
+  it.each([false, true])(
+    'recovers a returned write without replay (partial: %s)',
+    async (partiallyWritten) => {
+      applyMock.mockResolvedValue({
+        ...saved,
+        sessionError: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+        partiallyWritten,
+        failed: partiallyWritten
+          ? [
+              {
+                path: 'balance.startBalance',
+                code: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+                message: 'Retry',
+              },
+            ]
+          : [],
+      });
+      const { result } = renderPage(yaml, {}, yaml, batch, 'base:4');
+      act(() => result.current.edits.handleFieldChange('balance.startBalance', 314159));
+      await act(() => result.current.save.handleConfirmSave());
+      vi.mocked(verifyAdminTokenFn).mockResolvedValue({
+        valid: true,
+        user: { id: 'admin-1', email: 'admin@example.test', name: 'Admin', role: 'ADMIN' },
+        tenantId: null,
+      });
+      vi.mocked(getEffectiveCapabilitiesFn).mockResolvedValue({
+        capabilities: [SystemCapabilities.ACCESS_ADMIN],
+      });
+      await act(() => result.current.save.retrySession());
+      expect(result.current.save.sessionResult).toBeNull();
+      expect(result.current.edits.editedValues).toEqual(
+        partiallyWritten ? { 'balance.startBalance': 314159 } : {},
+      );
+      if (partiallyWritten) expect(result.current.save.editRevision).toBe('base:4');
+      expect(applyMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([false, true])(
+    'retains the save outcome without refetching when session recovery is needed (partial: %s)',
+    async (partiallyWritten) => {
+      const outcome: t.ApplyConfigChangesResult = {
+        ...saved,
+        sessionError: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+        partiallyWritten,
+        failed: partiallyWritten
+          ? [
+              {
+                path: 'balance.startBalance',
+                code: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+                message: 'Retry',
+              },
+            ]
+          : [],
+      };
+      applyMock.mockResolvedValue(outcome);
+      const invalidate = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+      try {
+        const { result } = renderPage(yaml, {}, yaml, batch, 'base:4');
+        act(() => result.current.edits.handleFieldChange('balance.startBalance', 5));
+        act(() => result.current.save.openReview());
+        invalidate.mockClear();
+        await act(() => result.current.review.confirm());
+        expect(result.current.save.sessionResult).toEqual(outcome);
+        expect(result.current.save.saving).toBe(false);
+        expect(result.current.review.open).toBe(false);
+        expect(invalidate).not.toHaveBeenCalled();
+        expect(applyMock).toHaveBeenCalledTimes(1);
+      } finally {
+        invalidate.mockRestore();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'retains an imported save outcome before returning or throwing (partial: %s)',
+    async (partiallyWritten) => {
+      const outcome: t.ApplyConfigChangesResult = {
+        ...saved,
+        sessionError: 'OPENID_SESSION_ENDED',
+        partiallyWritten,
+        failed: partiallyWritten
+          ? [{ path: 'balance.startBalance', code: 'OPENID_SESSION_ENDED', message: 'Ended' }]
+          : [],
+      };
+      applyMock.mockResolvedValue(outcome);
+      const invalidate = vi.spyOn(QueryClient.prototype, 'invalidateQueries');
+      try {
+        const { result } = renderPage();
+        await act(async () => {
+          const write = result.current.save.writeChanges(
+            { type: 'base' },
+            [{ fieldPath: 'balance.startBalance', value: 5 }],
+            [],
+          );
+          if (partiallyWritten) await expect(write).rejects.toThrow('Save failed partway');
+          else await expect(write).resolves.toEqual({ skipped: [], reported: [] });
+        });
+        expect(result.current.save.sessionResult).toEqual(outcome);
+        expect(invalidate).not.toHaveBeenCalled();
+        expect(applyMock).toHaveBeenCalledTimes(1);
+      } finally {
+        invalidate.mockRestore();
+      }
+    },
+  );
+
+  it.each([true, false])(
+    'releases session redirects when the save resolves before unmount: %s',
+    async (beforeUnmount) => {
+      let complete: (result: t.ApplyConfigChangesResult) => void = () => undefined;
+      applyMock.mockReturnValue(
+        new Promise<t.ApplyConfigChangesResult>((resolve) => {
+          complete = resolve;
+        }),
+      );
+      const { result, unmount } = renderPage();
+      const write = result.current.save.writeChanges(
+        { type: 'base' },
+        [{ fieldPath: 'balance.startBalance', value: 5 }],
+        [],
+      );
+      if (!beforeUnmount) unmount();
+      await act(async () => {
+        complete({ ...saved, sessionError: 'AUTH_SESSION_CHECK_UNAVAILABLE' });
+        await write;
+      });
+      if (beforeUnmount) unmount();
+
+      const assign = vi.fn();
+      vi.stubGlobal('window', {
+        location: { pathname: '/configuration', search: '', hash: '', assign },
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response('{}', {
+            headers: { 'X-Admin-Session-Error': 'AUTH_SESSION_CHECK_UNAVAILABLE' },
+          }),
+        ),
+      );
+      try {
+        await expect(sessionFetch('/_serverFn/background')).rejects.toThrow(
+          'AUTH_SESSION_CHECK_UNAVAILABLE',
+        );
+        expect(assign).toHaveBeenCalledWith('/login?session=unavailable&redirect=%2Fconfiguration');
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it('names a target without a document as absent', async () => {
     applyMock.mockResolvedValue(saved);

@@ -1,4 +1,5 @@
 import type { TStartupConfig } from 'librechat-data-provider';
+import type { ReactNode } from 'react';
 import type { SerializableUser } from './server';
 import type { ApiErrorBody } from './changes';
 
@@ -15,6 +16,7 @@ export interface AuthCardProps {
   providers?: readonly SsoProviderOption[];
   /** `ADMIN_SSO_ONLY`: no password form, and straight to the provider when there is one. */
   ssoOnly?: boolean;
+  autoRedirect?: boolean;
 }
 
 /** A provider of LibreChat's admin OAuth routes the panel signs admins in through. */
@@ -77,6 +79,8 @@ export type AuthErrorCode =
   | 'unreachable'
   | 'totp_invalid'
   | 'totp_expired'
+  | 'session_ended'
+  | 'session_unavailable'
   | 'session_invalid'
   | 'verification_failed'
   | 'sso_start_failed'
@@ -146,4 +150,20 @@ export type SsoExchange = (code: string) => Promise<SsoExchangeResult>;
 
 export interface SsoErrorProps {
   code: AuthErrorCode;
+}
+
+export interface SessionErrorProps {
+  onRetry?: () => Promise<void>;
+  /** A draft rechecks the session after sign-in in another tab. */
+  retryLabel?: string;
+  ended?: boolean;
+  embedded?: boolean;
+  children?: ReactNode;
+}
+
+export type SessionErrorCode = 'OPENID_SESSION_ENDED' | 'AUTH_SESSION_CHECK_UNAVAILABLE';
+
+export interface AdminSessionIdentity {
+  userId: string;
+  tenantId: string | null;
 }

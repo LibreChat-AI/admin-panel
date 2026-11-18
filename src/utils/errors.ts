@@ -30,7 +30,10 @@ export function errorText(error: unknown, fallback: string, localize: t.Localize
   const termsUrl = termsRefusalUrl(error);
   if (termsUrl) return localize('com_config_terms_refused_at', { url: termsUrl });
   if (termsUrl === '') return localize('com_config_terms_refused');
-  return messageOf(error) || fallback;
+  const message = messageOf(error);
+  if (message === 'OPENID_SESSION_ENDED') return localize('com_auth_session_ended');
+  if (message === 'AUTH_SESSION_CHECK_UNAVAILABLE') return localize('com_auth_session_unavailable');
+  return message || fallback;
 }
 
 /**

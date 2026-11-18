@@ -99,6 +99,7 @@ describe('refreshAdminToken — tenant header forwarding', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/auth/refresh', {
       method: 'POST',
       headers: { Cookie: 'refreshToken=rt1', 'X-Tenant-Id': 'tenant-a' },
+      redirect: 'manual',
     });
   });
 
@@ -110,6 +111,7 @@ describe('refreshAdminToken — tenant header forwarding', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/auth/refresh', {
       method: 'POST',
       headers: { Cookie: 'refreshToken=rt1' },
+      redirect: 'manual',
     });
   });
 });
@@ -312,7 +314,7 @@ describe('ensureFreshBearer', () => {
     expect(updateSpy.mock.calls[0][0]).toMatchObject({ refreshToken: 'rt-stable' });
   });
 
-  it('returns the stale token when refresh fails', async () => {
+  it('clears the session when refresh confirms it is invalid', async () => {
     sessionState.data = {
       token: 'cur',
       refreshToken: 'rt',
@@ -322,10 +324,10 @@ describe('ensureFreshBearer', () => {
     };
     fetchMock.mockResolvedValueOnce(jsonResponse(401, { error: 'nope' }));
 
-    const result = await ensureFreshBearer(30_000);
-
-    expect(result).toBe('cur');
-    expect(updateSpy).not.toHaveBeenCalled();
+    await expect(ensureFreshBearer(30_000)).rejects.toThrow('OPENID_SESSION_ENDED');
+    expect(sessionState.data.token).toBeUndefined();
+    expect(sessionState.data.refreshToken).toBeUndefined();
+    expect(sessionState.data.user).toBeUndefined();
   });
 
   it('returns undefined when no token and no refreshToken are present', async () => {
@@ -360,10 +362,146 @@ describe('refreshOn401', () => {
     });
   });
 
-  it('returns undefined when there is no refresh token', async () => {
+  it('clears the rejected bearer when there is no refresh token', async () => {
     sessionState.data = { token: 'cur' };
-    const result = await refreshOn401();
-    expect(result).toBeUndefined();
+    await expect(refreshOn401()).rejects.toThrow('OPENID_SESSION_ENDED');
+    expect(sessionState.data.token).toBeUndefined();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('session failures during renewal', () => {
+  beforeEach(() => {
+    sessionState.data = {
+      token: 'old-bearer',
+      refreshToken: 'session-a',
+      tokenProvider: 'openid',
+      user: { id: 'user-1' },
+      expiresAt: Date.now() - 1_000,
+    };
+  });
+
+  it.each(['openid', 'google', 'librechat'] as const)(
+    'ends only the rejected %s session after a logout response',
+    async (provider) => {
+      sessionState.data.tokenProvider = provider;
+      fetchMock.mockResolvedValueOnce(jsonResponse(401, { error_code: 'OPENID_SESSION_ENDED' }));
+
+      await expect(ensureFreshBearer(30_000)).rejects.toThrow('OPENID_SESSION_ENDED');
+      expect(sessionState.data.token).toBeUndefined();
+      expect(sessionState.data.refreshToken).toBeUndefined();
+      expect(sessionState.data.user).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    [503, { error_code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }],
+    [503, { code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }],
+    [401, { error_code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }],
+    [502, {}],
+    [503, null],
+    [429, {}],
+    [404, {}],
+    [408, {}],
+    [200, { unexpected: true }],
+  ])('keeps credentials after response %s %j and recovers on Retry', async (status, body) => {
+    const before = { ...sessionState.data };
+    fetchMock.mockResolvedValueOnce(jsonResponse(status as number, body));
+
+    await expect(ensureFreshBearer(30_000)).rejects.toThrow('AUTH_SESSION_CHECK_UNAVAILABLE');
+    expect(sessionState.data).toEqual(before);
+    expect(updateSpy).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { token: 'new-bearer', refreshToken: 'session-a-rotated' }),
+    );
+    await expect(ensureFreshBearer(30_000)).resolves.toBe('new-bearer');
+    expect(sessionState.data.refreshToken).toBe('session-a-rotated');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['openid', 'google', 'librechat'] as const)(
+    'keeps %s credentials when the renewal request cannot reach LibreChat',
+    async (provider) => {
+      sessionState.data.tokenProvider = provider;
+      const before = { ...sessionState.data };
+      fetchMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+      await expect(refreshOn401()).rejects.toThrow('AUTH_SESSION_CHECK_UNAVAILABLE');
+      expect(sessionState.data).toEqual(before);
+      expect(updateSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('requires sign-in when renewal requires two-factor enrollment', async () => {
+    sessionState.data.tokenProvider = 'librechat';
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        code: 'TWO_FACTOR_ENROLLMENT_REQUIRED',
+        twoFAPending: true,
+        twoFASetupRequired: true,
+        tempToken: 'setup-token',
+      }),
+    );
+
+    await expect(refreshOn401()).rejects.toThrow('OPENID_SESSION_ENDED');
+    expect(sessionState.data.token).toBeUndefined();
+    expect(sessionState.data.refreshToken).toBeUndefined();
+  });
+
+  it('keeps credentials when OpenID is temporarily not configured', async () => {
+    const before = { ...sessionState.data };
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, { error_code: 'OPENID_NOT_CONFIGURED' }));
+
+    await expect(refreshOn401()).rejects.toThrow('AUTH_SESSION_CHECK_UNAVAILABLE');
+    expect(sessionState.data).toEqual(before);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('treats a 401 with no error body as a refused renewal', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, null));
+
+    await expect(refreshOn401()).rejects.toThrow('OPENID_SESSION_ENDED');
+    expect(sessionState.data.token).toBeUndefined();
+    expect(sessionState.data.refreshToken).toBeUndefined();
+  });
+
+  it('keeps credentials when a successful renewal has an unreadable body', async () => {
+    const before = { ...sessionState.data };
+    fetchMock.mockResolvedValueOnce(new Response('not JSON', { status: 200 }));
+
+    await expect(refreshOn401()).rejects.toThrow('AUTH_SESSION_CHECK_UNAVAILABLE');
+    expect(sessionState.data).toEqual(before);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not let a revoked session end a separate session for the same user', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, { error_code: 'OPENID_SESSION_ENDED' }))
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'session-b-bearer' }));
+
+    const ended = refreshAdminTokenDeduped('session-a', 'openid', 'user-1');
+    const active = refreshAdminTokenDeduped('session-b', 'openid', 'user-1');
+
+    await expect(ended).resolves.toBeUndefined();
+    await expect(active).resolves.toEqual({ token: 'session-b-bearer' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares a temporary failure only with callers renewing the same session', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(503, { error_code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }))
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'session-b-bearer' }));
+
+    const first = refreshAdminTokenDeduped('session-a', 'openid', 'user-1');
+    const same = refreshAdminTokenDeduped('session-a', 'openid', 'user-1');
+    const separate = refreshAdminTokenDeduped('session-b', 'openid', 'user-1');
+    const results = await Promise.allSettled([first, same, separate]);
+
+    expect(results[0]).toMatchObject({ status: 'rejected' });
+    expect(results[1]).toMatchObject({ status: 'rejected' });
+    expect(results[2]).toEqual({ status: 'fulfilled', value: { token: 'session-b-bearer' } });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

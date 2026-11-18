@@ -2,8 +2,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const ensureFreshBearer = vi.fn();
 const refreshOn401 = vi.fn();
+const clearAdminSession = vi.fn();
+const setResponseHeader = vi.fn();
+const session = { data: {}, update: vi.fn() };
+
+vi.mock('@tanstack/react-start/server', () => ({
+  setResponseHeader: (...args: string[]) => setResponseHeader(...args),
+}));
+vi.mock('../session', () => ({ useAppSession: async () => session }));
 
 vi.mock('./refresh', () => ({
+  clearAdminSession: (...args: unknown[]) => clearAdminSession(...args),
   ensureFreshBearer: (...args: unknown[]) => ensureFreshBearer(...args),
   refreshOn401: (...args: unknown[]) => refreshOn401(...args),
 }));
@@ -14,6 +23,8 @@ const fetchMock = vi.fn();
 
 beforeEach(() => {
   fetchMock.mockReset();
+  clearAdminSession.mockReset();
+  setResponseHeader.mockReset();
   ensureFreshBearer.mockReset();
   refreshOn401.mockReset();
   vi.stubGlobal('fetch', fetchMock);
@@ -29,7 +40,7 @@ function jsonResponse(status: number, body: unknown = {}): Response {
 describe('apiFetch', () => {
   it('throws when no bearer is available', async () => {
     ensureFreshBearer.mockResolvedValueOnce(undefined);
-    await expect(apiFetch('/api/admin/grants')).rejects.toThrow(/No admin session token/);
+    await expect(apiFetch('/api/admin/grants')).rejects.toThrow('OPENID_SESSION_ENDED');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -78,23 +89,47 @@ describe('apiFetch', () => {
       .mockResolvedValueOnce(jsonResponse(401))
       .mockResolvedValueOnce(jsonResponse(401, { error: 'still bad' }));
 
-    const response = await apiFetch('/api/admin/grants');
-
-    expect(response.status).toBe(401);
+    await expect(apiFetch('/api/admin/grants')).rejects.toThrow('OPENID_SESSION_ENDED');
+    expect(clearAdminSession).toHaveBeenCalledWith(session);
+    expect(setResponseHeader).toHaveBeenCalledWith('X-Admin-Session-Error', 'OPENID_SESSION_ENDED');
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(refreshOn401).toHaveBeenCalledTimes(1);
   });
 
-  it('returns the original 401 when refreshOn401 fails', async () => {
+  it('propagates a refused renewal instead of returning the original API 401', async () => {
     ensureFreshBearer.mockResolvedValueOnce('jwt-stale');
-    refreshOn401.mockResolvedValueOnce(undefined);
+    refreshOn401.mockRejectedValueOnce(new Error('OPENID_SESSION_ENDED'));
     const expired = jsonResponse(401, { error: 'expired' });
     fetchMock.mockResolvedValueOnce(expired);
 
-    const response = await apiFetch('/api/admin/grants');
-
-    expect(response.status).toBe(401);
+    await expect(apiFetch('/api/admin/grants')).rejects.toThrow('OPENID_SESSION_ENDED');
+    expect(setResponseHeader).toHaveBeenCalledWith('X-Admin-Session-Error', 'OPENID_SESSION_ENDED');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['OPENID_SESSION_ENDED', 'AUTH_SESSION_CHECK_UNAVAILABLE'])(
+    'signals %s even if the caller catches a proactive renewal failure',
+    async (code) => {
+      ensureFreshBearer.mockRejectedValueOnce(new Error(code));
+      await apiFetch('/api/admin/config/meta').catch(() => null);
+      expect(setResponseHeader).toHaveBeenCalledWith('X-Admin-Session-Error', code);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('preserves a temporary reactive renewal failure without retrying the action', async () => {
+    ensureFreshBearer.mockResolvedValueOnce('expired');
+    fetchMock.mockResolvedValueOnce(jsonResponse(401));
+    refreshOn401.mockRejectedValueOnce(new Error('AUTH_SESSION_CHECK_UNAVAILABLE'));
+    await expect(apiFetch('/api/admin/roles', { method: 'POST' })).rejects.toThrow(
+      'AUTH_SESSION_CHECK_UNAVAILABLE',
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(clearAdminSession).not.toHaveBeenCalled();
+    expect(setResponseHeader).toHaveBeenCalledWith(
+      'X-Admin-Session-Error',
+      'AUTH_SESSION_CHECK_UNAVAILABLE',
+    );
   });
 
   it('does not call refreshOn401 on non-401 errors', async () => {

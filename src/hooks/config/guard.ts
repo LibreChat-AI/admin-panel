@@ -30,6 +30,7 @@ export function useNavigationGuard({
   openReview,
   reviewOpen,
   saving,
+  paused,
   describeScope,
 }: t.NavigationGuardOptions): t.NavigationGuardState {
   const shouldBlockFn = useCallback(
@@ -46,6 +47,11 @@ export function useNavigationGuard({
   const { proceed, reset } = blocker;
 
   useEffect(() => {
+    if (paused && awaitingSave) {
+      setAwaitingSave(false);
+      reset?.();
+      return;
+    }
     if (!awaitingSave || !blocked) return;
     if (!isDirty) {
       setAwaitingSave(false);
@@ -56,7 +62,7 @@ export function useNavigationGuard({
       setAwaitingSave(false);
       reset?.();
     }
-  }, [awaitingSave, blocked, isDirty, reviewOpen, saving, proceed, reset]);
+  }, [awaitingSave, blocked, isDirty, reviewOpen, saving, paused, proceed, reset]);
 
   const intent: t.NavigationIntent = (() => {
     if (!blocked || !blocker.next) return { kind: 'leave' };

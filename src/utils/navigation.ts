@@ -2,14 +2,20 @@ import { PrincipalType } from 'librechat-data-provider';
 import type * as t from '@/types';
 
 /**
- * An in-app path (with its search string) that is safe to navigate to after
- * login, or `/`. Anything that could leave the app (`//host`, `/\host`,
- * `https://…`, `javascript:`) falls back to `/`.
+ * A normalized in-app path with its query and fragment, or `/` when the
+ * browser could interpret it as an external URL.
  */
 export function toSafeRedirect(value: string | undefined): string {
   if (!value || !value.startsWith('/')) return '/';
   if (value.startsWith('//') || value.startsWith('/\\')) return '/';
-  return value;
+  const origin = 'https://admin.invalid';
+  try {
+    const url = new URL(value, origin);
+    if (url.origin !== origin || url.pathname.startsWith('//')) return '/';
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return '/';
+  }
 }
 
 /**

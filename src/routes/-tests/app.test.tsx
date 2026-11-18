@@ -1,9 +1,10 @@
 import { ClickUIProvider } from '@clickhouse/click-ui';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import {
   Outlet,
+  createRoute,
   createRouter,
   RouterProvider,
   createMemoryHistory,
@@ -13,8 +14,10 @@ import type * as t from '@/types';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { Route as DashboardRoute } from '../_app/index';
 import { SystemCapabilities } from '@/constants';
+import { holdSessionRedirects } from '@/utils';
 import { localizeEn } from '@/test/coverage';
 import { Route as AppRoute } from '../_app';
+import { Route as LoginRoute } from '../login';
 
 const server = vi.hoisted(() => ({
   verifyAdminTokenFn: vi.fn(),
@@ -26,6 +29,7 @@ vi.mock('@/server', () => ({
   verifyAdminTokenFn: server.verifyAdminTokenFn,
   getEffectiveCapabilitiesFn: server.getEffectiveCapabilitiesFn,
   adminLogoutFn: vi.fn(),
+  ssoProvidersFn: vi.fn(async () => ({ providers: [], ssoOnly: false })),
   configContractOptions: { queryKey: ['configContract'], queryFn: server.never, retry: false },
   configSchemaTreeOptions: { queryKey: ['configSchemaTree'], queryFn: server.never },
   baseConfigOptions: { queryKey: ['baseConfig'], queryFn: server.never },
@@ -53,7 +57,12 @@ const TestRoot = createRootRouteWithContext<t.RouterContext>()({
  */
 Object.assign(AppRoute.options, { id: '/_app', getParentRoute: () => TestRoot });
 Object.assign(DashboardRoute.options, { id: '/', path: '/', getParentRoute: () => AppRoute });
-const routeTree = TestRoot.addChildren([AppRoute.addChildren([DashboardRoute])]);
+Object.assign(LoginRoute.options, { id: '/login', path: '/login', getParentRoute: () => TestRoot });
+const HelpRoute = createRoute({ getParentRoute: () => AppRoute, path: '/help' });
+const routeTree = TestRoot.addChildren([
+  AppRoute.addChildren([DashboardRoute, HelpRoute]),
+  LoginRoute,
+]);
 
 function matchMediaStub(query: string): MediaQueryList {
   return {
@@ -100,10 +109,11 @@ function watchChrome(): ChromeLog {
   return log;
 }
 
-function renderApp(queryClient = new QueryClient()) {
+function renderApp(queryClient = new QueryClient(), initialEntry = '/', basepath = '/') {
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    basepath,
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
     context: { queryClient },
   });
   const chrome = watchChrome();
@@ -112,7 +122,7 @@ function renderApp(queryClient = new QueryClient()) {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { queryClient, chrome };
+  return { queryClient, chrome, router };
 }
 
 function expectNoChrome(chrome: ChromeLog) {
@@ -139,6 +149,102 @@ describe('/_app admin gate', () => {
     server.verifyAdminTokenFn.mockReset().mockResolvedValue({ valid: true, user: USER });
     server.getEffectiveCapabilitiesFn.mockReset();
   });
+
+  it.each([
+    ['', '%0A'],
+    ['', '%0D'],
+    ['', '%09'],
+    ['/admin', '%0A'],
+    ['/admin', '%0D'],
+    ['/admin', '%09'],
+    ['', 'normal'],
+    ['/admin', 'normal'],
+  ])('Retry keeps the %s deployment on-site for %s', async (basePath, control) => {
+    const originalWindow = window;
+    const assign = vi.fn();
+    vi.stubGlobal(
+      'window',
+      Object.create(window, {
+        location: {
+          value: {
+            href: 'https://panel.example/login',
+            origin: 'https://panel.example',
+            pathname: `${basePath}/login`,
+            search: '',
+            hash: '',
+            assign,
+          },
+        },
+      }),
+    );
+    vi.stubEnv('VITE_BASE_PATH', basePath);
+    const normal = '/configuration?tab=system#balance';
+    const redirect = control === 'normal' ? encodeURIComponent(normal) : `/${control}/evil.example`;
+    try {
+      renderApp(
+        new QueryClient(),
+        `${basePath}/login?session=unavailable&redirect=${redirect}`,
+        basePath || '/',
+      );
+      const retry = await screen.findByRole('button', { name: localizeEn('com_ui_retry') });
+      await act(async () => fireEvent.click(retry));
+      const expected = `${basePath}${control === 'normal' ? normal : '/'}`;
+      expect(assign).toHaveBeenCalledExactlyOnceWith(expected);
+      expect(new URL(assign.mock.calls[0][0], 'https://panel.example/login').origin).toBe(
+        'https://panel.example',
+      );
+      expect(server.verifyAdminTokenFn).not.toHaveBeenCalled();
+    } finally {
+      vi.stubGlobal('window', originalWindow);
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each(['verification', 'capabilities'] as const)(
+    'shows the session Retry screen when %s reports an unavailable session check',
+    async (stage) => {
+      if (stage === 'verification') {
+        server.verifyAdminTokenFn.mockResolvedValue({
+          valid: false,
+          error: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+        });
+      } else {
+        server.getEffectiveCapabilitiesFn.mockRejectedValue(
+          new Error('AUTH_SESSION_CHECK_UNAVAILABLE'),
+        );
+      }
+      const { chrome, router } = renderApp();
+
+      expect(await screen.findByText(localizeEn('com_auth_session_unavailable'))).toBeVisible();
+      expect(screen.getByRole('button', { name: localizeEn('com_ui_retry') })).toBeVisible();
+      expect(screen.getByRole('button', { name: localizeEn('com_ui_sign_out') })).toBeVisible();
+      expect(screen.queryByText(localizeEn('com_perm_unavailable_title'))).toBeNull();
+      expect(router.state.location.pathname).toBe('/login');
+      expect(router.state.location.search).toMatchObject({ session: 'unavailable', redirect: '/' });
+      expect(chrome.mounted).toEqual([screen.getByRole('main')]);
+      expect(document.querySelector('aside, header')).toBeNull();
+    },
+  );
+
+  it.each(['verification', 'capabilities'] as const)(
+    'shows the session-ended login message when %s confirms logout',
+    async (stage) => {
+      if (stage === 'verification') {
+        server.verifyAdminTokenFn.mockResolvedValue({
+          valid: false,
+          error: 'OPENID_SESSION_ENDED',
+        });
+      } else {
+        server.getEffectiveCapabilitiesFn.mockRejectedValue(new Error('OPENID_SESSION_ENDED'));
+      }
+      const { chrome, router } = renderApp();
+
+      expect(await screen.findByText(localizeEn('com_auth_session_ended'))).toBeVisible();
+      expect(screen.getByRole('button', { name: localizeEn('com_auth_sign_in') })).toBeVisible();
+      expect(router.state.location.search).toMatchObject({ session: 'ended', redirect: '/' });
+      expectNoChrome(chrome);
+    },
+  );
 
   it('shows only the loading shell while the capabilities load', async () => {
     let resolve: (value: { capabilities: string[] }) => void = () => undefined;
@@ -194,8 +300,46 @@ describe('/_app admin gate', () => {
 
     await router.load();
 
+    expect(server.verifyAdminTokenFn).toHaveBeenCalledExactlyOnceWith({ data: { refresh: true } });
     expect(server.getEffectiveCapabilitiesFn).toHaveBeenCalledTimes(1);
     expect(queryClient.getQueryData(['effectiveCapabilities', USER.id])).toBeDefined();
+  });
+
+  it('does not force renewal when navigating within Admin or invalidating its routes', async () => {
+    server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: ADMIN_CAPABILITIES });
+    const { router } = renderApp();
+    await screen.findByRole('complementary');
+    server.verifyAdminTokenFn.mockClear();
+
+    await act(() => router.navigate({ to: '/help' }));
+
+    expect(server.verifyAdminTokenFn).toHaveBeenCalledExactlyOnceWith({ data: { refresh: false } });
+    server.verifyAdminTokenFn.mockClear();
+
+    await act(() => router.invalidate());
+
+    expect(server.verifyAdminTokenFn).toHaveBeenCalledExactlyOnceWith({ data: { refresh: false } });
+  });
+
+  it('does not force renewal during preload but does when entering the preloaded Admin route', async () => {
+    server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: ADMIN_CAPABILITIES });
+    const router = createRouter({
+      routeTree,
+      history: createMemoryHistory({ initialEntries: ['/login'] }),
+      context: { queryClient: new QueryClient() },
+      defaultPreloadStaleTime: 0,
+    });
+    await router.load();
+    expect(server.verifyAdminTokenFn).not.toHaveBeenCalled();
+
+    await router.preloadRoute({ to: '/' });
+
+    expect(server.verifyAdminTokenFn).toHaveBeenCalledExactlyOnceWith({ data: { refresh: false } });
+    server.verifyAdminTokenFn.mockClear();
+
+    await router.navigate({ to: '/' });
+
+    expect(server.verifyAdminTokenFn).toHaveBeenCalledExactlyOnceWith({ data: { refresh: true } });
   });
 
   it('waits for stale cached capabilities to be fetched again before rendering', async () => {
@@ -258,6 +402,51 @@ describe('/_app admin gate', () => {
     expect(screen.queryByText(localizeEn('com_error_page_title'))).toBeNull();
     expect(screen.queryByText(localizeEn('com_perm_unavailable_title'))).toBeNull();
   });
+
+  it('does not refresh permissions under a draft hold', async () => {
+    server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: ADMIN_CAPABILITIES });
+    const { queryClient } = renderApp();
+    await screen.findByRole('complementary');
+    const release = holdSessionRedirects();
+    try {
+      server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: [] });
+      await act(() => queryClient.invalidateQueries({ queryKey: ['effectiveCapabilities'] }));
+      expect(server.getEffectiveCapabilitiesFn).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('complementary')).toBeVisible();
+    } finally {
+      release();
+    }
+  });
+
+  it.each(['AUTH_SESSION_CHECK_UNAVAILABLE', 'OPENID_SESSION_ENDED'] as const)(
+    'keeps the page if a draft hold starts during a loader request that fails with %s',
+    async (code) => {
+      server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: ADMIN_CAPABILITIES });
+      const { queryClient, router } = renderApp();
+      await screen.findByRole('complementary');
+      await queryClient.invalidateQueries({ queryKey: ['effectiveCapabilities'], refetchType: 'none' });
+      let rejectCapabilities: (error: Error) => void = () => undefined;
+      server.getEffectiveCapabilitiesFn.mockImplementation(
+        () => new Promise((_resolve, reject) => { rejectCapabilities = reject; }),
+      );
+      const navigation = router.invalidate({ sync: true });
+      await waitFor(() => expect(server.getEffectiveCapabilitiesFn).toHaveBeenCalledTimes(2));
+      const notify = vi.fn();
+      const release = holdSessionRedirects(notify);
+      try {
+        await act(async () => {
+          rejectCapabilities(new Error(code));
+          await navigation;
+        });
+        expect(router.state.location.pathname).toBe('/');
+        expect(screen.getByRole('region', { name: localizeEn('com_dash_quick_links') })).toBeVisible();
+        expect(notify).toHaveBeenCalledExactlyOnceWith(code);
+        expect(queryClient.getQueryState(['effectiveCapabilities', USER.id])?.error).toBeNull();
+      } finally {
+        release();
+      }
+    },
+  );
 
   it('takes the panel away when a refetch shows access:admin was revoked', async () => {
     server.getEffectiveCapabilitiesFn.mockResolvedValue({ capabilities: ADMIN_CAPABILITIES });

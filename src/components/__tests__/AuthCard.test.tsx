@@ -88,6 +88,19 @@ async function idleWithoutWindow(ms: number): Promise<void> {
 }
 
 describe('AuthCard sign-in failures', () => {
+  it('identifies the username and current password for browser autofill', () => {
+    renderCard();
+
+    expect(screen.getByLabelText(localizeEn('com_auth_email_label'))).toHaveAttribute(
+      'autocomplete',
+      'username',
+    );
+    expect(screen.getByLabelText(localizeEn('com_auth_password_label'))).toHaveAttribute(
+      'autocomplete',
+      'current-password',
+    );
+  });
+
   it('tells an admin refused for a missing tenant to use their organization address', async () => {
     loginFn.mockResolvedValue({ error: true, code: 'tenant_required' });
 
@@ -243,6 +256,16 @@ describe('AuthCard SSO providers', () => {
 
     expect(startFn).not.toHaveBeenCalled();
     expect(emailField()).toBeVisible();
+  });
+
+  it('waits for an explicit SSO sign-in after the session ends', async () => {
+    startFn.mockResolvedValue({ error: false, authUrl: '#provider' });
+    renderCard({ providers: OPENID, ssoOnly: true, autoRedirect: false });
+
+    expect(startFn).not.toHaveBeenCalled();
+    expect(screen.queryByText(localizeEn('com_auth_sso_redirecting_auto'))).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: localizeEn('com_auth_sso_sign_in') }));
+    await waitFor(() => expect(startFn).toHaveBeenCalledTimes(1));
   });
 
   it('brings the password form back when the automatic redirect fails', async () => {

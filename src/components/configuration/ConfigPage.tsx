@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import type * as t from '@/types';
@@ -25,6 +25,7 @@ import {
   usePendingConfigValues,
 } from '@/hooks';
 import {
+  holdSessionRedirects,
   notifyError,
   isRowVisible,
   moveEntryPath,
@@ -57,6 +58,7 @@ import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
 import { ChangeReview, ChangesBar } from './review';
 import { ConfigLoadError } from './ConfigLoadError';
+import { SaveSessionError } from './SaveSessionError';
 import { ContentToolbar } from './ContentToolbar';
 import { availableScopesOptions } from '@/server';
 import { SystemCapabilities } from '@/constants';
@@ -83,8 +85,10 @@ export function ConfigPage({
   customizedOnly = false,
 }: t.ConfigPageProps) {
   const localize = useLocalize();
+  const queryClient = useQueryClient();
   const navigate = useNavigate({ from: '/configuration/' });
   const { tree: schemaTree } = routeApi.useLoaderData();
+  const { user, tenantId } = routeApi.useRouteContext();
 
   const {
     sectionPermissions,
@@ -209,6 +213,7 @@ export function ConfigPage({
   const clearFilter = useCallback(() => setFilterText(''), [setFilterText]);
 
   const save = useConfigSave({
+    sessionIdentity: { userId: user.id, tenantId },
     schemaTree,
     schemaPathSet: layers.schemaPathSet,
     editingScope,
@@ -243,6 +248,13 @@ export function ConfigPage({
     writeChanges: save.writeChanges,
     describeSkipped: save.describeSkipped,
   });
+  const { handleSessionError } = save;
+  useEffect(() => {
+    if (!imports.importOpen) return;
+    const release = holdSessionRedirects(handleSessionError);
+    void queryClient.cancelQueries({ predicate: (query) => query.state.data !== undefined });
+    return release;
+  }, [imports.importOpen, handleSessionError, queryClient, user.id]);
 
   /** Re-selecting the open scope keeps the edits; any other goes through the guard. */
   const handleScopeChange = useCallback(
@@ -262,6 +274,7 @@ export function ConfigPage({
   const scopeKey = editingScope ? formatScopeParam(editingScope) : 'base';
   const lastScope = useRef({ key: scopeKey, name: editingScope?.name, param: initialScope });
   useEffect(() => {
+    if (save.sessionError) return;
     const previous = lastScope.current;
     if (previous.key === scopeKey) return;
     lastScope.current = { key: scopeKey, name: editingScope?.name, param: initialScope };
@@ -278,6 +291,7 @@ export function ConfigPage({
     cancelReview();
   }, [
     scopeKey,
+    save.sessionError,
     editingScope,
     initialScope,
     scopeNotFound,
@@ -298,11 +312,12 @@ export function ConfigPage({
     [availableScopes, localize],
   );
   const guard = useNavigationGuard({
-    isDirty,
+    isDirty: isDirty || imports.importOpen,
     discardEdits,
     openReview: save.openReview,
     reviewOpen: save.confirmSaveOpen,
     saving: save.saving,
+    paused: !!save.sessionError,
     describeScope,
   });
   const backToBase = useCallback(() => selectScope({ type: 'BASE' }), [selectScope]);
@@ -528,8 +543,19 @@ export function ConfigPage({
 
   return (
     <ConfigErrorsProvider value={save.fieldErrors}>
+      {save.sessionError && (
+        <SaveSessionError
+          result={save.sessionResult}
+          code={save.sessionError}
+          error={save.recoveryError}
+          onRetry={save.retrySession}
+        />
+      )}
       <ExpandProvider resetKey={`${activeTab}|${editingScope?._id ?? 'base'}`}>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2"
+          style={save.sessionError ? { display: 'none' } : undefined}
+        >
           <div className="shrink-0 px-4">
             {banner && <div className="pt-4 pb-2">{banner}</div>}
             <HeaderActions
@@ -684,10 +710,10 @@ export function ConfigPage({
           </div>
 
           {isReady && <ChangesBar review={review} />}
-          <ChangeReview review={review} />
+          <ChangeReview review={save.sessionError ? { ...review, open: false } : review} />
 
           <ScopeSelector
-            open={scopeSelectorOpen}
+            open={scopeSelectorOpen && !save.sessionError}
             onOpenChange={setScopeSelectorOpen}
             currentSelection={selectedScope}
             onSelect={handleScopeChange}
@@ -697,13 +723,13 @@ export function ConfigPage({
           />
 
           <PreviewDrawer
-            open={previewOpen}
+            open={previewOpen && !save.sessionError}
             onClose={() => setPreviewOpen(false)}
             initialTarget={previewTarget}
           />
 
           <ImportYamlDialog
-            open={imports.importOpen}
+            open={imports.importOpen && !save.sessionError}
             onClose={() => imports.setImportOpen(false)}
             currentScope={editingScope}
             onImport={imports.handleImport}
@@ -713,6 +739,7 @@ export function ConfigPage({
 
           <NavigationGuardDialog
             open={guard.open}
+            saveDisabled={!!save.sessionError || imports.importOpen}
             intent={guard.intent}
             changeCount={Math.max(review.model.count, 1)}
             onSave={guard.onSave}
@@ -721,7 +748,7 @@ export function ConfigPage({
           />
 
           <ResetBaseConfigDialog
-            open={resetBase.resetBaseOpen}
+            open={resetBase.resetBaseOpen && !save.sessionError}
             resetting={resetBase.resettingBase}
             error={resetBase.resetBaseError}
             termsUrl={resetBase.resetBaseTermsUrl}

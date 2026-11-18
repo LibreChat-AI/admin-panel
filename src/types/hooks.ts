@@ -1,3 +1,4 @@
+import type { AdminSessionIdentity, SessionErrorCode } from './auth';
 import type {
   ConfigIssue,
   EntryKeyMove,
@@ -277,6 +278,7 @@ export type AnnounceWriteFn = (
 
 /** Options for `useConfigSave` (WS1). */
 export interface ConfigSaveOptions {
+  sessionIdentity: AdminSessionIdentity;
   schemaTree: SchemaField[];
   schemaPathSet: Set<string>;
   editingScope?: ConfigScope;
@@ -310,6 +312,12 @@ export interface ConfigSaveOptions {
 
 /** The save plan, the review dialog state and the write path shared with import (WS1). */
 export interface ConfigSaveState {
+  sessionError: SessionErrorCode | null;
+  recoveryError: string | null;
+  handleSessionError: (code: SessionErrorCode) => void;
+  retrySession: () => Promise<void>;
+  /** The completed or partial write to show alongside session recovery. */
+  sessionResult: ApplyConfigChangesResult | null;
   confirmSaveOpen: boolean;
   saving: boolean;
   /** The last save failed because the admin session ended; signing in again and saving keeps the edits. */

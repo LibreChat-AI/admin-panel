@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type * as t from '@/types';
 import {
   errorText,
@@ -16,6 +16,7 @@ import {
   carriedEntries,
   describeIssueCode,
   restateChanges,
+  holdSessionRedirects,
   isRestateWarning,
   findEntryKeyMoves,
   findRemovedSecrets,
@@ -27,6 +28,8 @@ import {
   toRevisionPrecondition,
 } from '@/utils';
 import {
+  SystemCapabilities,
+  hasImpliedCapability,
   UNSAFE_KEY_CODES,
   TERMS_NOT_ACCEPTED_CODE,
   TERMS_NOT_ACCEPTED_ISSUE,
@@ -43,7 +46,12 @@ import { specListIssues } from '@/components/configuration/sections/specs/valida
 import { isResetSent, summarizeChanges } from '@/components/configuration/summary';
 import { describeSkippedChanges } from '@/components/configuration/review/group';
 import { useConfigContract, useConfigWriteRules } from './contract';
-import { applyConfigChangesFn, resetBaseConfigFn } from '@/server';
+import {
+  applyConfigChangesFn,
+  resetBaseConfigFn,
+  verifyAdminTokenFn,
+  getEffectiveCapabilitiesFn,
+} from '@/server';
 import { describeIssues } from '@/components/configuration/issues';
 import { hasPathOverlap } from '@/components/configuration/counts';
 import { useLocalize } from '../useLocalize';
@@ -89,7 +97,8 @@ function useEditRevision(loaded: t.Revision, pending: boolean): t.HeldRevision {
 }
 
 /** The admin session ended (signed out elsewhere or expired): the save never reached LibreChat. */
-const SESSION_ERROR_RE = /no admin session token|session (has )?expired|unauthori[sz]ed|\b401\b/i;
+const SESSION_ERROR_RE =
+  /OPENID_SESSION_ENDED|no admin session token|session (has )?expired|unauthori[sz]ed|\b401\b/i;
 
 function isSessionError(message: string): boolean {
   return SESSION_ERROR_RE.test(message);
@@ -110,6 +119,7 @@ function termsUrlOf(result: t.ApplyConfigChangesResult): string | null {
  * validated, all-or-nothing call that reports what did not take effect.
  */
 export function useConfigSave({
+  sessionIdentity,
   schemaTree,
   schemaPathSet,
   editingScope,
@@ -152,12 +162,46 @@ export function useConfigSave({
   const [sessionExpired, setSessionExpired] = useState(false);
   const [termsUrl, setTermsUrl] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
+  const [sessionResult, setSessionResult] = useState<t.ApplyConfigChangesResult | null>(null);
+  const [sessionError, setSessionError] = useState<t.SessionErrorCode | null>(null);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const originalSession = useRef(sessionIdentity);
+  const sessionTarget = useRef<t.WriteTarget | null>(null);
+  const savedDraft = useRef(false);
+  const mounted = useRef(false);
+  const releaseSessionRedirects = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      releaseSessionRedirects.current?.();
+      releaseSessionRedirects.current = undefined;
+    };
+  }, []);
+
+  const currentScope = useRef(editingScope);
+  useEffect(() => {
+    currentScope.current = editingScope;
+  }, [editingScope]);
+  const handleSessionError = useCallback((code: t.SessionErrorCode) => {
+    sessionTarget.current ??= currentScope.current
+      ? { type: 'scope', scope: currentScope.current }
+      : { type: 'base' };
+    setSessionError(code);
+    setConfirmSaveOpen(false);
+  }, []);
 
   useEffect(() => setServerIssues([]), [editedValues, visibilityEdits]);
 
   const hasPendingEdits = [editedValues, visibilityEdits, restateEdits].some(
     (pending) => Object.keys(pending).length > 0,
   );
+  useEffect(() => {
+    if (!hasPendingEdits && !sessionError && !sessionResult) return;
+    const release = holdSessionRedirects(handleSessionError);
+    void queryClient.cancelQueries({ predicate: (query) => query.state.data !== undefined });
+    return release;
+  }, [hasPendingEdits, sessionError, sessionResult, handleSessionError, queryClient]);
   const { revision: editRevision, hold: holdRevision } = useEditRevision(
     targetRevision,
     hasPendingEdits,
@@ -206,12 +250,14 @@ export function useConfigSave({
 
   /** The target's own reads, and the server-resolved ones (catalogs, env status, previews) any save can change. */
   const invalidateTarget = useCallback(
-    (target: t.WriteTarget) => {
+    (target: t.WriteTarget, throwOnError = false) => {
       const keys: ReadonlyArray<readonly string[]> =
         target.type === 'base'
           ? [['baseConfig'], ...RESOLVED_READ_QUERY_KEYS]
           : [['resolvedConfig'], ['availableScopes'], ...RESOLVED_READ_QUERY_KEYS];
-      return Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+      return Promise.all(
+        keys.map((queryKey) => queryClient.invalidateQueries({ queryKey }, { throwOnError })),
+      );
     },
     [queryClient],
   );
@@ -228,14 +274,32 @@ export function useConfigSave({
         const result = await applyConfigChangesFn({
           data: { target: toTargetRef(target), ops, expectedRevision: revision },
         });
+        if (result.sessionError) {
+          if (mounted.current) {
+            releaseSessionRedirects.current ??= holdSessionRedirects(handleSessionError);
+            sessionTarget.current = target;
+            setSessionResult(result);
+            handleSessionError(result.sessionError);
+          }
+          return result;
+        }
         await invalidateTarget(target);
         return result;
       } catch (err) {
+        const code = err instanceof Error ? err.message : '';
+        if (isSessionError(code) || code === 'AUTH_SESSION_CHECK_UNAVAILABLE') {
+          if (mounted.current) {
+            handleSessionError(
+              code === 'AUTH_SESSION_CHECK_UNAVAILABLE' ? code : 'OPENID_SESSION_ENDED',
+            );
+          }
+          throw err;
+        }
         void invalidateTarget(target);
         throw err;
       }
     },
-    [invalidateTarget],
+    [invalidateTarget, handleSessionError],
   );
 
   const describeFailure = useCallback(
@@ -537,6 +601,17 @@ export function useConfigSave({
       setConflict(false);
       try {
         const result = await applyChanges(editTarget, ops, revision);
+        if (result.sessionError) {
+          savedDraft.current =
+            !result.conflict &&
+            !result.partiallyWritten &&
+            result.compensated !== false &&
+            result.issues.length === 0 &&
+            result.failed.length === 0;
+          setSaving(false);
+          setConfirmSaveOpen(false);
+          return;
+        }
         if (result.conflict) {
           setSaving(false);
           setConflict(true);
@@ -572,7 +647,9 @@ export function useConfigSave({
       } catch (err) {
         const raw = err instanceof Error ? err.message : String(err);
         const expired = isSessionError(raw);
-        const message = expired ? localize('com_config_session_expired') : raw;
+        const message = expired
+          ? localize('com_config_session_expired')
+          : errorText(err, raw, localize);
         setSaving(false);
         setSessionExpired(expired);
         setSaveError(message);
@@ -645,10 +722,67 @@ export function useConfigSave({
 
   const closeReview = useCallback(() => setConfirmSaveOpen(false), []);
 
+  const retrySession = useCallback(async () => {
+    setRecoveryError(null);
+    try {
+      const verified = await verifyAdminTokenFn({ data: { refresh: true } });
+      if (!verified.valid || !verified.user) {
+        handleSessionError(
+          verified.error === 'AUTH_SESSION_CHECK_UNAVAILABLE'
+            ? 'AUTH_SESSION_CHECK_UNAVAILABLE'
+            : 'OPENID_SESSION_ENDED',
+        );
+        return;
+      }
+      if (
+        verified.user.id !== originalSession.current.userId ||
+        verified.tenantId !== originalSession.current.tenantId
+      ) {
+        setRecoveryError(localize('com_config_session_identity_changed'));
+        return;
+      }
+      const { capabilities } = await getEffectiveCapabilitiesFn();
+      if (!hasImpliedCapability(capabilities, SystemCapabilities.ACCESS_ADMIN)) {
+        setRecoveryError(localize('com_config_session_access_lost'));
+        return;
+      }
+      await invalidateTarget(sessionTarget.current ?? editTarget, true);
+      if (!mounted.current) return;
+      queryClient.setQueryData(['effectiveCapabilities', verified.user.id], {
+        available: true,
+        capabilities,
+      });
+      if (savedDraft.current) clearEdits();
+      savedDraft.current = false;
+      sessionTarget.current = null;
+      setSessionResult(null);
+      setSessionError(null);
+      setSessionExpired(false);
+      setSaveError(null);
+      releaseSessionRedirects.current?.();
+      releaseSessionRedirects.current = undefined;
+    } catch {
+      if (mounted.current) setRecoveryError(localize('com_config_session_retry_failed'));
+    }
+  }, [
+    localize,
+    handleSessionError,
+    invalidateTarget,
+    editTarget,
+    queryClient,
+    clearEdits,
+    setSaveError,
+  ]);
+
   return {
+    sessionError,
+    recoveryError,
+    handleSessionError,
+    retrySession,
     confirmSaveOpen,
     saving,
     sessionExpired,
+    sessionResult,
     termsUrl,
     savePlan,
     unsafeKeys,

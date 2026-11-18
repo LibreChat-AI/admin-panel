@@ -13,10 +13,10 @@ import {
 } from '@/constants';
 import { offeredSsoProviders, toSafeRedirect, ssoStartPath } from '@/utils';
 import { getApiBaseUrl, getServerApiUrl } from './utils/url';
-import { refreshAdminTokenDeduped } from './utils/refresh';
+import { clearAdminSession, refreshAdminTokenDeduped } from './utils/refresh';
 import { buildOAuthExchangePayload } from './utils/oauth';
 import { useAppSession, getSessionConfig } from './session';
-import { tenantHeaders } from './utils/tenant';
+import { readTenantHeader, tenantHeaders } from './utils/tenant';
 
 /** Extract a named cookie value from `set-cookie` response headers. */
 function extractCookieValue(response: Response, name: string): string | undefined {
@@ -118,6 +118,8 @@ function verifyTempFailureCode(status: number, body: t.AuthErrorBody): t.AuthErr
 }
 
 const EXCHANGE_ERROR_CODES: ReadonlyMap<string, t.AuthErrorCode> = new Map([
+  ['OPENID_SESSION_ENDED', 'session_ended'],
+  ['AUTH_SESSION_CHECK_UNAVAILABLE', 'session_unavailable'],
   ['MISSING_CODE', 'sso_code_invalid'],
   ['INVALID_CODE_FORMAT', 'sso_code_invalid'],
   ['INVALID_OR_EXPIRED_CODE', 'sso_code_expired'],
@@ -125,7 +127,8 @@ const EXCHANGE_ERROR_CODES: ReadonlyMap<string, t.AuthErrorCode> = new Map([
 
 /** Why `POST /api/admin/oauth/exchange` refused (its `error_code`, else the status). */
 function exchangeFailureCode(status: number, body: t.AuthErrorBody): t.AuthErrorCode {
-  const known = body.error_code ? EXCHANGE_ERROR_CODES.get(body.error_code) : undefined;
+  const errorCode = body.error_code ?? body.code;
+  const known = errorCode ? EXCHANGE_ERROR_CODES.get(errorCode) : undefined;
   if (known) return known;
   if (status === 429) return 'rate_limited';
   if (status === 403) return forbiddenCode(body, 'not_admin');
@@ -229,108 +232,87 @@ export const adminVerify2FAFn = createServerFn({ method: 'POST' })
     }
   });
 
-const clearSession = async (session: Awaited<ReturnType<typeof useAppSession>>) => {
-  await session.update({
-    token: undefined,
-    user: undefined,
-    refreshToken: undefined,
-    tokenProvider: undefined,
-    expiresAt: undefined,
-    lastVerified: undefined,
-    lastActivity: undefined,
-  });
-};
+export const verifyAdminTokenFn = createServerFn({ method: 'GET' })
+  .validator(z.object({ refresh: z.boolean() }).optional())
+  .handler(async ({ data }) => {
+    try {
+      const session = await useAppSession();
+      const { token, user, lastVerified, lastActivity } = session.data;
 
-export const verifyAdminTokenFn = createServerFn({ method: 'GET' }).handler(async () => {
-  try {
-    const session = await useAppSession();
-    const { token, user, lastVerified, lastActivity, refreshToken, tokenProvider } = session.data;
-
-    if (!token || !user) {
-      return { valid: false, error: 'No session found' };
-    }
-
-    const now = Date.now();
-    const sessionConfig = getSessionConfig();
-
-    if (lastActivity && now - lastActivity > sessionConfig.idleTimeout) {
-      await clearSession(session);
-      return { valid: false, error: 'Session expired due to inactivity' };
-    }
-
-    const needsRevalidation =
-      !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
-
-    if (needsRevalidation) {
-      try {
-        const response = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!response.ok) {
-          if (response.status === 403) {
-            await clearSession(session);
-            return { valid: false, error: 'Admin privileges have been revoked' };
-          }
-          if (response.status === 401) {
-            if (refreshToken) {
-              const refreshed = await refreshAdminTokenDeduped(
-                refreshToken,
-                tokenProvider,
-                user.id,
-              );
-              if (refreshed) {
-                const refreshedSession = {
-                  token: refreshed.token,
-                  refreshToken: refreshed.refreshToken ?? refreshToken,
-                  expiresAt: refreshed.expiresAt,
-                  lastVerified: now,
-                  lastActivity: now,
-                };
-                try {
-                  const reVerify = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
-                    headers: { Authorization: `Bearer ${refreshed.token}` },
-                  });
-                  if (reVerify.ok) {
-                    await session.update(refreshedSession);
-                    return { valid: true, user };
-                  }
-                } catch {
-                  await session.update(refreshedSession);
-                  return { valid: true, user };
-                }
-              }
-            }
-            console.warn(
-              '[verifyAdminTokenFn] Token refresh failed or unavailable, clearing session',
-            );
-            await clearSession(session);
-            return { valid: false, error: 'Session is no longer valid' };
-          }
-          console.warn(
-            '[verifyAdminTokenFn] Re-validation returned non-auth error, allowing cached session:',
-            response.status,
-          );
-        }
-
-        await session.update({ lastVerified: now, lastActivity: now });
-      } catch (error) {
-        console.warn(
-          '[verifyAdminTokenFn] Re-validation call failed, allowing cached session:',
-          error,
-        );
-        await session.update({ lastVerified: now, lastActivity: now });
+      if (!token || !user) {
+        return { valid: false, error: 'No session found' };
       }
-    } else {
-      await session.update({ lastActivity: now });
-    }
 
-    return { valid: true, user };
-  } catch (error) {
-    console.error('Token verification error:', error);
-    return { valid: false, error: 'Verification failed' };
-  }
-});
+      const now = Date.now();
+      const sessionConfig = getSessionConfig();
+
+      if (lastActivity && now - lastActivity > sessionConfig.idleTimeout) {
+        await clearAdminSession(session);
+        return { valid: false, error: 'Session expired due to inactivity' };
+      }
+
+      const needsRevalidation =
+        !lastVerified || now - lastVerified > sessionConfig.revalidationInterval;
+      const refreshOnEntry =
+        data?.refresh === true &&
+        session.data.tokenProvider === 'openid' &&
+        !!session.data.refreshToken;
+
+      if (refreshOnEntry || needsRevalidation) {
+        let response: Response | undefined;
+        if (!refreshOnEntry) {
+          response = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+        }
+        if (!response || response.status === 401) {
+          const { refreshToken, tokenProvider } = session.data;
+          const refreshed = refreshToken
+            ? await refreshAdminTokenDeduped(refreshToken, tokenProvider, user.id)
+            : undefined;
+          if (!refreshed) {
+            await clearAdminSession(session);
+            return { valid: false, error: 'OPENID_SESSION_ENDED' };
+          }
+          await session.update({
+            token: refreshed.token,
+            refreshToken: refreshed.refreshToken ?? refreshToken,
+            expiresAt: refreshed.expiresAt,
+          });
+          response = await fetch(`${getServerApiUrl()}/api/admin/verify`, {
+            headers: { Authorization: `Bearer ${refreshed.token}` },
+          });
+        }
+        if (response.status === 401 || response.status === 403) {
+          await clearAdminSession(session);
+          return {
+            valid: false,
+            error:
+              response.status === 403
+                ? 'Admin privileges have been revoked'
+                : 'OPENID_SESSION_ENDED',
+          };
+        }
+        if (!response.ok) {
+          return { valid: false, error: 'AUTH_SESSION_CHECK_UNAVAILABLE' };
+        }
+        await session.update({ lastVerified: now, lastActivity: now });
+      } else {
+        await session.update({ lastActivity: now });
+      }
+
+      return { valid: true, user, tenantId: readTenantHeader() ?? null };
+    } catch (error) {
+      console.error('Token verification error:', error);
+      return {
+        valid: false,
+        error:
+          error instanceof Error && error.message === 'OPENID_SESSION_ENDED'
+            ? 'OPENID_SESSION_ENDED'
+            : 'AUTH_SESSION_CHECK_UNAVAILABLE',
+      };
+    }
+  });
 
 export const requireAuthFn = createServerFn({ method: 'GET' })
   .validator(z.object({ location: z.string() }))
@@ -338,6 +320,9 @@ export const requireAuthFn = createServerFn({ method: 'GET' })
     const verifyResult = await verifyAdminTokenFn();
 
     if (!verifyResult.valid) {
+      if (verifyResult.error === 'AUTH_SESSION_CHECK_UNAVAILABLE') {
+        throw new Error(verifyResult.error);
+      }
       throw redirect({
         to: '/login',
         search: { redirect: data.location },
@@ -373,7 +358,7 @@ export const adminLogoutFn = createServerFn({ method: 'POST' }).handler(async ()
       }
     }
 
-    await clearSession(session);
+    await clearAdminSession(session);
 
     return { error: false, redirect };
   } catch (error) {

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { ConfigValue, ReadOnlyReason } from './config';
 import type { ConfigSectionConfig } from './config-ui';
 import type { ConfigScope } from './scope';
+import type { SerializableUser } from './server';
 
 /** Search params of `/configuration` (WS5). */
 export interface ConfigSearchParams {
@@ -30,6 +31,13 @@ export interface SectionMeta {
   pathPrefix?: string;
   /** Paths under this prefix belong to another section (providers vs custom endpoints). */
   excludePrefix?: string;
+}
+
+/** The last verified identity keeps an existing draft mounted during recovery. */
+export interface AppSessionContext {
+  pathname: string;
+  user: SerializableUser;
+  tenantId: string | null;
 }
 
 /** Context every route receives from `getRouter` (WS5: page shell). */
@@ -85,6 +93,8 @@ export type NavigationIntent = { kind: 'leave' } | { kind: 'scope'; name: string
 
 /** Options of `useNavigationGuard` (WS5: SH-6). */
 export interface NavigationGuardOptions {
+  /** Session recovery owns navigation until the write outcome has been shown. */
+  paused?: boolean;
   isDirty: boolean;
   discardEdits: () => void;
   /** Opens the change review ("Save & continue"). */
@@ -107,6 +117,7 @@ export interface NavigationGuardState {
 export interface NavigationGuardDialogProps
   extends Omit<NavigationGuardState, 'open'>, Pick<NavigationGuardState, 'open'> {
   changeCount: number;
+  saveDisabled?: boolean;
 }
 
 /** Why a section is shown read-only, and what its banner says (WS5; HF-8, FX-10, PR-7). */

@@ -13,7 +13,10 @@ vi.mock('@tanstack/react-start', () => ({
   createServerFn: () => ({
     handler: (fn: (...args: unknown[]) => unknown) => fn,
     validator: () => ({
-      handler: (fn: (...args: unknown[]) => unknown) => fn,
+      handler:
+        (fn: (...args: unknown[]) => unknown) =>
+        (options = {}) =>
+          fn(options),
     }),
   }),
 }));
@@ -38,13 +41,10 @@ vi.mock('./utils/url', () => ({
   getServerApiUrl: () => 'http://librechat.test',
 }));
 
-vi.mock('./utils/refresh', () => ({
-  refreshAdminTokenDeduped: vi.fn(),
-}));
-
 import {
   ssoStartFn,
   adminLoginFn,
+  adminLogoutFn,
   ssoProvidersFn,
   oauthExchangeFn,
   adminVerify2FAFn,
@@ -261,8 +261,11 @@ describe('adminVerify2FAFn', () => {
 describe('verifyAdminTokenFn', () => {
   beforeEach(() => {
     fetchMock.mockReset();
-    updateSession.mockReset();
+    updateSession.mockReset().mockImplementation(async (next: Partial<t.SessionData>) => {
+      sessionState.data = { ...sessionState.data, ...next };
+    });
     sessionState.data = {};
+    requestHeaders.clear();
     vi.stubGlobal('fetch', fetchMock);
   });
 
@@ -277,9 +280,16 @@ describe('verifyAdminTokenFn', () => {
 
     const result = await verifyAdminTokenFn();
 
-    expect(result).toEqual({ valid: true, user });
+    expect(result).toEqual({ valid: true, user, tenantId: null });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(updateSession).toHaveBeenCalledWith({ lastActivity: expect.any(Number) });
+  });
+
+  it('returns the request tenant with the verified identity', async () => {
+    const user = { id: 'admin-1', role: 'ADMIN', email: 'admin@example.test' };
+    sessionState.data = { user, token: 'jwt', lastVerified: Date.now(), lastActivity: Date.now() };
+    requestHeaders.set('x-tenant-id', ' tenant-a ');
+    expect(await verifyAdminTokenFn()).toEqual({ valid: true, user, tenantId: 'tenant-a' });
   });
 
   it('clears a delegated admin session when backend capability revalidation is denied', async () => {
@@ -306,12 +316,266 @@ describe('verifyAdminTokenFn', () => {
       }),
     );
   });
+
+  function expiredSession() {
+    const user = { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' };
+    sessionState.data = {
+      user,
+      token: 'old-token',
+      refreshToken: 'old-refresh',
+      tokenProvider: 'openid',
+      lastVerified: 0,
+      lastActivity: Date.now(),
+    };
+    return user;
+  }
+
+  function freshSession() {
+    const user = expiredSession();
+    sessionState.data.lastVerified = Date.now();
+    sessionState.data.expiresAt = Date.now() + 300_000;
+    return user;
+  }
+
+  it('detects provider logout on entry while the saved access token is still valid', async () => {
+    freshSession();
+    fetchMock.mockResolvedValueOnce(jsonResponse(401, { error_code: 'OPENID_SESSION_ENDED' }));
+
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: false,
+      error: 'OPENID_SESSION_ENDED',
+    });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      'http://librechat.test/api/admin/oauth/refresh',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refresh_token: 'old-refresh',
+          user_id: 'user-1',
+          provider: 'openid',
+        }),
+      },
+    );
+    expect(sessionState.data).toMatchObject({
+      token: undefined,
+      refreshToken: undefined,
+      user: undefined,
+    });
+  });
+
+  it('keeps a fresh session during a temporary entry failure and renews it on Retry', async () => {
+    const user = freshSession();
+    const original = { ...sessionState.data };
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error_code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }),
+    );
+
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: false,
+      error: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+    });
+    expect(sessionState.data).toEqual(original);
+    expect(updateSession).not.toHaveBeenCalled();
+
+    const expiresAt = Date.now() + 300_000;
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(200, { token: 'new-token', refreshToken: 'new-refresh', expiresAt }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { user }));
+
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: true,
+      user,
+      tenantId: null,
+    });
+    expect(sessionState.data).toMatchObject({
+      token: 'new-token',
+      refreshToken: 'new-refresh',
+      expiresAt,
+    });
+    expect(fetchMock).toHaveBeenLastCalledWith('http://librechat.test/api/admin/verify', {
+      headers: { Authorization: 'Bearer new-token' },
+    });
+  });
+
+  it('uses the rotated refresh token on entry Retry after verification fails', async () => {
+    const user = freshSession();
+    const lastVerified = sessionState.data.lastVerified;
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'new-token', refreshToken: 'new-refresh' }))
+      .mockResolvedValueOnce(jsonResponse(503, {}));
+
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: false,
+      error: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+    });
+    expect(sessionState.data).toMatchObject({
+      token: 'new-token',
+      refreshToken: 'new-refresh',
+      lastVerified,
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(200, { token: 'retry-token', refreshToken: 'retry-refresh' }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { user }));
+
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: true,
+      user,
+      tenantId: null,
+    });
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body).refresh_token).toBe('new-refresh');
+  });
+
+  it.each(['librechat', 'google', 'saml', undefined] as const)(
+    'does not force renewal on entry for a %s session',
+    async (tokenProvider) => {
+      const user = freshSession();
+      sessionState.data.tokenProvider = tokenProvider;
+
+      expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+        valid: true,
+        user,
+        tenantId: null,
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps OpenID sessions without renewal credentials on their existing verification path', async () => {
+    const user = freshSession();
+    sessionState.data.refreshToken = undefined;
+
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: true,
+      user,
+      tenantId: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not renew a fresh OpenID session during navigation within Admin', async () => {
+    const user = freshSession();
+
+    expect(await verifyAdminTokenFn({ data: { refresh: false } })).toEqual({
+      valid: true,
+      user,
+      tenantId: null,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('ends an idle session before attempting renewal on entry', async () => {
+    freshSession();
+    sessionState.data.lastActivity = Date.now() - 31 * 60 * 1000;
+
+    expect(await verifyAdminTokenFn({ data: { refresh: true } })).toEqual({
+      valid: false,
+      error: 'Session expired due to inactivity',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(sessionState.data.token).toBeUndefined();
+  });
+
+  it('keeps credentials after an unavailable renewal and recovers on Retry', async () => {
+    const user = expiredSession();
+    const original = { ...sessionState.data };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, {}))
+      .mockResolvedValueOnce(jsonResponse(503, { error_code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }));
+
+    expect(await verifyAdminTokenFn()).toEqual({
+      valid: false,
+      error: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+    });
+    expect(sessionState.data).toEqual(original);
+    expect(updateSession).not.toHaveBeenCalled();
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, {}))
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'new-token', refreshToken: 'new-refresh' }))
+      .mockResolvedValueOnce(jsonResponse(200, { user }));
+
+    expect(await verifyAdminTokenFn()).toEqual({ valid: true, user, tenantId: null });
+    expect(sessionState.data).toMatchObject({ token: 'new-token', refreshToken: 'new-refresh' });
+    expect(sessionState.data.lastVerified).toBeGreaterThan(0);
+    expect(fetchMock.mock.calls[3][1].body).toBe(
+      JSON.stringify({ refresh_token: 'old-refresh', user_id: 'user-1', provider: 'openid' }),
+    );
+  });
+
+  it('clears the admin credentials when renewal reports the provider session ended', async () => {
+    expiredSession();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, {}))
+      .mockResolvedValueOnce(jsonResponse(401, { error_code: 'OPENID_SESSION_ENDED' }));
+
+    expect(await verifyAdminTokenFn()).toEqual({ valid: false, error: 'OPENID_SESSION_ENDED' });
+    expect(sessionState.data).toMatchObject({
+      token: undefined,
+      refreshToken: undefined,
+      user: undefined,
+      lastVerified: undefined,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['network', 'server'] as const)(
+    'keeps credentials and rechecks after a %s verification failure',
+    async (failure) => {
+      const user = expiredSession();
+      const original = { ...sessionState.data };
+      if (failure === 'network') fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+      else fetchMock.mockResolvedValueOnce(jsonResponse(503, {}));
+
+      expect(await verifyAdminTokenFn()).toEqual({
+        valid: false,
+        error: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+      });
+      expect(sessionState.data).toEqual(original);
+      expect(updateSession).not.toHaveBeenCalled();
+
+      fetchMock.mockResolvedValueOnce(jsonResponse(200, { user }));
+      expect(await verifyAdminTokenFn()).toEqual({ valid: true, user, tenantId: null });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it('keeps rotated credentials when re-verification is unavailable and checks them on Retry', async () => {
+    const user = expiredSession();
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(401, {}))
+      .mockResolvedValueOnce(jsonResponse(200, { token: 'new-token', refreshToken: 'new-refresh' }))
+      .mockResolvedValueOnce(jsonResponse(503, {}));
+
+    expect(await verifyAdminTokenFn()).toEqual({
+      valid: false,
+      error: 'AUTH_SESSION_CHECK_UNAVAILABLE',
+    });
+    expect(sessionState.data).toMatchObject({
+      token: 'new-token',
+      refreshToken: 'new-refresh',
+      lastVerified: 0,
+    });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { user }));
+    expect(await verifyAdminTokenFn()).toEqual({ valid: true, user, tenantId: null });
+    expect(fetchMock).toHaveBeenLastCalledWith('http://librechat.test/api/admin/verify', {
+      headers: { Authorization: 'Bearer new-token' },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
 });
 
 describe('oauthExchangeFn', () => {
   beforeEach(() => {
     fetchMock.mockReset();
-    updateSession.mockReset();
+    updateSession.mockReset().mockImplementation(async (next: Partial<t.SessionData>) => {
+      sessionState.data = { ...sessionState.data, ...next };
+    });
     warnSpy.mockClear();
     sessionState.data = {};
     requestHeaders.clear();
@@ -572,6 +836,8 @@ describe('oauthExchangeFn', () => {
 
   it.each([
     [401, { error_code: 'INVALID_OR_EXPIRED_CODE' }, 'sso_code_expired'],
+    [401, { error_code: 'OPENID_SESSION_ENDED' }, 'session_ended'],
+    [503, { error_code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }, 'session_unavailable'],
     [400, { error_code: 'INVALID_CODE_FORMAT' }, 'sso_code_invalid'],
     [400, { error_code: 'MISSING_CODE' }, 'sso_code_invalid'],
     [429, {}, 'rate_limited'],
@@ -584,6 +850,35 @@ describe('oauthExchangeFn', () => {
 
     expect(result).toEqual({ error: true, code });
     expect(updateSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the PKCE verifier after an unavailable exchange and uses it on Retry', async () => {
+    const data = { code: 'a'.repeat(64), provider: 'openid' as const };
+    sessionState.data = {
+      codeVerifier: 'verifier-123',
+      ssoProvider: 'openid',
+      ssoRedirect: '/grants',
+    };
+    const original = { ...sessionState.data };
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error_code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }),
+    );
+
+    expect(await oauthExchangeFn({ data })).toEqual({ error: true, code: 'session_unavailable' });
+    expect(sessionState.data).toEqual(original);
+    expect(updateSession).not.toHaveBeenCalled();
+
+    const user = { id: 'user-1', role: 'ADMIN', email: 'admin@example.com' };
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { token: 'new-token', refreshToken: 'new-refresh', user }),
+    );
+    expect(await oauthExchangeFn({ data })).toEqual({ error: false, user, redirectTo: '/grants' });
+    expect(fetchMock.mock.calls[1][1].body).toBe(fetchMock.mock.calls[0][1].body);
+    expect(sessionState.data).toMatchObject({
+      token: 'new-token',
+      refreshToken: 'new-refresh',
+      codeVerifier: undefined,
+    });
   });
 });
 
@@ -802,4 +1097,39 @@ describe('ssoStartFn', () => {
     expect(result).toEqual({ error: true, code: 'sso_start_failed' });
     errorSpy.mockRestore();
   });
+});
+
+describe('adminLogoutFn during a session-check failure', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    updateSession.mockReset().mockImplementation(async (next) => {
+      Object.assign(sessionState.data, next);
+    });
+    sessionState.data = {
+      token: 'old-token',
+      refreshToken: 'retained-refresh',
+      user: { id: 'b' },
+      codeVerifier: 'pending-verifier',
+      ssoProvider: 'openid',
+      ssoRedirect: '/access',
+    };
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  it.each(['unreachable', 'unavailable'])(
+    'clears local credentials when logout is %s upstream',
+    async (failure) => {
+      if (failure === 'unreachable') fetchMock.mockRejectedValue(new Error('offline'));
+      else
+        fetchMock.mockResolvedValue(jsonResponse(503, { code: 'AUTH_SESSION_CHECK_UNAVAILABLE' }));
+      expect(await adminLogoutFn()).toEqual({ error: false, redirect: undefined });
+      expect(sessionState.data.token).toBeUndefined();
+      expect(sessionState.data.refreshToken).toBeUndefined();
+      expect(sessionState.data.user).toBeUndefined();
+      expect(sessionState.data.codeVerifier).toBeUndefined();
+      expect(sessionState.data.ssoProvider).toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe('http://librechat.test/api/auth/logout');
+    },
+  );
 });

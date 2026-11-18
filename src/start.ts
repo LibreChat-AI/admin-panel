@@ -1,5 +1,5 @@
 import { createStart, createCsrfMiddleware } from '@tanstack/react-start';
-import { csrfOptions, parseOrigins, invalidOrigins } from '@/utils';
+import { csrfOptions, parseOrigins, invalidOrigins, sessionFetch } from '@/utils';
 
 const trustedOrigins =
   typeof process === 'undefined' ? undefined : process.env.ADMIN_PANEL_TRUSTED_ORIGINS;
@@ -15,4 +15,7 @@ const csrfMiddleware: ReturnType<typeof createCsrfMiddleware> = createCsrfMiddle
   csrfOptions(parseOrigins(trustedOrigins)),
 );
 
-export const startInstance = createStart(() => ({ requestMiddleware: [csrfMiddleware] }));
+export const startInstance = createStart(() => ({
+  requestMiddleware: [csrfMiddleware],
+  serverFns: { fetch: sessionFetch },
+}));

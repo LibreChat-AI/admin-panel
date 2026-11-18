@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Icon } from '@clickhouse/click-ui';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, Outlet, useRouter, Link, redirect } from '@tanstack/react-router';
+import type { QueryClient } from '@tanstack/react-query';
 import type { ErrorComponentProps } from '@tanstack/react-router';
 import type * as t from '@/types';
 import { capabilitiesQueryOptions, useCommandMenu, useDocumentTitle, useLocalize } from '@/hooks';
@@ -12,6 +13,7 @@ import { CommandMenu } from '@/components/CommandMenu';
 import { Sidebar } from '@/components/Sidebar';
 import { verifyAdminTokenFn } from '@/server';
 import { Header } from '@/components/Header';
+import { hasSessionRedirectHold, notifySessionRedirectHolds } from '@/utils';
 
 const ROUTE_TITLE_KEYS: Record<string, string> = {
   '/': 'com_dash_title',
@@ -27,24 +29,109 @@ const DOCUMENT_TITLE_KEYS: Record<string, string> = {
   '/': 'com_nav_dashboard',
 };
 
+/** Presentation context only; a fresh entry always verifies the session again. */
+const verifiedSessions = new WeakMap<QueryClient, t.AppSessionContext>();
+
 export const Route = createFileRoute('/_app')({
-  beforeLoad: async ({ location }) => {
-    const result = await verifyAdminTokenFn();
+  beforeLoad: async ({ location, cause, context, abortController }) => {
+    const previous = verifiedSessions.get(context.queryClient);
+    const result = await verifyAdminTokenFn({ data: { refresh: cause === 'enter' } }).catch(
+      (error) => ({
+        valid: false as const,
+        error:
+          error instanceof Error && error.message === 'OPENID_SESSION_ENDED'
+            ? 'OPENID_SESSION_ENDED'
+            : 'AUTH_SESSION_CHECK_UNAVAILABLE',
+      }),
+    );
+
+    abortController.signal.throwIfAborted();
+    const held =
+      cause === 'stay' &&
+      hasSessionRedirectHold() &&
+      previous?.pathname === location.pathname;
+    if (held) {
+      if (!result.valid) {
+        notifySessionRedirectHolds(
+          result.error === 'AUTH_SESSION_CHECK_UNAVAILABLE'
+            ? 'AUTH_SESSION_CHECK_UNAVAILABLE'
+            : 'OPENID_SESSION_ENDED',
+        );
+      } else if (
+        result.user.id !== previous.user.id ||
+        (result.tenantId ?? null) !== previous.tenantId
+      ) {
+        notifySessionRedirectHolds('OPENID_SESSION_ENDED');
+      }
+      return { ...previous, sessionHeld: true };
+    }
 
     if (!result.valid) {
+      let session: 'ended' | 'unavailable' | undefined;
+      if (result.error === 'AUTH_SESSION_CHECK_UNAVAILABLE') session = 'unavailable';
+      if (result.error === 'OPENID_SESSION_ENDED') session = 'ended';
       throw redirect({
         to: '/login',
-        search: { redirect: location.href },
+        search: {
+          redirect: location.href,
+          ...(session ? { session } : {}),
+        },
       });
     }
 
-    return { user: result.user };
+    const session = {
+      user: result.user,
+      tenantId: result.tenantId ?? null,
+      pathname: location.pathname,
+    };
+    return { ...session, sessionHeld: false };
   },
-  loader: ({ context }): Promise<t.AppGateLoaderData> =>
-    context.queryClient.fetchQuery(capabilitiesQueryOptions(context.user.id)).then(
-      () => ({ verified: true }),
-      () => ({ verified: false }),
-    ),
+  loader: ({ context, location, cause, abortController }): Promise<t.AppGateLoaderData> => {
+    if (context.sessionHeld) return Promise.resolve({ verified: true });
+    const options = capabilitiesQueryOptions(context.user.id);
+    const previous = context.queryClient.getQueryState(options.queryKey);
+    return context.queryClient.fetchQuery(options).then(
+      () => {
+        if (cause !== 'preload' && !abortController.signal.aborted) {
+          verifiedSessions.set(context.queryClient, {
+            user: context.user,
+            tenantId: context.tenantId,
+            pathname: location.pathname,
+          });
+        }
+        return { verified: true };
+      },
+      (error) => {
+        if (
+          error instanceof Error &&
+          (error.message === 'AUTH_SESSION_CHECK_UNAVAILABLE' ||
+            error.message === 'OPENID_SESSION_ENDED')
+        ) {
+          if (
+            cause === 'stay' &&
+            !abortController.signal.aborted &&
+            previous?.data &&
+            hasSessionRedirectHold() &&
+            verifiedSessions.get(context.queryClient)?.pathname === location.pathname
+          ) {
+            notifySessionRedirectHolds(error.message);
+            context.queryClient.setQueryData(options.queryKey, previous.data, {
+              updatedAt: previous.dataUpdatedAt,
+            });
+            return { verified: true };
+          }
+          throw redirect({
+            to: '/login',
+            search: {
+              redirect: location.href,
+              session: error.message === 'OPENID_SESSION_ENDED' ? 'ended' : 'unavailable',
+            },
+          });
+        }
+        return { verified: false };
+      },
+    );
+  },
   pendingMs: 300,
   pendingComponent: AppPending,
   component: AppLayout,

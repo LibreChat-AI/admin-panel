@@ -11,6 +11,8 @@ vi.mock('@tanstack/react-router', async (importOriginal) =>
 describe('SsoError', () => {
   it.each([
     ['TENANT_CONTEXT_REQUIRED', 'com_auth_error_tenant_required'],
+    ['OPENID_SESSION_ENDED', 'com_auth_session_ended'],
+    ['AUTH_SESSION_CHECK_UNAVAILABLE', 'com_auth_session_unavailable'],
     ['auth_failed', 'com_auth_error_sso_auth_failed'],
     ['pkce_store_failed', 'com_auth_error_sso_pkce_failed'],
     ['pkce_retrieval_failed', 'com_auth_error_sso_pkce_failed'],

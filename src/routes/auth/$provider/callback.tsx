@@ -1,4 +1,4 @@
-import { createFileRoute, notFound, redirect } from '@tanstack/react-router';
+import { createFileRoute, notFound, redirect, useRouter } from '@tanstack/react-router';
 import {
   withBasePath,
   toSafeRedirect,
@@ -7,6 +7,7 @@ import {
   parseSsoCallbackSearch,
 } from '@/utils';
 import { SsoError } from '@/components/SsoError';
+import { SessionError } from '@/components/SessionError';
 import { oauthExchangeFn } from '@/server';
 
 export const Route = createFileRoute('/auth/$provider/callback')({
@@ -29,5 +30,9 @@ export const Route = createFileRoute('/auth/$provider/callback')({
 
 function SsoCallback() {
   const { code } = Route.useLoaderData();
+  const router = useRouter();
+  const search = Route.useSearch();
+  const canRetry = code === 'session_unavailable' && !!search.code && !search.error;
+  if (canRetry) return <SessionError onRetry={() => router.invalidate({ sync: true })} />;
   return <SsoError code={code} />;
 }
