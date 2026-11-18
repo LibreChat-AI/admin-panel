@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TWO_FACTOR_ENROLLMENT_REQUIRED_CODE } from 'librechat-data-provider';
 import type * as t from '@/types';
 import { readTenantHeader, tenantHeaders } from './tenant';
 import { SSO_PROVIDERS } from '@/constants';
@@ -38,6 +39,9 @@ async function readRefreshResponse(response: Response): Promise<RefreshedTokense
     ) {
       throw new Error('AUTH_SESSION_CHECK_UNAVAILABLE');
     }
+    return undefined;
+  }
+  if ((body as t.AuthErrorBody | undefined)?.code === TWO_FACTOR_ENROLLMENT_REQUIRED_CODE) {
     return undefined;
   }
   const parsed = refreshResponseSchema.safeParse(body);
@@ -86,10 +90,19 @@ async function refreshSsoSession(
 async function refreshPasswordSession(
   refreshToken: string,
 ): Promise<RefreshedTokenset | undefined> {
-  const response = await fetch(`${getServerApiUrl()}/api/auth/refresh`, {
+  const url = `${getServerApiUrl()}/api/auth/refresh`;
+  const response = await fetch(url, {
     method: 'POST',
     headers: { Cookie: `refreshToken=${refreshToken}`, ...tenantHeaders() },
+    redirect: 'manual',
   });
+  const location = response.headers.get('location');
+  if (response.status === 302 && location) {
+    const target = new URL(location, url);
+    const rootLogin = new URL('/login', url);
+    const baseLogin = new URL(`${getServerApiUrl().replace(/\/$/, '')}/login`);
+    if (target.href === rootLogin.href || target.href === baseLogin.href) return undefined;
+  }
   const refreshed = await readRefreshResponse(response);
   if (!refreshed) return undefined;
   return { token: refreshed.token, refreshToken: extractRefreshTokenCookie(response) };

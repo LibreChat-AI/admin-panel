@@ -99,6 +99,7 @@ describe('refreshAdminToken — tenant header forwarding', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/auth/refresh', {
       method: 'POST',
       headers: { Cookie: 'refreshToken=rt1', 'X-Tenant-Id': 'tenant-a' },
+      redirect: 'manual',
     });
   });
 
@@ -110,6 +111,7 @@ describe('refreshAdminToken — tenant header forwarding', () => {
     expect(fetchMock).toHaveBeenCalledWith('http://lc.test/api/auth/refresh', {
       method: 'POST',
       headers: { Cookie: 'refreshToken=rt1' },
+      redirect: 'manual',
     });
   });
 });
@@ -431,6 +433,31 @@ describe('session failures during renewal', () => {
       expect(updateSpy).not.toHaveBeenCalled();
     },
   );
+
+  it('requires sign-in when renewal requires two-factor enrollment', async () => {
+    sessionState.data.tokenProvider = 'librechat';
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        code: 'TWO_FACTOR_ENROLLMENT_REQUIRED',
+        twoFAPending: true,
+        twoFASetupRequired: true,
+        tempToken: 'setup-token',
+      }),
+    );
+
+    await expect(refreshOn401()).rejects.toThrow('OPENID_SESSION_ENDED');
+    expect(sessionState.data.token).toBeUndefined();
+    expect(sessionState.data.refreshToken).toBeUndefined();
+  });
+
+  it('keeps credentials when OpenID is temporarily not configured', async () => {
+    const before = { ...sessionState.data };
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, { error_code: 'OPENID_NOT_CONFIGURED' }));
+
+    await expect(refreshOn401()).rejects.toThrow('AUTH_SESSION_CHECK_UNAVAILABLE');
+    expect(sessionState.data).toEqual(before);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
 
   it('treats a 401 with no error body as a refused renewal', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(401, null));
