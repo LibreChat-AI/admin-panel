@@ -2,11 +2,11 @@ import { Button } from '@clickhouse/click-ui';
 import { useId, useRef, useState } from 'react';
 import type * as t from '@/types';
 import { cn, domainIssue, normalizeDomain, splitDomainEntries } from '@/utils';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { DecorativeIcon } from '@/components/shared';
 import { getDomainListPolicy } from '@/constants';
 import { INPUT_CLASSES } from './display';
 import { FieldNotice } from './Notice';
-import { useLocalize } from '@/hooks';
 
 /** Separators that make typed text a list of entries. */
 const LIST_SEPARATOR = /[,;\n]/;
@@ -52,6 +52,7 @@ export function DomainListField({
   const [error, setError] = useState<string | null>(null);
   const [confirmingLast, setConfirmingLast] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  useSessionDraft(!disabled && draft !== '');
   const name = ariaLabel ?? id;
   const lowerCount = lowerValues?.length ?? 0;
   const source = localize(

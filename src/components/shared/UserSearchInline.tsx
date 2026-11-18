@@ -45,7 +45,7 @@ export function UserSearchInline({
   });
 
   const results = searchQuery.data ?? [];
-  const hasResults = showResults && debouncedQuery.trim().length > 0;
+  const hasResults = !disabled && showResults && debouncedQuery.trim().length > 0;
   const listOpen = hasResults && results.length > 0;
   const noUsersFound = hasResults && results.length === 0 && !searchQuery.isLoading;
   const popupShown = listOpen || noUsersFound;
@@ -89,6 +89,7 @@ export function UserSearchInline({
   };
 
   const handleSelect = (user: AdminUserSearchResult) => {
+    if (disabled) return;
     onAdd(user);
     setQuery('');
     setDebouncedQuery('');

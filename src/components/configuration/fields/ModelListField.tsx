@@ -1,8 +1,8 @@
 import { useId, useState } from 'react';
 import { ButtonGroup, TextField as CUITextField } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useLocalize, useModelListDefaults, useSessionDraft } from '@/hooks';
 import { AddItemButton, DecorativeIcon } from '@/components/shared';
-import { useLocalize, useModelListDefaults } from '@/hooks';
 import { TextField } from './TextField';
 import { FieldNotice } from './Notice';
 
@@ -80,6 +80,7 @@ export function ModelListField({
   const [draft, setDraft] = useState('');
   const [editing, setEditing] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  useSessionDraft(!disabled && (draft !== '' || editing !== null || pendingOnly));
   const mode: t.ModelListMode = required || hasList || pendingOnly ? 'only' : 'defaults';
 
   /** Back to the list's default; a list only the layer beneath sets cannot be cleared (D3). */

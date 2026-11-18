@@ -23,6 +23,8 @@ import {
   useResetBaseConfig,
   useConfigSearchIndex,
   usePendingConfigValues,
+  useSessionDrafts,
+  useDraftBaseline,
 } from '@/hooks';
 import {
   holdSessionRedirects,
@@ -52,13 +54,14 @@ import { ScopeActionsProvider } from '@/contexts/ScopeContext';
 import { RestatesContext } from '@/contexts/RestatesContext';
 import { RenamesContext } from '@/contexts/RenamesContext';
 import { ExpandProvider } from '@/contexts/ExpandContext';
+import { DraftsContext } from '@/contexts/DraftsContext';
 import { ConfigContentSkeleton } from './ConfigSkeleton';
 import { isPathUnder, tabForPath } from './configMeta';
 import { ConfigTabContent } from './ConfigTabContent';
 import { ImportYamlDialog } from './ImportYamlDialog';
+import { SaveSessionError } from './SaveSessionError';
 import { ChangeReview, ChangesBar } from './review';
 import { ConfigLoadError } from './ConfigLoadError';
-import { SaveSessionError } from './SaveSessionError';
 import { ContentToolbar } from './ContentToolbar';
 import { availableScopesOptions } from '@/server';
 import { SystemCapabilities } from '@/constants';
@@ -104,22 +107,32 @@ export function ConfigPage({
       initialTab ?? (highlightField?.includes('.') ? tabForPath(highlightField) : undefined),
   });
 
+  const drafts = useSessionDrafts();
+  const scopeState = useScopeSelection({ initialScope });
+  const { selectScope, scopeSelectorOpen, setScopeSelectorOpen, retryScopes } = scopeState;
   const {
     selectedScope,
-    selectScope,
     isEditingScope,
     editingScope,
-    scopeSelectorOpen,
-    setScopeSelectorOpen,
-    isResolvingScope = false,
+    isResolvingScope,
     scopeNotFound,
     scopeLoadError,
-    retryScopes,
-  } = useScopeSelection({ initialScope });
+  } = useDraftBaseline(
+    {
+      selectedScope: scopeState.selectedScope,
+      isEditingScope: scopeState.isEditingScope,
+      editingScope: scopeState.editingScope,
+      isResolvingScope: scopeState.isResolvingScope ?? false,
+      scopeNotFound: scopeState.scopeNotFound,
+      scopeLoadError: scopeState.scopeLoadError,
+    },
+    drafts.hasPendingDrafts,
+  );
 
   const baseline = useConfigBaseline(selectedScope);
   const isReady = baseline.status === 'ready' && !isResolvingScope;
-  const layers = useConfigLayers({ schemaTree, selectedScope, sectionPermissions });
+  const currentLayers = useConfigLayers({ schemaTree, selectedScope, sectionPermissions });
+  const layers = useDraftBaseline(currentLayers, drafts.hasPendingDrafts);
 
   const edits = useConfigEdits({
     isEditingScope,
@@ -214,12 +227,32 @@ export function ConfigPage({
 
   const save = useConfigSave({
     sessionIdentity: { userId: user.id, tenantId },
+    sectionPermissions,
+    canManageConfig,
     schemaTree,
     schemaPathSet: layers.schemaPathSet,
     editingScope,
     layers,
     edits,
+    hasPendingDrafts: drafts.hasPendingDrafts,
   });
+  const draftContext = useMemo<t.ConfigDraftContextValue>(
+    () => ({
+      registerDraft: drafts.registerDraft,
+      editSessionId: edits.editSessionId,
+      sessionError: save.sessionError,
+      recoveryError: save.recoveryError,
+      blocked: save.sessionError !== null,
+      retrySession: save.retrySession,
+    }),
+    [
+      drafts.registerDraft,
+      edits.editSessionId,
+      save.sessionError,
+      save.recoveryError,
+      save.retrySession,
+    ],
+  );
   const { cancelReview } = save;
 
   /** "Go to field" and error jumps from the review may target a setting the tab filter hides. */
@@ -312,7 +345,7 @@ export function ConfigPage({
     [availableScopes, localize],
   );
   const guard = useNavigationGuard({
-    isDirty: isDirty || imports.importOpen,
+    isDirty: isDirty || imports.importOpen || drafts.hasPendingDrafts,
     discardEdits,
     openReview: save.openReview,
     reviewOpen: save.confirmSaveOpen,
@@ -542,222 +575,229 @@ export function ConfigPage({
   })();
 
   return (
-    <ConfigErrorsProvider value={save.fieldErrors}>
-      {save.sessionError && (
-        <SaveSessionError
-          result={save.sessionResult}
-          code={save.sessionError}
-          error={save.recoveryError}
-          onRetry={save.retrySession}
-        />
-      )}
-      <ExpandProvider resetKey={`${activeTab}|${editingScope?._id ?? 'base'}`}>
-        <div
-          className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2"
-          style={save.sessionError ? { display: 'none' } : undefined}
-        >
-          <div className="shrink-0 px-4">
-            {banner && <div className="pt-4 pb-2">{banner}</div>}
-            <HeaderActions
-              showImport={isReady && !scopeNotFound}
-              importDisabled={isDirty || !canManageConfig}
-              importTitle={importTitle}
-              onImportClick={() => imports.setImportOpen(true)}
-              showReset={isReady && !isEditingScope && !scopeNotFound && baseOverrides.count > 0}
-              resetLabel={localize('com_config_review_reset_button', {
-                count: baseOverrides.count,
-              })}
-              resetDisabled={isDirty || !canManageConfig}
-              resetTitle={resetBaseTitle}
-              onResetClick={resetBase.openResetBase}
-              showPreview={isReady && permissions.canView}
-              onPreviewClick={() => setPreviewOpen(true)}
-              showScope={permissions.canView}
-              scopeSelection={selectedScope}
-              scopeLoading={isResolvingScope && !scopeLoadError}
-              scopeUnavailable={scopeLoadError != null}
-              onScopeClick={() => setScopeSelectorOpen(true)}
-            />
-            <ConfigTabBar
-              tabs={visibleTabs}
-              activeTab={activeTab}
-              onTabChange={handleTabChange}
-              tabBadges={isReady ? tabBadges : undefined}
-            />
-            {isReady && editingScope && (
-              <ScopeBar
-                scope={editingScope}
-                onBackToBase={backToBase}
-                onError={notifyError}
-                canEditPriority={canManageConfig}
-                values={layers.scopeOverrideValues}
-                pendingResets={edits.pendingResets}
-                onRevert={
-                  permissions.canAssign
-                    ? (paths) => paths.forEach(edits.handleResetField)
-                    : undefined
-                }
-                onUnhide={permissions.canAssign ? edits.handleUnhideField : undefined}
-                visibility={edits.visibilityEdits}
-                fields={schemaTree}
-                config={activeConfigValues}
-                onRevertEntry={permissions.canAssign ? revertScopeEntry : undefined}
-                isEntryPending={isScopeEntryPending}
+    <DraftsContext.Provider value={draftContext}>
+      <ConfigErrorsProvider value={save.fieldErrors}>
+        {save.sessionError && (
+          <SaveSessionError
+            result={save.sessionResult}
+            code={save.sessionError}
+            error={save.recoveryError}
+            onRetry={save.retrySession}
+          />
+        )}
+        <ExpandProvider resetKey={`${activeTab}|${editingScope?._id ?? 'base'}`}>
+          <div
+            className="flex min-h-0 flex-1 flex-col overflow-hidden pt-2"
+            style={save.sessionError ? { display: 'none' } : undefined}
+          >
+            <div className="shrink-0 px-4">
+              {banner && <div className="pt-4 pb-2">{banner}</div>}
+              <HeaderActions
+                showImport={isReady && !scopeNotFound}
+                importDisabled={isDirty || !canManageConfig}
+                importTitle={importTitle}
+                onImportClick={() => imports.setImportOpen(true)}
+                showReset={isReady && !isEditingScope && !scopeNotFound && baseOverrides.count > 0}
+                resetLabel={localize('com_config_review_reset_button', {
+                  count: baseOverrides.count,
+                })}
+                resetDisabled={isDirty || !canManageConfig}
+                resetTitle={resetBaseTitle}
+                onResetClick={resetBase.openResetBase}
+                showPreview={isReady && permissions.canView}
+                onPreviewClick={() => setPreviewOpen(true)}
+                showScope={permissions.canView}
+                scopeSelection={selectedScope}
+                scopeLoading={isResolvingScope && !scopeLoadError}
+                scopeUnavailable={scopeLoadError != null}
+                onScopeClick={() => setScopeSelectorOpen(true)}
               />
-            )}
-            {isReady && (
-              <ContentToolbar
-                scrollContainer={scrollEl}
-                filter={filterText}
-                onFilterChange={setFilterText}
-                filterHits={filterHits}
-                onFilterSelect={revealSetting}
-                customizedOnly={customizedOnly}
-                onCustomizedOnlyChange={setCustomizedOnly}
-                jumpTargets={jumpTargets}
-                onJump={jumpTo}
-                nothingCustomized={layers.activeConfiguredPaths.size === 0}
+              <ConfigTabBar
+                tabs={visibleTabs}
+                activeTab={activeTab}
+                onTabChange={handleTabChange}
+                tabBadges={isReady ? tabBadges : undefined}
               />
-            )}
-          </div>
-
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            <div className="relative min-h-0 min-w-0 flex-1">
-              <div className="h-full scrollbar-gutter-stable overflow-auto pl-4" ref={setScrollEl}>
-                {baseline.status === 'error' && (
-                  <ConfigLoadError error={baseline.error} onRetry={baseline.retry} />
-                )}
-                {baseline.status !== 'error' && scopeLoadError && (
-                  <ConfigLoadError
-                    error={scopeLoadError}
-                    onRetry={retryScopes}
-                    titleKey="com_config_shell_scopes_error_title"
-                    descriptionKey="com_config_shell_scopes_error_desc"
-                  />
-                )}
-                {baseline.status !== 'error' &&
-                  !scopeLoadError &&
-                  (baseline.status === 'pending' || isResolvingScope) && <ConfigContentSkeleton />}
-                {isReady && (
-                  <ScopeActionsProvider value={scopeActions}>
-                    <RevealTargetContext.Provider value={highlightField ?? null}>
-                      <GlobalRevealContext.Provider value={revealGlobal}>
-                        <CollectionEditsContext.Provider value={edits.collectionEdits}>
-                          <RestatesContext.Provider value={restates}>
-                            <RenamesContext.Provider value={entryRenames}>
-                              <ConfigTabContent
-                                key={scopeKey}
-                                sections={sectionsForActiveTab}
-                                configValues={activeConfigValues}
-                                editedValues={editedValues}
-                                onFieldChange={edits.handleFieldChange}
-                                onResetField={edits.handleResetField}
-                                onDiscardField={edits.handleDiscardField}
-                                previewMode={false}
-                                previewScope={editingScope}
-                                previewChangedPaths={layers.scopeChangedPaths}
-                                resolvedValues={layers.scopeResolvedValues}
-                                permissions={permissions}
-                                showChangedOnly={false}
-                                readOnly={!canEditActiveTab || scopeNotFound != null}
-                                configuredPaths={layers.activeConfiguredPaths}
-                                dbOverridePaths={layers.overridePaths}
-                                listOverrideCounts={layers.listOverrideCounts}
-                                touchedPaths={edits.touchedPaths}
-                                pendingResets={edits.pendingResets}
-                                sectionPermissions={sectionPermissions}
-                                schemaDefaults={layers.schemaDefaults}
-                                showConfiguredOnly={customizedOnly}
-                                isEditingScope={isEditingScope}
-                                baseRecordKeys={layers.baseRecordKeys}
-                                onValidationError={notifyError}
-                                editSessionId={edits.editSessionId}
-                                unknownSettings={topLevelUnknown}
-                                onShowAll={showAllSettings}
-                                filterText={filterText}
-                                onClearFilter={clearFilter}
-                                visibleSectionIds={filterSectionIds}
-                                filterPaths={filterPaths}
-                                valueLayers={layers.valueLayers}
-                                visibilityEdits={edits.visibilityEdits}
-                                onHideField={
-                                  permissions.canAssign ? edits.handleHideField : undefined
-                                }
-                                onUnhideField={
-                                  permissions.canAssign ? edits.handleUnhideField : undefined
-                                }
-                                onRenameEntry={edits.handleRenameEntry}
-                              />
-                            </RenamesContext.Provider>
-                          </RestatesContext.Provider>
-                        </CollectionEditsContext.Provider>
-                      </GlobalRevealContext.Provider>
-                    </RevealTargetContext.Provider>
-                  </ScopeActionsProvider>
-                )}
-              </div>
+              {isReady && editingScope && (
+                <ScopeBar
+                  scope={editingScope}
+                  onBackToBase={backToBase}
+                  onError={notifyError}
+                  canEditPriority={canManageConfig}
+                  values={layers.scopeOverrideValues}
+                  pendingResets={edits.pendingResets}
+                  onRevert={
+                    permissions.canAssign
+                      ? (paths) => paths.forEach(edits.handleResetField)
+                      : undefined
+                  }
+                  onUnhide={permissions.canAssign ? edits.handleUnhideField : undefined}
+                  visibility={edits.visibilityEdits}
+                  fields={schemaTree}
+                  config={activeConfigValues}
+                  onRevertEntry={permissions.canAssign ? revertScopeEntry : undefined}
+                  isEntryPending={isScopeEntryPending}
+                />
+              )}
+              {isReady && (
+                <ContentToolbar
+                  scrollContainer={scrollEl}
+                  filter={filterText}
+                  onFilterChange={setFilterText}
+                  filterHits={filterHits}
+                  onFilterSelect={revealSetting}
+                  customizedOnly={customizedOnly}
+                  onCustomizedOnlyChange={setCustomizedOnly}
+                  jumpTargets={jumpTargets}
+                  onJump={jumpTo}
+                  nothingCustomized={layers.activeConfiguredPaths.size === 0}
+                />
+              )}
             </div>
-            <ConfigTableOfContents
-              entries={isReady ? tocEntries : NO_TOC_ENTRIES}
-              scrollContainer={scrollEl}
-              tocRef={setTocEl}
-              showConfiguredOnly={customizedOnly}
-              configuredPaths={layers.activeConfiguredPaths}
-              onNavigate={setActiveSection}
-              dirtyPaths={dirtyPaths}
-              errorPaths={errorPaths}
+
+            <div className="flex min-h-0 flex-1 overflow-hidden">
+              <div className="relative min-h-0 min-w-0 flex-1">
+                <div
+                  className="h-full scrollbar-gutter-stable overflow-auto pl-4"
+                  ref={setScrollEl}
+                >
+                  {baseline.status === 'error' && (
+                    <ConfigLoadError error={baseline.error} onRetry={baseline.retry} />
+                  )}
+                  {baseline.status !== 'error' && scopeLoadError && (
+                    <ConfigLoadError
+                      error={scopeLoadError}
+                      onRetry={retryScopes}
+                      titleKey="com_config_shell_scopes_error_title"
+                      descriptionKey="com_config_shell_scopes_error_desc"
+                    />
+                  )}
+                  {baseline.status !== 'error' &&
+                    !scopeLoadError &&
+                    (baseline.status === 'pending' || isResolvingScope) && (
+                      <ConfigContentSkeleton />
+                    )}
+                  {isReady && (
+                    <ScopeActionsProvider value={scopeActions}>
+                      <RevealTargetContext.Provider value={highlightField ?? null}>
+                        <GlobalRevealContext.Provider value={revealGlobal}>
+                          <CollectionEditsContext.Provider value={edits.collectionEdits}>
+                            <RestatesContext.Provider value={restates}>
+                              <RenamesContext.Provider value={entryRenames}>
+                                <ConfigTabContent
+                                  key={scopeKey}
+                                  sections={sectionsForActiveTab}
+                                  configValues={activeConfigValues}
+                                  editedValues={editedValues}
+                                  onFieldChange={edits.handleFieldChange}
+                                  onResetField={edits.handleResetField}
+                                  onDiscardField={edits.handleDiscardField}
+                                  previewMode={false}
+                                  previewScope={editingScope}
+                                  previewChangedPaths={layers.scopeChangedPaths}
+                                  resolvedValues={layers.scopeResolvedValues}
+                                  permissions={permissions}
+                                  showChangedOnly={false}
+                                  readOnly={!canEditActiveTab || scopeNotFound != null}
+                                  configuredPaths={layers.activeConfiguredPaths}
+                                  dbOverridePaths={layers.overridePaths}
+                                  listOverrideCounts={layers.listOverrideCounts}
+                                  touchedPaths={edits.touchedPaths}
+                                  pendingResets={edits.pendingResets}
+                                  sectionPermissions={sectionPermissions}
+                                  schemaDefaults={layers.schemaDefaults}
+                                  showConfiguredOnly={customizedOnly}
+                                  isEditingScope={isEditingScope}
+                                  baseRecordKeys={layers.baseRecordKeys}
+                                  onValidationError={notifyError}
+                                  editSessionId={edits.editSessionId}
+                                  unknownSettings={topLevelUnknown}
+                                  onShowAll={showAllSettings}
+                                  filterText={filterText}
+                                  onClearFilter={clearFilter}
+                                  visibleSectionIds={filterSectionIds}
+                                  filterPaths={filterPaths}
+                                  valueLayers={layers.valueLayers}
+                                  visibilityEdits={edits.visibilityEdits}
+                                  onHideField={
+                                    permissions.canAssign ? edits.handleHideField : undefined
+                                  }
+                                  onUnhideField={
+                                    permissions.canAssign ? edits.handleUnhideField : undefined
+                                  }
+                                  onRenameEntry={edits.handleRenameEntry}
+                                />
+                              </RenamesContext.Provider>
+                            </RestatesContext.Provider>
+                          </CollectionEditsContext.Provider>
+                        </GlobalRevealContext.Provider>
+                      </RevealTargetContext.Provider>
+                    </ScopeActionsProvider>
+                  )}
+                </div>
+              </div>
+              <ConfigTableOfContents
+                entries={isReady ? tocEntries : NO_TOC_ENTRIES}
+                scrollContainer={scrollEl}
+                tocRef={setTocEl}
+                showConfiguredOnly={customizedOnly}
+                configuredPaths={layers.activeConfiguredPaths}
+                onNavigate={setActiveSection}
+                dirtyPaths={dirtyPaths}
+                errorPaths={errorPaths}
+              />
+            </div>
+
+            {isReady && <ChangesBar review={review} />}
+            <ChangeReview review={save.sessionError ? { ...review, open: false } : review} />
+
+            <ScopeSelector
+              open={scopeSelectorOpen && !save.sessionError}
+              onOpenChange={setScopeSelectorOpen}
+              currentSelection={selectedScope}
+              onSelect={handleScopeChange}
+              permissions={permissions}
+              onError={notifyError}
+              isDirty={isDirty}
+            />
+
+            <PreviewDrawer
+              open={previewOpen && !save.sessionError}
+              onClose={() => setPreviewOpen(false)}
+              initialTarget={previewTarget}
+            />
+
+            <ImportYamlDialog
+              open={imports.importOpen && !save.sessionError}
+              onClose={() => imports.setImportOpen(false)}
+              currentScope={editingScope}
+              onImport={imports.handleImport}
+              schemaTree={schemaTree}
+              schemaPathSet={layers.schemaPathSet}
+            />
+
+            <NavigationGuardDialog
+              open={guard.open}
+              saveDisabled={!!save.sessionError || imports.importOpen}
+              intent={guard.intent}
+              changeCount={Math.max(review.model.count, 1)}
+              onSave={guard.onSave}
+              onDiscard={guard.onDiscard}
+              onCancel={guard.onCancel}
+            />
+
+            <ResetBaseConfigDialog
+              open={resetBase.resetBaseOpen && !save.sessionError}
+              resetting={resetBase.resettingBase}
+              error={resetBase.resetBaseError}
+              termsUrl={resetBase.resetBaseTermsUrl}
+              onConfirm={resetBase.handleResetBaseConfig}
+              onCancel={resetBase.cancelResetBase}
+              overrides={baseOverrides}
             />
           </div>
-
-          {isReady && <ChangesBar review={review} />}
-          <ChangeReview review={save.sessionError ? { ...review, open: false } : review} />
-
-          <ScopeSelector
-            open={scopeSelectorOpen && !save.sessionError}
-            onOpenChange={setScopeSelectorOpen}
-            currentSelection={selectedScope}
-            onSelect={handleScopeChange}
-            permissions={permissions}
-            onError={notifyError}
-            isDirty={isDirty}
-          />
-
-          <PreviewDrawer
-            open={previewOpen && !save.sessionError}
-            onClose={() => setPreviewOpen(false)}
-            initialTarget={previewTarget}
-          />
-
-          <ImportYamlDialog
-            open={imports.importOpen && !save.sessionError}
-            onClose={() => imports.setImportOpen(false)}
-            currentScope={editingScope}
-            onImport={imports.handleImport}
-            schemaTree={schemaTree}
-            schemaPathSet={layers.schemaPathSet}
-          />
-
-          <NavigationGuardDialog
-            open={guard.open}
-            saveDisabled={!!save.sessionError || imports.importOpen}
-            intent={guard.intent}
-            changeCount={Math.max(review.model.count, 1)}
-            onSave={guard.onSave}
-            onDiscard={guard.onDiscard}
-            onCancel={guard.onCancel}
-          />
-
-          <ResetBaseConfigDialog
-            open={resetBase.resetBaseOpen && !save.sessionError}
-            resetting={resetBase.resettingBase}
-            error={resetBase.resetBaseError}
-            termsUrl={resetBase.resetBaseTermsUrl}
-            onConfirm={resetBase.handleResetBaseConfig}
-            onCancel={resetBase.cancelResetBase}
-            overrides={baseOverrides}
-          />
-        </div>
-      </ExpandProvider>
-    </ConfigErrorsProvider>
+        </ExpandProvider>
+      </ConfigErrorsProvider>
+    </DraftsContext.Provider>
   );
 }

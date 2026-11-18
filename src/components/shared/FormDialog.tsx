@@ -3,6 +3,7 @@ import type * as t from '@/types';
 import { useReturnFocus, useLocalize, useDiscardPrompt } from '@/hooks';
 import { RowFilterContext } from '@/contexts/RowFilterContext';
 import { DiscardConfirm } from './DiscardConfirm';
+import { SessionDraftError } from './SessionDraftError';
 import { cn } from '@/utils';
 
 const sizeClasses: Record<string, string> = {
@@ -32,6 +33,7 @@ export function FormDialog({
   submitLabel,
   submitDisabled,
   saving,
+  recovery,
   error,
   hint,
   size,
@@ -60,6 +62,7 @@ export function FormDialog({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (recovery?.blocked) return;
     onSubmit();
   };
 
@@ -89,9 +92,22 @@ export function FormDialog({
           className="form-dialog-form"
         >
           <div className="form-dialog-body">
-            <RowFilterContext.Provider value={null}>{children}</RowFilterContext.Provider>
+            {recovery?.sessionError && (
+              <SessionDraftError
+                code={recovery.sessionError}
+                error={recovery.recoveryError}
+                onRetry={recovery.retrySession}
+              />
+            )}
+            <div
+              className={recovery?.blocked ? undefined : 'contents'}
+              hidden={recovery?.blocked}
+              inert={recovery?.blocked || undefined}
+            >
+              <RowFilterContext.Provider value={null}>{children}</RowFilterContext.Provider>
+            </div>
           </div>
-          <div className="form-dialog-footer">
+          <div className="form-dialog-footer" hidden={recovery?.blocked && !asking}>
             {asking ? (
               <DiscardConfirm message={discardPrompt} onKeep={prompt.keep} onDiscard={close} />
             ) : (

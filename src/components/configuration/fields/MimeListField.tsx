@@ -12,8 +12,8 @@ import {
   knownMimePatternLabel,
 } from '@/utils';
 import { AddItemButton, DecorativeIcon, TrashButton } from '@/components/shared';
+import { useListKeys, useLocalize, useDraftValue } from '@/hooks';
 import { ConfirmChoiceDialog } from './ConfirmChoice';
-import { useListKeys, useLocalize } from '@/hooks';
 import { SelectField } from './SelectField';
 
 const ORIGIN_KEYS: Record<t.MimeListOrigin, string> = {
@@ -430,24 +430,27 @@ function PatternInput({
   onCommit: (pattern: string) => void;
   onCancel?: () => void;
 }) {
-  const [draft, setDraft] = useState(initial);
   const [error, setError] = useState<string | null>(null);
-  const [shown, setShown] = useState(initial);
+  const {
+    draft,
+    setDraft,
+    commit: submit,
+  } = useDraftValue({
+    value: initial,
+    delay: 0,
+    onCommit: (next) => {
+      const pattern = next.trim();
+      if (pattern === initial) return;
+      const problem = pattern ? issueText(pattern) : null;
+      setError(problem);
+      if (problem) return false;
+      onCommit(pattern);
+    },
+  });
   const errorId = `${id}-error`;
-  /** The saved pattern changed from outside (Undo, a revert): show it. */
-  if (shown !== initial) {
-    setShown(initial);
-    setDraft(initial);
-    setError(null);
-  }
-
-  const submit = () => {
-    const pattern = draft.trim();
-    if (pattern === initial) return;
-    const problem = pattern ? issueText(pattern) : null;
-    setError(problem);
-    if (!problem) onCommit(pattern);
-  };
+  useEffect(() => {
+    if (draft === initial) setError(null);
+  }, [draft, initial]);
 
   return (
     <div className="cui-field flex w-full max-w-150 flex-col gap-1 [&_input]:font-mono!">

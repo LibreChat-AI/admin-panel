@@ -5,8 +5,8 @@ import type * as t from '@/types';
 import { AUTH_METHODS, authMethodOf, lockedAuthMethod, planAuthSwitch } from './auth';
 import { asConfigRecord, hasConfigValue } from '@/utils';
 import { UnknownSettings } from '../../UnknownSettings';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { McpFieldGroup } from './Group';
-import { useLocalize } from '@/hooks';
 import { McpNote } from './Note';
 
 const METHOD_LABEL_KEYS: Readonly<Record<t.McpAuthMethod, string>> = {
@@ -84,6 +84,7 @@ export function McpAuthMethod({
   const current = authMethodOf(entry);
   const pinned = lockedAuthMethod(lower);
   const [picked, setPicked] = useState<t.McpAuthMethod | null>(null);
+  useSessionDraft(!disabled && picked !== null && current === 'none');
   const method = picked != null && current === 'none' ? picked : current;
   const label = localize('com_config_mcp_auth_method_label');
   const pinnedReason = pinned

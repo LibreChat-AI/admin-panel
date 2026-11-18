@@ -1,6 +1,12 @@
 import { useState, useCallback, useRef, useEffect, useId } from 'react';
 import type * as t from '@/types';
-import { useLocalize, useValuesScope, useConfigKeyProblem, useExpandableState } from '@/hooks';
+import {
+  useLocalize,
+  useValuesScope,
+  useConfigKeyProblem,
+  useExpandableState,
+  useSessionDraft,
+} from '@/hooks';
 import { DecorativeIcon, StateChip } from '@/components/shared';
 import { getEntrySummary } from './entries';
 import { sourceLabel } from '../values';
@@ -65,6 +71,7 @@ export function ObjectEntryCard({
   const [editKey, setEditKey] = useState(entryKey);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [hasAddField, setHasAddField] = useState(false);
+  useSessionDraft(!disabled && isEditing && editKey !== entryKey);
   const inputRef = useRef<HTMLInputElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const undoRef = useRef<HTMLButtonElement>(null);

@@ -26,6 +26,7 @@ import {
   planConfigChanges,
   mergedBackChanges,
   toRevisionPrecondition,
+  hasConfigCapability,
 } from '@/utils';
 import {
   SystemCapabilities,
@@ -120,6 +121,9 @@ function termsUrlOf(result: t.ApplyConfigChangesResult): string | null {
  */
 export function useConfigSave({
   sessionIdentity,
+  sectionPermissions,
+  canManageConfig,
+  hasPendingDrafts = false,
   schemaTree,
   schemaPathSet,
   editingScope,
@@ -193,9 +197,11 @@ export function useConfigSave({
 
   useEffect(() => setServerIssues([]), [editedValues, visibilityEdits]);
 
-  const hasPendingEdits = [editedValues, visibilityEdits, restateEdits].some(
-    (pending) => Object.keys(pending).length > 0,
-  );
+  const hasPendingEdits =
+    hasPendingDrafts ||
+    [editedValues, visibilityEdits, restateEdits].some(
+      (pending) => Object.keys(pending).length > 0,
+    );
   useEffect(() => {
     if (!hasPendingEdits && !sessionError && !sessionResult) return;
     const release = holdSessionRedirects(handleSessionError);
@@ -727,10 +733,12 @@ export function useConfigSave({
     try {
       const verified = await verifyAdminTokenFn({ data: { refresh: true } });
       if (!verified.valid || !verified.user) {
-        handleSessionError(
-          verified.error === 'AUTH_SESSION_CHECK_UNAVAILABLE'
-            ? 'AUTH_SESSION_CHECK_UNAVAILABLE'
-            : 'OPENID_SESSION_ENDED',
+        const unavailable = verified.error === 'AUTH_SESSION_CHECK_UNAVAILABLE';
+        handleSessionError(unavailable ? 'AUTH_SESSION_CHECK_UNAVAILABLE' : 'OPENID_SESSION_ENDED');
+        setRecoveryError(
+          localize(
+            unavailable ? 'com_config_session_retry_failed' : 'com_config_session_still_ended',
+          ),
         );
         return;
       }
@@ -742,8 +750,20 @@ export function useConfigSave({
         return;
       }
       const { capabilities } = await getEffectiveCapabilitiesFn();
-      if (!hasImpliedCapability(capabilities, SystemCapabilities.ACCESS_ADMIN)) {
+      const hasCapability = (capability: string) => hasImpliedCapability(capabilities, capability);
+      if (!hasCapability(SystemCapabilities.ACCESS_ADMIN)) {
         setRecoveryError(localize('com_config_session_access_lost'));
+        return;
+      }
+      const configAccessLost =
+        (canManageConfig && !hasCapability(SystemCapabilities.MANAGE_CONFIGS)) ||
+        Object.entries(sectionPermissions).some(
+          ([section, permission]) =>
+            (permission.canView && !hasConfigCapability(hasCapability, section, 'read')) ||
+            (permission.canEdit && !hasConfigCapability(hasCapability, section, 'manage')),
+        );
+      if (configAccessLost) {
+        setRecoveryError(localize('com_config_session_permission_lost'));
         return;
       }
       await invalidateTarget(sessionTarget.current ?? editTarget, true);
@@ -766,6 +786,8 @@ export function useConfigSave({
     }
   }, [
     localize,
+    sectionPermissions,
+    canManageConfig,
     handleSessionError,
     invalidateTarget,
     editTarget,

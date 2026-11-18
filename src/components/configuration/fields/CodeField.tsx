@@ -1,8 +1,8 @@
 import yaml from 'js-yaml';
 import { useState, useEffect, useRef } from 'react';
 import type * as t from '@/types';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { cn, isConfigValueEqual } from '@/utils';
-import { useLocalize } from '@/hooks';
 
 function toYaml(value: t.ConfigValue): string {
   if (value === undefined || value === null) return '';
@@ -20,29 +20,41 @@ export function CodeField({
   const [text, setText] = useState(() => toYaml(value));
   const [error, setError] = useState<string>();
   const externalValue = useRef(value);
+  const recovery = useSessionDraft(!disabled && text !== toYaml(value));
+  const sessionRef = useRef(recovery?.editSessionId);
+  const preserveRef = useRef(false);
+  if (recovery?.blocked && text !== toYaml(externalValue.current)) preserveRef.current = true;
 
   useEffect(() => {
-    if (value !== externalValue.current) {
-      externalValue.current = value;
-      setText(toYaml(value));
-      setError(undefined);
-    }
-  }, [value]);
+    const reset = sessionRef.current !== recovery?.editSessionId;
+    sessionRef.current = recovery?.editSessionId;
+    const preserve = preserveRef.current && !reset;
+    if (reset) preserveRef.current = false;
+    if (!reset && value === externalValue.current) return;
+    externalValue.current = value;
+    if (preserve) return;
+    setText(toYaml(value));
+    setError(undefined);
+  }, [value, recovery?.editSessionId, recovery?.blocked]);
 
   /** Leaving the field writes only a change: focusing a default or saved value and tabbing on pins nothing. */
   const handleBlur = () => {
+    if (recovery?.blocked) return;
     const trimmed = text.trim();
     if (trimmed === toYaml(value)) {
+      preserveRef.current = false;
       setError(undefined);
       return;
     }
     if (trimmed === '') {
+      preserveRef.current = false;
       setError(undefined);
       onChange(undefined);
       return;
     }
     try {
       const parsed = yaml.load(trimmed, { schema: yaml.JSON_SCHEMA }) as t.ConfigValue;
+      preserveRef.current = false;
       setError(undefined);
       if (isConfigValueEqual(parsed, value)) return;
       externalValue.current = parsed;

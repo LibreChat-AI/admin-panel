@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type * as t from '@/types';
+import { useExpandableState, useLocalize, useValuesScope, useSessionDraft } from '@/hooks';
 import { DecorativeIcon, KebabMenu, StateChip, WarningList } from '@/components/shared';
-import { useExpandableState, useLocalize, useValuesScope } from '@/hooks';
 import { RegionNameContext } from '@/contexts/RegionNameContext';
 import { transportLabelKey, transportOf } from './transport';
-import { sourceLabel } from '../../values';
 import { cn, restoreFocusLater } from '@/utils';
+import { sourceLabel } from '../../values';
 
 /** Row-menu icons, the same as the custom endpoint rows'. */
 const ACTION_ICONS: Readonly<Record<t.McpServerAction['id'], t.MenuIconName>> = {
@@ -99,6 +99,7 @@ function RenameInput({
   const localize = useLocalize();
   const inputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(serverKey);
+  useSessionDraft(draft !== serverKey);
   const [error, setError] = useState<string | null>(null);
   const errorId = `${toDomId(serverKey)}-rename-error`;
 

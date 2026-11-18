@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { ButtonGroup } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useLocalize, useInlineFit, useSessionDraft } from '@/hooks';
 import { TextareaField } from '../../fields/TextareaField';
 import { defaultChoiceLabel } from '../../fields/display';
 import { SelectField } from '../../fields/SelectField';
-import { useLocalize, useInlineFit } from '@/hooks';
 
 function modeOf(value: t.ConfigValue): t.McpInstructionsMode {
   if (value === true) return 'server';
@@ -41,6 +41,7 @@ export function InstructionsField({
   const own = fieldDefault.hasOwnValue ? value : undefined;
   const valueMode = modeOf(own);
   const [pendingCustom, setPendingCustom] = useState(false);
+  useSessionDraft(pendingCustom && valueMode !== 'custom');
   const mode = pendingCustom && valueMode !== 'custom' ? 'custom' : valueMode;
   const defaultLabel = defaultChoiceLabel(fieldDefault, localize, {
     true: localize('com_config_mcp_instructions_server'),

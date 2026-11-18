@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { ButtonGroup } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { ListField } from './ListField';
-import { useLocalize } from '@/hooks';
 
 type Mode = 'default' | 'off' | 'all' | 'some';
 
@@ -37,6 +37,7 @@ export function BoolOrListField({
   const localize = useLocalize();
   const valueMode = modeOf(value);
   const [pendingSome, setPendingSome] = useState(false);
+  useSessionDraft(!disabled && pendingSome && valueMode !== 'some');
   const mode: Mode = pendingSome && valueMode !== 'some' ? 'some' : valueMode;
 
   const choose = (next: Mode) => {

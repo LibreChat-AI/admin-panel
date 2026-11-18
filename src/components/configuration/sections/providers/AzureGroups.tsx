@@ -9,6 +9,7 @@ import {
   useStoredGroupHides,
   useConfigKeyProblem,
   useEntryOverrideNotes,
+  useSessionDraft,
 } from '@/hooks';
 import { RevealTargetContext } from '@/contexts/RevealTargetContext';
 import { ConfigErrorsContext } from '@/contexts/ConfigErrorsContext';
@@ -194,6 +195,7 @@ function CreateGroup({ names, onCreate }: t.AzureGroupCreateProps) {
   const errorId = useId();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState('');
+  useSessionDraft(adding && name !== '');
   const trimmed = name.trim();
   const problem = names.includes(trimmed)
     ? localize('com_config_providers_azure_name_taken', { name: trimmed })

@@ -7,7 +7,11 @@ import { pressEscape, findFocusedDialog } from '@/test/focus';
 vi.mock('@/hooks', async () => {
   const { useReturnFocus } =
     await vi.importActual<typeof import('@/hooks/dialogs')>('@/hooks/dialogs');
-  return { useLocalize: () => (key: string) => key, useReturnFocus };
+  return {
+    ...(await vi.importActual<typeof import('@/hooks/config/pending')>('@/hooks/config/pending')),
+    useLocalize: () => (key: string) => key,
+    useReturnFocus,
+  };
 });
 
 /**

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type * as t from '@/types';
+import { useSessionDraft } from './pending';
 
 /** Commit delay while typing: edits register (and mark the page dirty) without waiting for blur. */
 export const DRAFT_COMMIT_DELAY = 300;
@@ -7,7 +8,8 @@ export const DRAFT_COMMIT_DELAY = 300;
 /**
  * Local draft of a field value that commits to the page `delay` ms after the
  * last keystroke, and immediately on `commit()` (blur, Enter). External value
- * changes (discard, save, reset) replace the draft. A pending commit is
+ * changes (discard, save, reset) replace the draft. Recovery refetches keep
+ * unfinished input. A pending commit is
  * flushed on unmount so a tab switch mid-typing keeps the edit.
  *
  * `onCommit` may return `false` to reject a draft (e.g. a cleared required
@@ -21,10 +23,18 @@ export function useDraftValue<T>({
   autoCommit,
 }: t.DraftValueOptions<T>): t.DraftValue<T> {
   const [draft, setDraftState] = useState<T>(value);
+  const recovery = useSessionDraft(!Object.is(draft, value));
   const committedRef = useRef<T>(value);
   const draftRef = useRef<T>(value);
   const onCommitRef = useRef(onCommit);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionRef = useRef(recovery?.editSessionId);
+  const preserveRef = useRef(false);
+  const blockedRef = useRef(false);
+  blockedRef.current = recovery?.blocked === true;
+  if (blockedRef.current && !Object.is(draftRef.current, committedRef.current)) {
+    preserveRef.current = true;
+  }
   onCommitRef.current = onCommit;
 
   const clearTimer = () => {
@@ -34,19 +44,29 @@ export function useDraftValue<T>({
   };
 
   useEffect(() => {
-    if (Object.is(value, committedRef.current)) return;
+    const reset = sessionRef.current !== recovery?.editSessionId;
+    sessionRef.current = recovery?.editSessionId;
+    const preserve = preserveRef.current && !reset;
+    if (reset) preserveRef.current = false;
+    if (!reset && Object.is(value, committedRef.current)) return;
     clearTimer();
     committedRef.current = value;
+    if (preserve) return;
     draftRef.current = value;
     setDraftState(value);
-  }, [value]);
+  }, [value, recovery?.editSessionId, recovery?.blocked]);
 
   const commit = useCallback(() => {
     clearTimer();
+    if (blockedRef.current) return;
     const next = draftRef.current;
-    if (Object.is(next, committedRef.current)) return;
+    if (Object.is(next, committedRef.current)) {
+      preserveRef.current = false;
+      return;
+    }
     const result = onCommitRef.current(next);
     if (result === false) return;
+    preserveRef.current = false;
     if (result === 'reset') {
       draftRef.current = committedRef.current;
       setDraftState(committedRef.current);

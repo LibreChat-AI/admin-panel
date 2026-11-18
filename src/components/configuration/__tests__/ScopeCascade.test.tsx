@@ -34,6 +34,7 @@ vi.mock('@/hooks', async () => {
   const contract =
     await vi.importActual<typeof import('@/hooks/config/contract')>('@/hooks/config/contract');
   return {
+    ...(await vi.importActual<typeof import('@/hooks/config/pending')>('@/hooks/config/pending')),
     useLocalize: () => localize,
     useConfigFeatures: contract.useConfigFeatures,
     useReturnFocus: dialogs.useReturnFocus,

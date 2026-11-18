@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type * as t from '@/types';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { SelectField } from './SelectField';
-import { useLocalize } from '@/hooks';
 
 function asRecord(value: t.ConfigValue): t.ConfigRecord {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -92,6 +92,7 @@ export function VariantField({
       : [];
   /** A chosen branch shows while the value fits no branch yet, or while the switch is blocked. */
   const showsPending = pending != null && (!matched || pendingBlocked.length > 0);
+  useSessionDraft(!disabled && showsPending);
   const record = asRecord(value);
   /** Nothing set and no branch chosen: LibreChat's default applies, and no branch is shown. */
   const isUnset = !matched && !showsPending && Object.keys(record).length === 0;

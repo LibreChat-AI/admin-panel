@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Button, TextField as CUITextField } from '@clickhouse/click-ui';
 import type * as t from '@/types';
+import { useLocalize, useSessionDraft } from '@/hooks';
 import { DecorativeIcon } from '@/components/shared';
 import { EMAIL_DOMAIN_PATTERN } from '@/constants';
-import { useLocalize } from '@/hooks';
 
 /** `@Example.com ` → `example.com`: LibreChat compares the lowercased part after `@`. */
 function normalizeDomain(text: string): string {
@@ -28,6 +28,7 @@ export function EmailDomainListField({
   const localize = useLocalize();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
+  useSessionDraft(!disabled && draft !== '');
   const errorId = `${id}-error`;
   const inputId = `${id}-input`;
 

@@ -20,6 +20,7 @@ import { RevealTargetContext } from '@/contexts/RevealTargetContext';
 import { useFieldState, useLocalize, useValuesScope, useRecordKeyRemoval } from '@/hooks';
 import { RecordObjectField } from '../fields/RecordObjectField';
 import { RowFilterContext } from '@/contexts/RowFilterContext';
+import { DraftsContext } from '@/contexts/DraftsContext';
 import { ArrayObjectField } from '../fields/ArrayObjectField';
 import { ShadowBadge, shadowedSourceLabel } from '../values';
 import { BooleanChip, FieldControl } from './FieldControl';
@@ -145,6 +146,9 @@ export function InlineFieldRenderer({
   showRequired,
   knownFields,
 }: t.InlineFieldRendererProps) {
+  const blocked = useContext(DraftsContext)?.blocked ?? false;
+  const blockedRef = useRef(blocked);
+  blockedRef.current = blocked;
   const configuredOnly = useContext(ConfiguredOnlyContext);
   const rowFilter = useContext(RowFilterContext);
   const revealTarget = useContext(RevealTargetContext);
@@ -157,6 +161,10 @@ export function InlineFieldRenderer({
   );
   const [pickerOpen, setPickerOpen] = useState(false);
   const focusKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (blocked) setPickerOpen(false);
+  }, [blocked]);
 
   /** Fields with a value, and the one a search result reveals, stay shown for the session. */
   const toShow = fields.filter(
@@ -201,6 +209,7 @@ export function InlineFieldRenderer({
   });
 
   const handleAddField = (key: string) => {
+    if (blockedRef.current) return;
     setShownKeys((prev) => new Set(prev).add(key));
     setPickerOpen(false);
     focusKeyRef.current = key;
@@ -212,7 +221,9 @@ export function InlineFieldRenderer({
       addFieldTriggerRef.current = null;
       return;
     }
-    addFieldTriggerRef.current = () => setPickerOpen(true);
+    addFieldTriggerRef.current = () => {
+      if (!blockedRef.current) setPickerOpen(true);
+    };
     return () => {
       addFieldTriggerRef.current = null;
     };
@@ -238,11 +249,12 @@ export function InlineFieldRenderer({
       ))}
       {!disabled && hiddenFields.length > 0 && (pickerOpen || !addFieldTriggerRef) && (
         <AddFieldPicker
-          key={hiddenFields.length}
+          key={`${hiddenFields.length}:${blocked}`}
           fields={hiddenFields}
           parentPath={parentPath}
           lookupKey={lookupKey}
-          autoOpen={pickerOpen}
+          autoOpen={pickerOpen && !blocked}
+          blocked={blocked}
           onAdd={handleAddField}
           onClose={() => setPickerOpen(false)}
         />
@@ -320,6 +332,7 @@ function AddFieldPicker({
   parentPath,
   lookupKey,
   autoOpen,
+  blocked,
   onAdd,
   onClose,
 }: {
@@ -327,6 +340,7 @@ function AddFieldPicker({
   parentPath: string;
   lookupKey: string;
   autoOpen: boolean;
+  blocked: boolean;
   onAdd: (key: string) => void;
   onClose: () => void;
 }) {
@@ -373,14 +387,15 @@ function AddFieldPicker({
       <div className="w-60">
         <Select
           id={pickerId}
+          disabled={blocked}
           showSearch
           onOpenChange={(next) => {
-            if (!next) onClose();
+            if (!next && !blocked) onClose();
           }}
           placeholder={localize('com_config_ctl_add_field_placeholder')}
           aria-label={localize('com_config_add_field')}
           onSelect={(key) => {
-            if (key) onAdd(key);
+            if (!blocked && key) onAdd(key);
           }}
           options={grouped ?? labelled}
         />

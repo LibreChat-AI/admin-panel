@@ -1,15 +1,15 @@
 import { Button, Dialog } from '@clickhouse/click-ui';
 import { PrincipalType } from 'librechat-data-provider';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AdminSystemGrant } from '@librechat/data-schemas';
 import type * as t from '@/types';
 import { grantCapabilityFn, principalGrantsQueryOptions, revokeCapabilityFn } from '@/server';
 import { getScopeTypeConfig, SystemCapabilities } from '@/constants';
-import { DecorativeIcon, LoadingState } from '@/components/shared';
-import { cn, notifySuccess, notifyError } from '@/utils';
+import { DecorativeIcon, LoadingState, SessionDraftError } from '@/components/shared';
+import { cn, errorText, notifySuccess, notifyError } from '@/utils';
 import { CapabilityPanel } from './CapabilityPanel';
-import { useLocalize } from '@/hooks';
+import { useLocalize, useSessionRecovery } from '@/hooks';
 
 function grantsToRecord(grants: AdminSystemGrant[]): Record<string, boolean> {
   const record: Record<string, boolean> = {};
@@ -32,7 +32,7 @@ export function EditCapabilitiesDialog({
   const queryClient = useQueryClient();
   const open = principalType != null && principalId != null;
 
-  const { data: grants = [], isLoading } = useQuery({
+  const { data: grants, isLoading } = useQuery({
     ...principalGrantsQueryOptions(principalType ?? PrincipalType.ROLE, principalId ?? ''),
     enabled: open,
   });
@@ -40,18 +40,28 @@ export function EditCapabilitiesDialog({
   const [capabilities, setCapabilities] = useState<Record<string, boolean>>({});
   const [baseline, setBaseline] = useState<Record<string, boolean>>({});
   const [error, setError] = useState('');
+  const initializedPrincipal = useRef<string | null>(null);
+  const hasChanges = Object.keys(capabilities).some((cap) => capabilities[cap] !== baseline[cap]);
+  const recovery = useSessionRecovery({ active: open, dirty: hasChanges });
 
   useEffect(() => {
-    if (open && !isLoading) {
-      const record = grantsToRecord(grants);
+    if (!open) {
+      initializedPrincipal.current = null;
+      return;
+    }
+    const key = `${principalType}:${principalId}`;
+    if (!isLoading && (initializedPrincipal.current !== key || !hasChanges)) {
+      initializedPrincipal.current = key;
+      const record = grantsToRecord(grants ?? []);
       setCapabilities(record);
       setBaseline(record);
       setError('');
     }
-  }, [open, isLoading, grants]);
+  }, [open, isLoading, grants, principalType, principalId, hasChanges]);
 
   const saveMutation = useMutation({
     mutationFn: async (vars: { name: string }) => {
+      recovery.requireSession();
       if (!principalType || !principalId) {
         throw new Error(localize('com_cap_principal_unavailable'));
       }
@@ -63,9 +73,11 @@ export function EditCapabilitiesDialog({
       }
       const shared = { principalType, principalId };
       for (const cap of toGrant) {
+        recovery.requireSession();
         await grantCapabilityFn({ data: { ...shared, capability: cap } });
       }
       for (const cap of toRevoke) {
+        recovery.requireSession();
         await revokeCapabilityFn({ data: { ...shared, capability: cap } });
       }
       return vars;
@@ -77,16 +89,15 @@ export function EditCapabilitiesDialog({
       notifySuccess(localize('com_toast_capabilities_saved', { name: vars.name }));
       onClose();
     },
-    onError: (err: Error) => notifyError(err.message),
+    onError: (err: Error) => notifyError(errorText(err, err.message, localize)),
   });
 
-  const hasChanges = Object.keys(capabilities).some((cap) => capabilities[cap] !== baseline[cap]);
-
   const handleSave = useCallback(() => {
+    if (recovery.blocked) return;
     setError('');
     if (!principalType || !principalId) return;
     saveMutation.mutate({ name: principalName });
-  }, [saveMutation, principalType, principalId, principalName]);
+  }, [saveMutation, principalType, principalId, principalName, recovery.blocked]);
 
   const dialogTitle = principalType
     ? `${localize('com_cap_edit_title', { name: principalName })}`
@@ -106,56 +117,65 @@ export function EditCapabilitiesDialog({
         onClose={onClose}
         className="modal-frost max-w-2xl!"
       >
-        {isLoading ? (
-          <LoadingState />
-        ) : (
-          <div className="flex flex-col gap-4">
-            {principalConfig && (
-              <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
-                    principalConfig.badgeClass,
-                  )}
-                >
-                  <DecorativeIcon name={principalConfig.icon} size="xs" />
-                  {localize(principalConfig.labelKey)}
-                </span>
-                <span className="text-sm font-medium text-(--cui-color-text-default)">
-                  {principalName}
-                </span>
-              </div>
-            )}
-            <CapabilityPanel
-              capabilities={capabilities}
-              onChange={setCapabilities}
-              disabled={saveMutation.isPending}
-            />
-            {error && (
-              <p role="alert" className="text-sm text-(--cui-color-text-danger)">
-                {error}
-              </p>
-            )}
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                htmlType="button"
-                type="secondary"
-                label={localize('com_ui_cancel')}
-                onClick={onClose}
+        {recovery.sessionError && (
+          <SessionDraftError
+            code={recovery.sessionError}
+            error={recovery.recoveryError}
+            onRetry={recovery.retrySession}
+          />
+        )}
+        <div hidden={recovery.blocked} inert={recovery.blocked || undefined}>
+          {isLoading ? (
+            <LoadingState />
+          ) : (
+            <div className="flex flex-col gap-4">
+              {principalConfig && (
+                <div className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium',
+                      principalConfig.badgeClass,
+                    )}
+                  >
+                    <DecorativeIcon name={principalConfig.icon} size="xs" />
+                    {localize(principalConfig.labelKey)}
+                  </span>
+                  <span className="text-sm font-medium text-(--cui-color-text-default)">
+                    {principalName}
+                  </span>
+                </div>
+              )}
+              <CapabilityPanel
+                capabilities={capabilities}
+                onChange={setCapabilities}
                 disabled={saveMutation.isPending}
               />
-              <Button
-                htmlType="button"
-                type="primary"
-                label={
-                  saveMutation.isPending ? localize('com_ui_loading') : localize('com_ui_save')
-                }
-                onClick={handleSave}
-                disabled={!hasChanges || saveMutation.isPending}
-              />
+              {error && (
+                <p role="alert" className="text-sm text-(--cui-color-text-danger)">
+                  {error}
+                </p>
+              )}
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  htmlType="button"
+                  type="secondary"
+                  label={localize('com_ui_cancel')}
+                  onClick={onClose}
+                  disabled={saveMutation.isPending}
+                />
+                <Button
+                  htmlType="button"
+                  type="primary"
+                  label={
+                    saveMutation.isPending ? localize('com_ui_loading') : localize('com_ui_save')
+                  }
+                  onClick={handleSave}
+                  disabled={!hasChanges || saveMutation.isPending}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </Dialog.Content>
     </Dialog>
   );
