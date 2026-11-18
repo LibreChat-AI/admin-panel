@@ -1,6 +1,6 @@
 import { ClickUIProvider } from '@clickhouse/click-ui';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import {
   Outlet,
@@ -109,10 +109,11 @@ function watchChrome(): ChromeLog {
   return log;
 }
 
-function renderApp(queryClient = new QueryClient()) {
+function renderApp(queryClient = new QueryClient(), initialEntry = '/', basepath = '/') {
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ['/'] }),
+    basepath,
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
     context: { queryClient },
   });
   const chrome = watchChrome();
@@ -147,6 +148,56 @@ describe('/_app admin gate', () => {
   beforeEach(() => {
     server.verifyAdminTokenFn.mockReset().mockResolvedValue({ valid: true, user: USER });
     server.getEffectiveCapabilitiesFn.mockReset();
+  });
+
+  it.each([
+    ['', '%0A'],
+    ['', '%0D'],
+    ['', '%09'],
+    ['/admin', '%0A'],
+    ['/admin', '%0D'],
+    ['/admin', '%09'],
+    ['', 'normal'],
+    ['/admin', 'normal'],
+  ])('Retry keeps the %s deployment on-site for %s', async (basePath, control) => {
+    const originalWindow = window;
+    const assign = vi.fn();
+    vi.stubGlobal(
+      'window',
+      Object.create(window, {
+        location: {
+          value: {
+            href: 'https://panel.example/login',
+            origin: 'https://panel.example',
+            pathname: `${basePath}/login`,
+            search: '',
+            hash: '',
+            assign,
+          },
+        },
+      }),
+    );
+    vi.stubEnv('VITE_BASE_PATH', basePath);
+    const normal = '/configuration?tab=system#balance';
+    const redirect = control === 'normal' ? encodeURIComponent(normal) : `/${control}/evil.example`;
+    try {
+      renderApp(
+        new QueryClient(),
+        `${basePath}/login?session=unavailable&redirect=${redirect}`,
+        basePath || '/',
+      );
+      const retry = await screen.findByRole('button', { name: localizeEn('com_ui_retry') });
+      await act(async () => fireEvent.click(retry));
+      const expected = `${basePath}${control === 'normal' ? normal : '/'}`;
+      expect(assign).toHaveBeenCalledExactlyOnceWith(expected);
+      expect(new URL(assign.mock.calls[0][0], 'https://panel.example/login').origin).toBe(
+        'https://panel.example',
+      );
+      expect(server.verifyAdminTokenFn).not.toHaveBeenCalled();
+    } finally {
+      vi.stubGlobal('window', originalWindow);
+      vi.unstubAllEnvs();
+    }
   });
 
   it.each(['verification', 'capabilities'] as const)(

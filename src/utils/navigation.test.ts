@@ -31,6 +31,34 @@ describe('toSafeRedirect', () => {
     expect(toSafeRedirect('/')).toBe('/');
   });
 
+  it.each(['%0A', '%0D', '%09'])(
+    'rejects an external redirect hidden by %s in the login query',
+    (control) => {
+      const search = new URLSearchParams(`redirect=/${control}/evil.example`);
+      const path = toSafeRedirect(search.get('redirect') ?? undefined);
+      expect(path).toBe('/');
+      for (const basePath of [undefined, '', '/', '/admin', '/admin/']) {
+        const target = new URL(withBasePath(path, basePath), 'https://panel.example/login');
+        expect(target.origin).toBe('https://panel.example');
+        expect(target.pathname).toBe(basePath?.startsWith('/admin') ? '/admin/' : '/');
+      }
+    },
+  );
+
+  it.each(['/a/..//evil.example', '/%2e//evil.example', '/a/..\\/evil.example', '/\n/['])(
+    'rejects unsafe or malformed normalized paths: %j',
+    (value) => expect(toSafeRedirect(value)).toBe('/'),
+  );
+
+  it('returns a normalized local path with its query and fragment', () => {
+    const path = toSafeRedirect('/users/../configuration?tab=system&scope=group:a%2Fb#balance');
+    expect(path).toBe('/configuration?tab=system&scope=group:a%2Fb#balance');
+    expect(withBasePath(path, '/admin/')).toBe(
+      '/admin/configuration?tab=system&scope=group:a%2Fb#balance',
+    );
+    expect(toSafeRedirect(path)).toBe(path);
+  });
+
   it('falls back to / for anything that could leave the app', () => {
     for (const value of [
       undefined,
