@@ -17,4 +17,9 @@ scripts/
 e2e/
 *.md
 .git
+.github
+.vscode
+.claude
+coverage
+*.tsbuildinfo
 .DS_Store
