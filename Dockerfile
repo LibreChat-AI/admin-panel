@@ -18,24 +18,22 @@ ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 ENV NODE_ENV=production
 RUN bun run build
 
-# --- Production dependencies (patches applied, then devDeps stripped) ---
+# --- Production dependencies ---
 FROM base AS prod-deps
 COPY package.json bun.lock .npmrc ./
-COPY patches/ patches/
 COPY tools/ tools/
-RUN bun install --frozen-lockfile \
-    && bun install --frozen-lockfile --production
+RUN bun install --frozen-lockfile --production --ignore-scripts
 
 # --- Runtime ---
 FROM base AS runtime
 ENV NODE_ENV=production
 
-COPY --from=prod-deps /app/node_modules node_modules
-COPY --from=build /app/dist dist
-COPY --from=build /app/src/server src/server
-COPY server.ts package.json ./
+RUN chown bun:bun /app
+COPY --chown=bun:bun --from=prod-deps /app/node_modules node_modules
+COPY --chown=bun:bun --from=build /app/dist dist
+COPY --chown=bun:bun --from=build /app/src/server/logging.ts /app/src/server/metrics.ts src/server/
+COPY --chown=bun:bun server.ts package.json ./
 
-RUN chown -R bun:bun /app
 USER bun
 
 ENV PORT=3000
